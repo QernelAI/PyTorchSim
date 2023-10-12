@@ -26,18 +26,19 @@ class ExtensionKernel(common.Kernel):
         self.ranges = None
         self.itervars = None
         self.reduction_depth = None
+        self.cse.suffix = ";"
         
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
-        line = f"Extension.load({name}, {index})"
-        line = f"{var}[{line}]"
+        line = f"{var}[{index}]"
+        dtype = V.graph.get_dtype(name)
+        self.cse.prefix = cpp.DTYPE_TO_CPP[dtype] + " "
         return self.cse.generate(self.loads, line)
 
     def store(self, name, index, value, *args, **kwargs):
         var = self.args.output(name)
-        line = f"Extension.store({name}, {index}, {value})"
-        line = f"{var}[{line}]"
-        self.stores.writeline(line)
+        line = f"{var}[{index}] = {value}"
+        self.cse.generate(self.stores, line, assignment = False)
     
     def reduction(self, dtype, src_dtype, reduction_type, value):
         # Todo. 1. args handling
@@ -137,10 +138,10 @@ class ExtensionScheduling(BaseScheduling):
         self._scheduling = cpp.CppScheduling(scheduler)
 
     def can_fuse_vertical(self, node1, node2):
-        return True
+        return False
 
     def can_fuse_horizontal(self, node1, node2):
-        return True
+        return False
 
     def group_fn(self, sizes):
         return tuple(tuple(map(V.graph.sizevars.simplify, s)) for s in sizes)

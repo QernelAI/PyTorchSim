@@ -114,10 +114,10 @@ class ExtensionBackendTests(TestCase):
 
         self.assertFalse(self.module.custom_op_called())
         device = self.module.custom_device()
-        x = torch.empty(2, 16).to(device=device).fill_(1)
+        x = torch.empty(1000, 1000).to(device=device).fill_(1)
         self.assertTrue(self.module.custom_op_called())
-        y = torch.empty(2, 16).to(device=device).fill_(2)
-        z = torch.empty(2, 16).to(device=device).fill_(3)
+        y = torch.empty(1000, 1000).to(device=device).fill_(2)
+        z = torch.empty(1000).to(device=device).fill_(3)
         ref = torch.empty(2, 16).fill_(5)
 
         self.assertTrue(x.device == device)
@@ -126,15 +126,18 @@ class ExtensionBackendTests(TestCase):
 
         def fn(a, b, c):
             return a / b + c
+        
+        def vectoradd(a, b):
+            return a + b
 
         metrics.reset()
-        opt_fn = torch.compile()(fn)
-        code = run_and_get_cpp_code(opt_fn, x, y, z)
+        opt_fn = torch.compile()(vectoradd)
+        code = run_and_get_cpp_code(opt_fn, x, z)
         FileCheck().check("void kernel").check("loadu").check("extension_device").run(
             code
         )
-        opt_fn(x, y, z)
-        res = opt_fn(x, y, z)
+        opt_fn(x, z)
+        res = opt_fn(x, z)
         self.assertEqual(ref, res.to(device="cpu"))
 
 
