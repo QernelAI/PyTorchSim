@@ -18,30 +18,44 @@ class ExtensionKernel(common.Kernel):
         super().__init__(args)
 
     def load(self, name: str, index: sympy.Expr):
+        var = self.args.input(name)
         line = f"Extension.load({name}, {index})"
+        line = f"{var}" + line
         return self.cse.generate(self.loads, line)
 
     def store(self, name, index, value, *args, **kwargs):
+        var = self.args.output(name)
         line = f"Extension.store({name}, {index}, {value})"
+        line = f"{var}" + line
         self.stores.writeline(line)
     
     def reduction(self, dtype, src_dtype, reduction_type, value):
+        # Todo. 1. args handling
         line = f"Extension.reduction(dtype={dtype}, src_dtype={src_dtype},\
                 reduction_type={reduction_type}, value={value})"
         self.cse.generate(self.compute, line)
         
-    def codegen_kernel(self):
-        code = IndentedBuffer()
-        code.splice(
-            f"""
-            # This is dummy code for Extension device kernel
-            # Hello Extension Code!
-            """
-        )
-        code.splice(self.loads)
-        code.splice(self.compute)
-        code.splice(self.stores)
-        return code.getvalue()
+    def codegen_kernel(self, wrapper):
+        arg_defs, call_args, arg_types = self.args.cpp_argdefs()
+        arg_defs = ",\n".ljust(25).join(arg_defs)
+        arg_types = ",".join(arg_types)
+        code = common.BracesBuffer()
+
+        kernel_name = f"Extensin_Kernel"
+        kernel_decl_name = kernel_name if V.graph.cpp_wrapper else "kernel"
+        code.writeline(f'extern "C" void {kernel_decl_name}({arg_defs})')
+        with code.indent():
+            for old, new in self.args.aliases():
+                code.writeline(f"auto {old} = {new};")
+            # Loop body part
+            code.splice(self.loads)
+            code.splice(self.compute)
+            code.splice(self.stores)
+
+        wrapper.define_kernel(kernel_name, code.getvalue(), cuda=False)
+        # generate the code to call this
+        wrapper.generate_kernel_call(kernel_name, call_args, cuda=False)
+        print(code.getvalue())
 
 
 class ExtensionScheduling(BaseScheduling):
@@ -64,12 +78,9 @@ class ExtensionScheduling(BaseScheduling):
             ex_kernel = ExtensionKernel()
             with ex_kernel:
                 node.codegen(node.get_ranges())
-        kernel_name = f"Extensin_node_{self.count}"
-        self.count += 1
+
         wrapper = V.graph.wrapper_code
-        wrapper.define_kernel(
-            kernel_name, ex_kernel.codegen_kernel(), "\nmeta\n"
-        )
+        ex_kernel.codegen_kernel(wrapper)
         pass
 
     def codegen_sync(self):
