@@ -3,8 +3,7 @@ import contextlib
 from typing import List
 from typing import Set
 from typing import Dict
-from torch._inductor.codegen import cpp, wrapper
-from . import common
+from torch._inductor.codegen import cpp, wrapper, common
 from . import llvm_common
 from torch._inductor.scheduler import BaseScheduling
 from torch._inductor.virtualized import V
@@ -20,7 +19,7 @@ class ExtensionWrapperCodegen(wrapper.WrapperCodeGen):
 class ExtensionOverrides(common.OpOverrides):
     pass
 
-class ExtensionKernel(common.LLVM_Kernel):
+class ExtensionKernel(llvm_common.LLVM_Kernel):
     overrides = ExtensionOverrides
     newvar_prefix = ""
     # suffix = ';'
@@ -38,24 +37,21 @@ class ExtensionKernel(common.LLVM_Kernel):
     def load(self, name: str, index: sympy.Expr):
         index = self.rename_indexing(index)
         var = self.args.input(name)
-        ssa_num = var[-1]
-        # line = f"{var}[{index}]"
         dtype = V.graph.get_dtype(name)
         type_name = cpp.DTYPE_TO_CPP[dtype]
-        # self.reduction_prefix.writeline(f'%arrayidx{ssa_num} = getelementptr inbounds {type_name}, ptr %{var}, i64 {index}') # TODO: index
-        # self.reduction_prefix.writeline(f'%{ssa_num} = load {type_name}, ptr %arrayidx{ssa_num}, align 4') # TODO: align
-        # self.cse.prefix = type_name + " "
-        line = f"getelementptr inbounds {type_name}, ptr %{var}, i64 {index}"
-        self.cse.generate(self.loads, line)
-        line = f"load {type_name}, ptr %{ssa_num}, align 4"
+        line = f"getelementptr inbounds {type_name}, ptr %{var}, i64 %{index}" # TODO: index for loop
+        var = self.cse.generate(self.loads, line)
+        line = f"load {type_name}, ptr {var}, align 4"
         return self.cse.generate(self.loads, line)
 
     def store(self, name: str, index: sympy.Expr, value, *args, **kwargs):
         index = self.rename_indexing(index)
         var = self.args.output(name)
-        line = f"{var}[{index}] = {value}"
-        # self.reduction_prefix.writeline(f"%arrayidx = getelementptr inbounds {cpp.DTYPE_TO_CPP[V.graph.get_dtype(name)]}, ptr %{var}, i64 {index}")
-        # self.reduction_prefix.writeline(f"store {cpp.DTYPE_TO_CPP[V.graph.get_dtype(name)]} {value}, ptr %arrayidx, align 4") # TODO: ``index number, value
+        dtype = V.graph.get_dtype(name)
+        type_name = cpp.DTYPE_TO_CPP[dtype]
+        line = f"getelementptr inbounds {type_name}, ptr %{var}, i64 %{index}"
+        var = self.cse.generate(self.stores, line)
+        line = f"store {type_name} {value}, ptr {var}, align 4"
         self.cse.generate(self.stores, line, assignment = False)
 
     def reduction(self, dtype, src_dtype, reduction_type, value):

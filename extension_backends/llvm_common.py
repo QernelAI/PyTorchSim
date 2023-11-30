@@ -1,8 +1,26 @@
 import torch
-from . import common
-from torch._inductor.utils import get_sympy_Expr_dtype, unique
+from torch._inductor.codegen import common
 from torch._inductor.virtualized import V
 import sympy
+
+import contextlib
+from typing import Callable, Dict, Optional
+
+import sympy
+
+import torch.fx
+from torch.utils._sympy.value_ranges import ValueRanges
+
+from torch._inductor import metrics
+from torch._inductor.utils import (
+    free_symbol_startswith,
+    get_sympy_Expr_dtype,
+    IndentedBuffer,
+    sympy_subs,
+    unique,
+)
+
+schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 
 DTYPE_TO_LLVM = {
     torch.float32: "float",
@@ -55,3 +73,216 @@ class LLVMKernelArgs(common.KernelArgs):
             arg_defs.append(f"ptr readonly %{inner}")
             call_args.append(self.wrap_size_arg(outer))
         return arg_defs, call_args
+
+
+class LLVM_Kernel(common.CodeGen):
+    newvar_prefix = ""
+    name_prefix = "%"
+    suffix = ""
+    overrides = None
+    load_format = None
+    store_format = None
+
+    def __init__(self, args=None):
+        super().__init__()
+        metrics.generated_kernel_count += 1
+        self.args = args or common.KernelArgs()
+        self.loads = IndentedBuffer()
+        self.compute = IndentedBuffer()
+        self.stores = IndentedBuffer()
+        self.cse = common.CSE(self.newvar_prefix, self.suffix, self.name_prefix)
+        self.must_keep_buffers = set()
+        self.store_buffer_names = set()
+        # set in set_current_node
+        self.current_node = None
+        self.node_to_bounds: Optional[Dict[torch.fx.Node, ValueRanges]] = None
+
+    @contextlib.contextmanager
+    def set_current_node(self, node):
+        prior = self.current_node
+        self.current_node = node
+        self.node_to_bounds = node._body.bounds().get_bounds()
+        try:
+            yield
+        finally:
+            self.current_node = prior
+
+    @contextlib.contextmanager
+    def swap_buffers(self, lb, cb=None, sb=None):
+        if cb is None:
+            cb = lb
+        loads = self.loads
+        compute = self.compute
+        stores = self.stores
+        cse = self.cse
+        self.loads = lb
+        self.compute = cb
+        self.stores = sb
+        self.cse = cse.clone()
+        try:
+            yield
+        finally:
+            self.loads = loads
+            self.compute = compute
+            self.stores = stores
+            self.cse = cse
+
+    def load(self, name: str, index: sympy.Expr):
+        raise NotImplementedError()
+
+    def indirect_load(self, name: str, index: sympy.Expr):
+        """A load the depends on an index we have read"""
+        prior = self.loads
+        try:
+            # put the load in the compute section as it might have deps
+            self.loads = self.compute
+            return self.load(name, index)
+        finally:
+            self.loads = prior
+
+    def store_reduction(self, name, index, value):
+        raise NotImplementedError()
+
+    def store(self, name, index, value, mode=None):
+        raise NotImplementedError()
+
+    def reduction(self, dtype, src_dtype, reduction_type, value):
+        raise NotImplementedError()
+
+    def bucketize(
+        self,
+        values,
+        offsets_name: str,
+        offsets_size: sympy.Expr,
+        indexing_dtype: torch.dtype,
+        right: bool,
+    ):
+        """
+        See [Note: Inductor bucketize op]
+        """
+        raise NotImplementedError()
+
+    def __enter__(self):
+        class CSEProxy:
+            self.name = "CSEProxy"
+
+            @staticmethod
+            def __getattr__(name: str) -> Callable[..., common.CSEVariable]:  # type: ignore[misc]
+                def inner(*args, **kwargs):
+                    # TritonTemplateKernel has no current_node
+                    buf_bounds = ValueRanges.unknown()
+                    if hasattr(V.interpreter, "current_node"):
+                        fx_node = V.interpreter.current_node
+                        assert isinstance(self.node_to_bounds, dict)
+                        buf_bounds = self.node_to_bounds.get(
+                            fx_node, ValueRanges.unknown()
+                        )
+
+                    csevar = self.cse.generate(
+                        self.compute,
+                        getattr(parent_handler, name)(*args, **kwargs),  # type: ignore[has-type]
+                        bounds=buf_bounds,
+                    )
+                    csevar.update_on_args(name, args, kwargs)
+                    return csevar
+
+                return inner
+
+            @staticmethod
+            def indirect_indexing(index_var, size, check=True):
+                # Skip CSE since this doesn't return an expression
+                return self.indirect_indexing(index_var, size, check)  # type: ignore[attr-defined]
+
+            @staticmethod
+            def load(name: str, index: sympy.Expr):
+                if name in self.cse.invalidated_stores:
+                    # A load from an invalidated store requires us to
+                    # keep the actual buffer around
+                    V.kernel.must_keep_buffers.add(name)
+                if free_symbol_startswith(index, "tmp"):
+                    return self.indirect_load(name, index)
+                store_cache = self.cse.store_cache
+                if name in store_cache:
+                    return store_cache[name]
+                return self.load(name, index)
+
+            @staticmethod
+            def store(name, index, value, mode=None):
+                self.store_buffer_names.add(name)
+                if mode is None:
+                    self.cse.store_cache[name] = value
+                    if self.current_node:
+                        for other_name in self.current_node.get_mutations():
+                            self.cse.store_cache[other_name] = value
+                if name not in V.graph.removed_buffers:
+                    return self.store(name, index, value, mode=mode)
+
+            @staticmethod
+            def store_reduction(name, index, value):
+                self.store_buffer_names.add(name)
+                self.cse.store_cache[name] = value
+                if self.current_node:
+                    for other_name in self.current_node.get_mutations():
+                        self.cse.store_cache[other_name] = value
+
+                if name not in V.graph.removed_buffers:
+                    return self.store_reduction(name, index, value)
+
+            @staticmethod
+            def reduction(dtype, src_dtype, reduction_type, value):
+                return self.reduction(dtype, src_dtype, reduction_type, value)
+
+            @staticmethod
+            def bucketize(
+                values,
+                offsets_name: str,
+                offsets_size: sympy.Expr,
+                indexing_dtype: torch.dtype,
+                right: bool,
+            ):
+                """
+                [Note: Inductor bucketize op]
+
+                Given values (tensor) and offsets_name (reference to the name of a 1D
+                tensor), calculate the bucket that each value belongs to.
+
+                e.g. for values [-1, 0, 1, 2, 3, 4, 5, 9], offsets [0, 4, 4, 8], right=True
+                return =        [ 0, 1, 1, 1, 1, 3, 3, 4].
+
+                When right == False, bucket i refers to range (offsets[i], offsets[i+1]].
+                When right == True,  bucket i refers to range [offsets[i], offsets[i+1]).
+
+                Offsets must be non-decreasing or the result is undefined.
+                """
+                return self.bucketize(
+                    values, offsets_name, offsets_size, indexing_dtype, right
+                )
+
+        super().__enter__()
+        assert self.overrides
+        parent_handler = self.overrides(V.get_ops_handler())
+        self.exit_stack.enter_context(V.set_ops_handler(CSEProxy()))
+        self.exit_stack.enter_context(V.set_kernel_handler(self))
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if V.graph.scheduler:
+            V.graph.scheduler.remove_kernel_local_buffers()
+        super().__exit__(exc_type, exc_val, exc_tb)
+
+    def rename_indexing(self, index) -> sympy.Expr:
+        # adds the necessary kernel args for index expressions
+        # and renames variables in index expressions to kernel arg names
+        if isinstance(index, (list, tuple)):
+            return [self.rename_indexing(x) for x in index]
+        index = V.graph.sizevars.simplify(index)
+        sorted_symbols = sorted(index.free_symbols, key=lambda s: s.name)
+        replacements = {
+            x: self.args.size(x)
+            for x in sorted_symbols
+            if x.name.startswith("s") or x.name.startswith("ps")
+        }
+        return sympy_subs(index, replacements)
+
+    def create_cse_var(self, *args, **kwargs):
+        return common.CSEVariable(*args, **kwargs)
