@@ -5,6 +5,7 @@ from typing import Set
 from typing import Dict
 from torch._inductor.codegen import cpp, wrapper
 from . import common
+from . import llvm_common
 from torch._inductor.scheduler import BaseScheduling
 from torch._inductor.virtualized import V
 from torch._inductor.utils import IndentedBuffer
@@ -24,7 +25,7 @@ class ExtensionKernel(common.Kernel):
     newvar_prefix = "auto "
     suffix = ';'
     def __init__(self, args=None):
-        super().__init__(args)
+        super().__init__(llvm_common.LLVMKernelArgs())
         self.call_ranges = None
         self.ranges = None
         self.itervars = None
@@ -99,15 +100,14 @@ class ExtensionKernel(common.Kernel):
         return code
 
     def codegen_kernel(self, wrapper):
-        arg_defs, call_args, arg_types = self.args.cpp_argdefs()
+        arg_defs, call_args = self.args.llvm_argdefs()
         arg_defs = ",\n".ljust(25).join(arg_defs)
-        arg_types = ",".join(arg_types)
         code = common.BracesBuffer()
 
         # Todo. kernel name custom
         kernel_name = f"Extensin_Kernel"
         kernel_decl_name = kernel_name if V.graph.cpp_wrapper else "kernel"
-        code.writeline(f'extern "C" void {kernel_decl_name}({arg_defs})')
+        code.writeline(f'define void @{kernel_decl_name}({arg_defs})')
         with code.indent():
             for old, new in self.args.aliases():
                 code.writeline(f"auto {old} = {new};")
