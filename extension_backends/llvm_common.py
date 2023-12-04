@@ -35,6 +35,19 @@ DTYPE_TO_LLVM = {
     torch.bfloat16: "bfloat",
 }
 
+DTYPE_SIZE = {
+    torch.float32: 4,
+    torch.float64: 8,
+    torch.float16: 2,
+    torch.int64: 8,
+    torch.int32: 4,
+    torch.int16: 2,
+    torch.int8: 1,
+    torch.uint8: 1,
+    torch.bool: 1,
+    torch.bfloat16: 2,
+}
+
 class LLVMKernelArgs(common.KernelArgs):
     def llvm_argdefs(self):
         buffer_types = {x.get_name(): x.get_dtype() for x in V.graph.buffers}
@@ -77,7 +90,7 @@ class LLVMKernelArgs(common.KernelArgs):
 
 class LLVM_Kernel(common.CodeGen):
     newvar_prefix = ""
-    name_prefix = "%"
+    name_prefix = "%body"
     suffix = ""
     overrides = None
     load_format = None

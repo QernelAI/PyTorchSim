@@ -54,10 +54,9 @@ class ExtensionKernel(llvm_common.LLVM_Kernel):
         dtype = V.graph.get_dtype(name)
         type_name = llvm_common.DTYPE_TO_LLVM[dtype]
         align = llvm_common.DTYPE_SIZE[dtype]
-        line = f"%idxprom = load i64, ptr %idx{index}, align 8"
-        var = self.cse.generate(self.loads, line)
-        line = f"%{var} = mul nsw i64 %idxprom, {align}"
-        line = f"getelementptr inbounds {type_name}, ptr %{var}, i64 %idxprom{index}" # TODO: index for loop
+        line = f"mul nsw i64 %{index}, {align}"
+        offset = self.cse.generate(self.loads, line)
+        line = f"getelementptr inbounds {type_name}, ptr %{var}, i64 {offset}" # TODO: index for loop
         var = self.cse.generate(self.loads, line)
         line = f"load {type_name}, ptr {var}, align {align}"
         return self.cse.generate(self.loads, line)
@@ -67,9 +66,12 @@ class ExtensionKernel(llvm_common.LLVM_Kernel):
         var = self.args.output(name)
         dtype = V.graph.get_dtype(name)
         type_name = llvm_common.DTYPE_TO_LLVM[dtype]
-        line = f"getelementptr inbounds {type_name}, ptr %{var}, i64 %idxprom{index}"
+        align = llvm_common.DTYPE_SIZE[dtype]
+        line = f"mul nsw i64 %{index}, {align}"
+        offset = self.cse.generate(self.loads, line)
+        line = f"getelementptr inbounds {type_name}, ptr %{var}, i64 {offset}"
         var = self.cse.generate(self.stores, line)
-        line = f"store {type_name} {value}, ptr {var}, align 4"
+        line = f"store {type_name} {value}, ptr {var}, align {align}"
         self.cse.generate(self.stores, line, assignment = False)
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
@@ -156,7 +158,7 @@ class ExtensionKernel(llvm_common.LLVM_Kernel):
         else:
             self.call_ranges = tuple(lengths) + tuple(reduction_lengths)
             self.ranges = [self.rename_indexing(x) for x in self.call_ranges]
-            self.itervars = [sympy.Symbol(f"i{n}") for n in range(len(self.ranges))]
+            self.itervars = [sympy.Symbol(f"loop{n}") for n in range(len(self.ranges))]
             self.reduction_depth = len(lengths)
         return (
             self.itervars[: self.reduction_depth],
@@ -182,7 +184,6 @@ class LoopLevel:
         @contextlib.contextmanager
         def ctx():
             idx_var = f"%loop_idx{loop_index}"
-            stride_var = f"%idx{loop_index}"
             loop_var = f"%loop{loop_index}"
             loop_var2 = f"%loop.inc{loop_index}"
             loop_var3 = f"%inc{loop_index}"
@@ -196,7 +197,6 @@ class LoopLevel:
             line.writeline(f"br i1 {cmp_var}, label %for.body{loop_index}, label %for.end{loop_index}")
 
             line.writeline(f"\nfor.body{loop_index}:")
-            line.writeline(f"{stride_var} = mul nsw {self.INDEX_TYPE} {loop_var}, {stride}")
             yield
             line.writeline(f"br label %for.inc{loop_index}")
             line.writeline(f"\nfor.inc{loop_index}:")
