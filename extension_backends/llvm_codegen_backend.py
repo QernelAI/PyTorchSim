@@ -69,11 +69,15 @@ class ExtensionOverrides(common.OpOverrides):
     def div(self, operand1, operand2):
         return f'fdiv float {operand1}, {operand2}'
 
+SYMPY_TO_LLVM = {
+    sympy.core.mul.Mul: "mul",
+    sympy.core.add.Add: "add",
+}
 
 class ExtensionKernel(llvm_common.LLVM_Kernel):
     overrides = ExtensionOverrides
-    newvar_prefix = ""
-    # suffix = ';'
+    newvar_prefix = "%"
+
     def __init__(self, args=None):
         super().__init__(llvm_common.LLVMKernelArgs())
         self.call_ranges = None
@@ -83,10 +87,43 @@ class ExtensionKernel(llvm_common.LLVM_Kernel):
         self.reduction_prefix = IndentedBuffer()
         self.reduction_suffix = IndentedBuffer()
         self.reduction_vars = {}
-        self.reduction_cse = common.CSE(self.newvar_prefix, self.suffix, name_prefix="%tmp_acc")
+        self.reduction_cse = common.CSE(self.newvar_prefix, self.suffix, name_prefix="tmp_acc")
+        self.index_cse = common.CSE(self.newvar_prefix, self.suffix, name_prefix="tmp_idx")
+
+    def depth_first_traverse(self, expr, buffer):
+        child_var = []
+        for arg in expr.args:
+            child_var.append(self.depth_first_traverse(arg, buffer))
+
+        while len(child_var) >= 3:
+            first = child_var.pop(0)
+            second = child_var.pop(0)
+            first_prefix = "" if first.is_number else "%"
+            second_prefix = "" if second.is_number else "%"
+
+            line = f"{SYMPY_TO_LLVM[expr.func]} nsw i64 {first_prefix}{first}, {second_prefix}{second}"
+            var = self.index_cse.generate(buffer, line)
+            var = sympy.symbols(f"{var}")
+            child_var.append(var)
+
+        if len(expr.args) == 0:
+            return expr
+
+        elif len(child_var) == 2:
+            first = child_var[1]
+            second = child_var[0]
+            first_prefix = "" if first.is_number else "%"
+            second_prefix = "" if second.is_number else "%"
+            line = f"{SYMPY_TO_LLVM[expr.func]} nsw i64 {first_prefix}{first}, {second_prefix}{second}"
+            var = self.index_cse.generate(buffer, line)
+            var = sympy.symbols(f"{var}")
+            return var
+        else:
+            raise Exception
 
     def load(self, name: str, index: sympy.Expr):
         index = self.rename_indexing(index)
+        index = self.depth_first_traverse(index, self.loads)
         var = self.args.input(name)
         dtype = V.graph.get_dtype(name)
         type_name = llvm_common.DTYPE_TO_LLVM[dtype]
@@ -100,6 +137,7 @@ class ExtensionKernel(llvm_common.LLVM_Kernel):
 
     def store(self, name: str, index: sympy.Expr, value, *args, **kwargs):
         index = self.rename_indexing(index)
+        index = self.depth_first_traverse(index, self.stores)
         var = self.args.output(name)
         dtype = V.graph.get_dtype(name)
         type_name = llvm_common.DTYPE_TO_LLVM[dtype]
