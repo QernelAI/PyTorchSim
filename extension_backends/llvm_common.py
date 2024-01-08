@@ -93,7 +93,7 @@ class LLVMKernelArgs(common.KernelArgs):
         return arg_defs, call_args
 
 
-class LLVM_Kernel(common.CodeGen):
+class BaseLLVMKernel(common.CodeGen):
     newvar_prefix = "%"
     name_prefix = "body"
     suffix = ""
