@@ -166,7 +166,9 @@ class LLVMKernel(llvm_common.BaseLLVMKernel):
         offset = self.cse.generate(self.stores, line)
         line = f"getelementptr inbounds {type_name}, ptr %{var}, i64 %{offset}"
         var = self.cse.generate(self.stores, line)
-        line = f"store {type_name} {value}, ptr %{var}, align {align}"
+        if (isinstance(value, list)):
+            value = value[1]
+        line = f"store {type_name} %{value}, ptr %{var}, align {align}"
         self.cse.generate(self.stores, line, assignment = False)
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
@@ -322,7 +324,9 @@ class VectorizedLLVMKernel(LLVMKernel):
         var = self.vector_cse.generate(self.vector_stores, line)
 
         # NOTE. Since clang 16.0 always used this constant, 2 is hard coded
-        line = f"store <vscale x 2 x {type_name}> {value}, ptr %{var}, align {align}"
+        if (isinstance(value, list)):
+            value = value[0]
+        line = f"store <vscale x 2 x {type_name}> %{value}, ptr %{var}, align {align}"
         self.vector_cse.generate(self.vector_stores, line, assignment = False)
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
