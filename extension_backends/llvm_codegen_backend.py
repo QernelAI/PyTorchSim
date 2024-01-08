@@ -57,17 +57,37 @@ class ExtensionOverrides(common.OpOverrides):
     """Map element-wise ops to LLVM IR"""
 
     @staticmethod
-    def add(self, other):
-        return f'fadd float {self}, {other}' # TODO: separate float and integer
+    def add(operand1, operand2):
+        return f'fadd float %{operand1}, %{operand2}' # TODO: separate float and integer
 
-    def sub(self, other):
-        return f'fsub float {self}, {other}'
+    @staticmethod
+    def sub(operand1, operand2):
+        return f'fsub float %{operand1}, %{operand2}'
+ 
+    @staticmethod
+    def mul(operand1, operand2):
+        return f'fmul float %{operand1}, %{operand2}'
 
-    def mul(self, operand1, operand2):
-        return f'fmul float {operand1}, {operand2}'
+    @staticmethod
+    def div(operand1, operand2):
+        return f'fdiv float %{operand1}, %{operand2}'
 
-    def div(self, operand1, operand2):
-        return f'fdiv float {operand1}, {operand2}'
+class VectorOverrides(ExtensionOverrides):
+    @staticmethod
+    def vector_add(operand1, operand2):
+        return f'fadd <vscale x 2 x float> %{operand1}, %{operand2}'
+
+    @staticmethod
+    def vector_sub(operand1, operand2):
+        return f'fsub <vscale x 2 x float> %{operand1}, %{operand2}'   
+
+    @staticmethod
+    def vector_mul(operand1, operand2):
+        return f'fmul <vscale x 2 x float> %{operand1}, %{operand2}'
+
+    @staticmethod
+    def vector_div(operand1, operand2):
+        return f'fdiv <vscale x 2 x float> %{operand1}, %{operand2}'
 
 SYMPY_TO_LLVM = {
     sympy.core.mul.Mul: "mul",
@@ -260,16 +280,17 @@ class LLVMKernel(llvm_common.BaseLLVMKernel):
         )
 
 class VectorizedLLVMKernel(LLVMKernel):
+    overrides = VectorOverrides
+
     def __init__(self):
         super().__init__()
         self.vector_loads = IndentedBuffer()
-        self.vector_compute = IndentedBuffer()
         self.vector_stores = IndentedBuffer()
         self.vector_index_cse = common.CSE(self.newvar_prefix, self.suffix, name_prefix="tmp_vec_idx")
         self.vector_cse = common.CSE(self.newvar_prefix, self.suffix, name_prefix="vector_body")
 
     def load(self, name: str, index: sympy.Expr):
-        super().load(name, index)
+        scalar_var = super().load(name, index)
         index = self.rename_indexing(index)
         index = index.replace(sympy.symbols(f"index{len(self.itervars)-1}"), sympy.symbols(f"vector.index{len(self.itervars)-1}"))
         index = self.depth_first_traverse(index, self.vector_loads, self.vector_index_cse)
@@ -284,7 +305,7 @@ class VectorizedLLVMKernel(LLVMKernel):
 
         # NOTE. Since clang 16.0 always used this constant, 2 is hard coded
         line = f"load <vscale x 2 x {type_name}>, ptr %{var}, align {align}"
-        return self.vector_cse.generate(self.vector_loads, line)
+        return [self.vector_cse.generate(self.vector_loads, line), scalar_var]
 
     def store(self, name: str, index: sympy.Expr, value, *args, **kwargs):
         super().store(name, index, value, *args, **kwargs)
@@ -368,7 +389,7 @@ class VectorizedLLVMKernel(LLVMKernel):
                 with contextlib.ExitStack() as stack_inner:
                     inner_most.codegen(code,stack_inner)
                     code.splice(self.vector_loads)
-                    # TODO. code.splice(self.compute)
+                    code.splice(self.vector_compute)
                     code.splice(self.vector_stores)
 
                 with contextlib.ExitStack() as stack_inner:
