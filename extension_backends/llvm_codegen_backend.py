@@ -13,6 +13,10 @@ import sympy
 
 cexpr = cpp.CppPrinter().doprint
 
+tile_size = 16 # FIXME. hard coded
+tile_row = 4 # FIXME. hard coded
+tile_col = 4 # FIXME. hard coded
+
 def reduction_alloc(code, stack, vars):
     # FIXME. USE VARIABLES' TYPE...
     REDUCTION_TYPE = "float"
@@ -66,6 +70,30 @@ def vector_reduction_combine(reduction_type, start_value, vector_value):
         raise NotImplementedError()
     raise AssertionError(reduction_type)
 
+def matrix_reduction_combine(reduction_type, start_value, vector_value):
+    if reduction_type == "sum":
+        return f"tail call float @llvm.vector.reduce.fadd.nxv2f32(float %{start_value}, <{tile_row} x float> %{vector_value})"
+    if reduction_type == "prod":
+        return f"tail call float @llvm.vector.reduce.fmul.nxv2f32(float %{start_value}, <{tile_row} x float> %{vector_value})"
+    if reduction_type == "xor_sum":
+        raise NotImplementedError() # TODO: implement
+    if reduction_type == "any":
+        raise NotImplementedError()
+    if reduction_type in ("min", "max"):
+        raise NotImplementedError()
+    if reduction_type == "welford_reduce":
+        raise NotImplementedError()
+    if reduction_type == "welford_combine":
+        raise NotImplementedError()
+    raise AssertionError(reduction_type)
+
+def matrix_partial_reduction_combine(reduction_type, vector_value):
+    if reduction_type == "sum":
+        return f"tail call float @llvm.vector.reduce.fadd.nxv2f32(float 0.0, <{tile_row} x float> %{vector_value})"
+    if reduction_type == "prod":
+        return f"tail call float @llvm.vector.reduce.fmul.nxv2f32(float 1.0, <{tile_row} x float> %{vector_value})"
+    raise AssertionError(reduction_type)
+
 class ExtensionWrapperCodegen(wrapper.WrapperCodeGen):
     def __init__(self):
         super().__init__()
@@ -80,7 +108,7 @@ class ExtensionOverrides(common.OpOverrides):
     @staticmethod
     def sub(operand1, operand2):
         return f'fsub float %{operand1}, %{operand2}'
- 
+
     @staticmethod
     def mul(operand1, operand2):
         return f'fmul float %{operand1}, %{operand2}'
@@ -96,7 +124,7 @@ class VectorOverrides(ExtensionOverrides):
 
     @staticmethod
     def vector_sub(operand1, operand2):
-        return f'fsub <vscale x 2 x float> %{operand1}, %{operand2}'   
+        return f'fsub <vscale x 2 x float> %{operand1}, %{operand2}'
 
     @staticmethod
     def vector_mul(operand1, operand2):
@@ -105,6 +133,23 @@ class VectorOverrides(ExtensionOverrides):
     @staticmethod
     def vector_div(operand1, operand2):
         return f'fdiv <vscale x 2 x float> %{operand1}, %{operand2}'
+
+class MatrixOverrides(ExtensionOverrides):
+    @staticmethod
+    def add(operand1, operand2):
+        return f'fadd <{tile_size} x float> %{operand1}, %{operand2}'
+
+    @staticmethod
+    def sub(operand1, operand2):
+        return f'fsub <{tile_size} %{operand1}, %{operand2}'
+
+    @staticmethod
+    def mul(operand1, operand2):
+        return f'fmul <{tile_size} %{operand1}, %{operand2}'
+
+    @staticmethod
+    def div(operand1, operand2):
+        return f'fdiv <{tile_size} %{operand1}, %{operand2}'
 
 SYMPY_TO_LLVM = {
     sympy.core.mul.Mul: "mul",
@@ -167,7 +212,7 @@ class LLVMKernel(llvm_common.BaseLLVMKernel):
         align = llvm_common.DTYPE_SIZE[dtype]
         line = f"mul nsw i64 %{index}, {align}"
         offset = self.cse.generate(self.loads, line)
-        line = f"getelementptr inbounds {type_name}, ptr %{var}, i64 %{offset}" # TODO: index for loop
+        line = f"getelementptr inbounds {type_name}, ptr %{var}, i64 %{offset}"
         var = self.cse.generate(self.loads, line)
         line = f"load {type_name}, ptr %{var}, align {align}"
         return self.cse.generate(self.loads, line)
@@ -270,6 +315,10 @@ class LLVMKernel(llvm_common.BaseLLVMKernel):
         code.writeline(f'declare i32 @llvm.vscale.i32() #2')
         code.writeline(f'declare i64 @llvm.umax.i64(i64, i64) #1')
         code.writeline(f'declare i32 @llvm.umax.i32(i32, i32) #1')
+        code.writeline(f'declare <{tile_size} x float> @llvm.matrix.column.major.load.v{tile_size}f32.p0f32(ptr , i64, i1, i32, i32) #2')
+        code.writeline(f'declare <{tile_size} x float> @llvm.matrix.multiply.v{tile_size}f32.v16f32.v16f32(<16 x float>, <16 x float>, i32, i32, i32) #1')
+        code.writeline(f'declare void @llvm.matrix.column.major.store.v{tile_size}f32.p0f32(<{tile_size} x float>, ptr , i64, i1, i32, i32) #3')
+        code.writeline(f'declare float @llvm.vector.reduce.fadd.nxv2f32(float, <{tile_row} x float>)')
 
         codecache_def = IndentedBuffer()
         if not V.graph.cpp_wrapper:
@@ -403,7 +452,137 @@ class VectorizedLLVMKernel(LLVMKernel):
                 with contextlib.ExitStack() as stack_inner:
                     inner_most_scalar.codegen(code, stack_inner)
                     code.splice(self.loads)
-                    code.splice(self.compute) #FIXME. replace scalar computes!
+                    code.splice(self.compute)
+                    code.splice(self.stores)
+                code.splice(self.reductions_suffix)
+        code.writeline(f"ret void")
+        return code
+
+class MatrixLLVMKernel(LLVMKernel):
+    overrides = MatrixOverrides
+
+    def __init__(self):
+        super().__init__()
+
+    def load(self, name: str, index: sympy.Expr):
+        index = self.rename_indexing(index)
+        index = self.depth_first_traverse(index, self.loads, self.index_cse)
+        var = self.args.input(name)
+        dtype = V.graph.get_dtype(name)
+        type_name = llvm_common.DTYPE_TO_LLVM[dtype]
+        align = llvm_common.DTYPE_SIZE[dtype]
+        line = f"mul nsw i64 %{index}, {align}"
+        offset = self.cse.generate(self.loads, line)
+        line = f"getelementptr inbounds {type_name}, ptr %{var}, i64 %{offset}"
+        var = self.cse.generate(self.loads, line)
+        stride = self.ranges[-1] * align # stride is input row size
+        line = f"call <{tile_size} x {type_name}> @llvm.matrix.column.major.load.v{tile_size}f32.p0f32(ptr %{var}, i64 {stride}, i1 0, i32 {tile_row}, i32 {tile_col})"
+        return self.cse.generate(self.loads, line)
+
+    def store(self, name: str, index: sympy.Expr, value, *args, **kwargs):
+        index = self.rename_indexing(index)
+        index = self.depth_first_traverse(index, self.stores, self.index_cse)
+        var = self.args.output(name)
+        dtype = V.graph.get_dtype(name)
+        type_name = llvm_common.DTYPE_TO_LLVM[dtype]
+        align = llvm_common.DTYPE_SIZE[dtype]
+        line = f"mul nsw i64 %{index}, {align}"
+        offset = self.cse.generate(self.stores, line)
+        line = f"getelementptr inbounds {type_name}, ptr %{var}, i64 %{offset}"
+        var = self.cse.generate(self.stores, line)
+        stride = self.ranges[-1] * align
+        if (isinstance(value, list)):
+            value = value[0]
+        line = f"call void @llvm.matrix.column.major.store.v{tile_size}f32.p0f32(<{tile_size} x {type_name}> %{value}, ptr %{var}, i64 {stride}, i1 0, i32 {tile_row}, i32 {tile_col})"
+        self.cse.generate(self.stores, line, assignment = False)
+
+    def reduction(self, dtype, src_dtype, reduction_type, value):
+        argmax_or_argmin = reduction_type in {"argmax", "argmin"}
+        if argmax_or_argmin:
+            raise NotImplementedError() #TODO: argmin, argmax
+        else:
+            reduction_key = src_dtype, reduction_type, value
+            acc = self.reduction_cse.generate(
+                self.loads, f"reduction {reduction_key}", write=False
+            )
+            self.reduction_vars[acc] = reduction_type
+            type_name = llvm_common.DTYPE_TO_LLVM[dtype]
+            align = llvm_common.DTYPE_SIZE[dtype]
+            self.reduction_prefix.writeline(f"store {type_name} {reduction_init(reduction_type, dtype)}, ptr %{acc}, align {align}")
+            line = f"load <{tile_row} x {type_name}>, ptr %{acc}, align {align}"
+
+            # NOTE. To keep below line be under the compute, used store buffers
+            temp = self.cse.generate(self.stores, line)
+            output = []
+            comma = ", "
+            for i in range(tile_col):
+                indexes = [f"i32 {i*tile_row+j}" for j in range(tile_row)]
+                line = f"shufflevector <{tile_size} x {type_name}> %{value}, <{tile_size} x {type_name}> undef, <{tile_row} x i32> <{comma.join(indexes)}>"
+                split_vector = self.cse.generate(self.stores, line)
+                output.append(self.cse.generate(self.stores, matrix_partial_reduction_combine(reduction_type, split_vector)))
+            length = len(output)
+            size = 1
+            while(len(output) > 1):
+                op1 = output.pop(0)
+                op2 = output.pop(0)
+                if size == 1:
+                    line = f"insertelement <2 x {type_name}> undef, {type_name} %{op1}, i32 0"
+                    temp_vec = self.cse.generate(self.stores, line)
+                    line = f"insertelement <2 x {type_name}> %{temp_vec}, {type_name} %{op2}, i32 1"
+                else:
+                    indexes = [f"i32 {j}" for j in range(tile_row)]
+                    line = f"shufflevector <{size} x {type_name}> %{op1}, <{size} x {type_name}> %{op2}, <{size * 2} x i32> <{comma.join(indexes)}>"
+                out = self.cse.generate(self.stores, line)
+                output.append(out)
+                if (len(output) == length / 2):
+                    size *= 2
+                    length = len(output)
+            line = f"fadd <{tile_row} x {type_name}> %{temp}, %{output[0]}"
+            output = self.cse.generate(self.stores, line)
+            line = f"store <{tile_row} x {type_name}> %{output}, ptr %{acc}, align {align}"
+            self.cse.generate(self.stores, line, assignment = False)
+            self.reduction_cse.reduction_cache[reduction_key] = acc
+        return acc
+
+    def store_reduction(self, name, index, value):
+        index = self.rename_indexing(index)
+        index = self.depth_first_traverse(index, self.reduction_suffix, self.index_cse)
+        var = self.args.output(name)
+        dtype = V.graph.get_dtype(name)
+        type_name = llvm_common.DTYPE_TO_LLVM[dtype]
+        align = llvm_common.DTYPE_SIZE[dtype]
+        line = f"load <{tile_row} x {type_name}>, ptr %{value}, align {align}"
+        value = self.reduction_cse.generate(self.reductions_suffix, line)
+        line = f"mul nsw i64 %{index}, {align}"
+        offset = self.cse.generate(self.reductions_suffix, line)
+        line = f"mul nsw i64 %{offset}, {tile_row}"
+        offset = self.cse.generate(self.reductions_suffix, line)
+        line = f"getelementptr inbounds {type_name}, ptr %{var}, i64 %{offset}"
+        var = self.cse.generate(self.reductions_suffix, line)
+        line = f"store <{tile_row} x {type_name}> %{value}, ptr %{var}, align {align}"
+        self.cse.generate(self.reductions_suffix, line, assignment = False)
+
+    def codegen_loops(self):
+        code = common.BracesBuffer()
+        # Loop body part
+        loops_args = [[var, size, idx] for idx, (var, size) in enumerate(zip(self.itervars, self.ranges))]
+        outer_loops = [LoopLevel(var, size, idx) for var, size, idx in loops_args[:-2]]
+        loops = [MatrixLoopLevel(var, size, idx) for var, size, idx in loops_args[-2:]]
+        loops = outer_loops + loops
+        loops, reductions = [LoopNest(loops[: self.reduction_depth]),
+                             LoopNest(loops[self.reduction_depth :])]
+        reductions.mark_reduction(self.reduction_vars)
+
+        with contextlib.ExitStack() as stack:
+            if self.reduction_vars:
+                reduction_alloc(code, stack, self.reduction_vars)
+            loops.codegen(code, stack)
+            with contextlib.ExitStack() as stack_outer:
+                code.splice(self.reduction_prefix)
+                with contextlib.ExitStack() as stack:
+                    reductions.codegen(code, stack)
+                    code.splice(self.loads)
+                    code.splice(self.compute)
                     code.splice(self.stores)
                 code.splice(self.reductions_suffix)
         code.writeline(f"ret void")
@@ -527,6 +706,45 @@ class VectorLoopLevel(LoopLevel):
             line.writeline(f"{scalar_index_ph} = phi {self.INDEX_TYPE} [ 0, %{entry_label} ], [ {ph_vec}, %{middle_label} ]")
         return ctx()
 
+class MatrixLoopLevel(LoopLevel):
+    var: sympy.Expr
+    size: sympy.Expr
+    idx: int
+    start: int = 0
+    reduction_vars: Dict[str, str] = None
+
+    # Todo. Type change for reduction
+    INDEX_TYPE = "i64"
+    INDEX_SIZE = 8
+
+    def lines(self, line, stride=1):
+        loop_index = self.idx
+        @contextlib.contextmanager
+        def ctx():
+            entry_label = f"entry{loop_index}"
+            for_body_label = f"for.body{loop_index}"
+            for_inc_label = f"for.inc{loop_index}"
+            for_end_label = f"for.end{loop_index}"
+
+            index = f"%index{loop_index}"
+            index_next = f"%index.next{loop_index}"
+            cmp_var = f"%cmp{loop_index}"
+
+            line.writeline(f"br label %{entry_label}")
+            line.writeline(f"\n{entry_label}:")
+            line.writeline(f"br label %{for_body_label}")
+
+            line.writeline(f"\n{for_body_label}:")
+            line.writeline(f"{index} = phi {self.INDEX_TYPE} [ {self.start}, %{entry_label} ], [ {index_next}, %{for_inc_label} ]")
+            yield
+            line.writeline(f"br label %{for_inc_label}")
+            line.writeline(f"\n{for_inc_label}:")
+            line.writeline(f"{index_next} = add nsw {self.INDEX_TYPE} {index}, {stride * tile_row}")
+            line.writeline(f"{cmp_var} = icmp eq {self.INDEX_TYPE} {index_next}, {self.size}")
+            line.writeline(f"br i1 {cmp_var}, label %{for_end_label}, label %{for_body_label}")
+
+            line.writeline(f"\n{for_end_label}:")
+        return ctx()
 
 @dataclasses.dataclass
 class LoopNest:
@@ -603,6 +821,21 @@ class VectorizedLLVMScheduling(LLVMScheduling):
             nodes, key=lambda x: int(x.is_reduction())
         ).group
         ex_kernel = VectorizedLLVMKernel()
+        with ex_kernel as kernel:
+            for node in nodes:
+                vars, reduction_vars = ex_kernel.set_ranges(group, reduction_group)
+                node.run(vars, reduction_vars)
+
+        wrapper = V.graph.wrapper_code
+        ex_kernel.codegen_kernel(wrapper)
+        pass
+
+class MatrixLLVMScheduling(LLVMScheduling):
+    def codegen_nodes(self, nodes):
+        _, (group, reduction_group) = max(
+            nodes, key=lambda x: int(x.is_reduction())
+        ).group
+        ex_kernel = MatrixLLVMKernel()
         with ex_kernel as kernel:
             for node in nodes:
                 vars, reduction_vars = ex_kernel.set_ranges(group, reduction_group)
