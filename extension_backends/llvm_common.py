@@ -200,6 +200,7 @@ class BaseLLVMKernel(common.CodeGen):
                             fx_node, ValueRanges.unknown()
                         )
 
+                    vector_csevar = None
                     if isinstance(args[0], list):
                         vector_args = (args[0][0], args[1][0])
                         vector_csevar = self.vector_cse.generate(

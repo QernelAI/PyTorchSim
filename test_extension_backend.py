@@ -10,12 +10,12 @@ import torch.utils.cpp_extension
 
 try:
     from extension_backends.llvm_codegen_backend import (
-        VectorizedLLVMScheduling,
+        MatrixLLVMScheduling,
         ExtensionWrapperCodegen,
     )
 except ImportError:
     from .extension_backends.llvm_codegen_backend import (
-        VectorizedLLVMScheduling,
+        MatrixLLVMScheduling,
         ExtensionWrapperCodegen,
     )
 
@@ -102,10 +102,10 @@ class ExtensionBackendTests(TestCase):
         torch.utils.rename_privateuse1_backend("extension_device")
 
         register_backend_for_device(
-            "extension_device", VectorizedLLVMScheduling, ExtensionWrapperCodegen
+            "extension_device", MatrixLLVMScheduling, ExtensionWrapperCodegen
         )
         self.assertTrue(
-            get_scheduling_for_device("extension_device") == VectorizedLLVMScheduling
+            get_scheduling_for_device("extension_device") == MatrixLLVMScheduling
         )
         self.assertTrue(
             get_wrapper_codegen_for_device("extension_device")
