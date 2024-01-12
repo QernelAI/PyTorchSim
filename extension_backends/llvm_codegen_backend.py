@@ -11,8 +11,6 @@ from torch._inductor.virtualized import V
 from torch._inductor.utils import IndentedBuffer
 import sympy
 
-cexpr = cpp.CppPrinter().doprint
-
 tile_size = 16 # FIXME. hard coded
 tile_row = 4 # FIXME. hard coded
 tile_col = 4 # FIXME. hard coded
@@ -329,10 +327,13 @@ class LLVMKernel(llvm_common.BaseLLVMKernel):
 
         codecache_def = IndentedBuffer()
         if not V.graph.cpp_wrapper:
-            codecache_def.writeline("async_compile.cpp('''")
+            codecache_def.writeline("custom_async_compile.llvm('''")
         codecache_def.splice(code)
         if not V.graph.cpp_wrapper:
             codecache_def.writeline("''')")
+
+        wrapper.add_import_once(f'\nfrom extension_codecache import CustomAsyncCompile')
+        wrapper.add_import_once(f'\ncustom_async_compile = CustomAsyncCompile()')
 
         self.define_kernel(wrapper, codecache_def.getvalue(), kernel_name)
         # generate the code to call this
