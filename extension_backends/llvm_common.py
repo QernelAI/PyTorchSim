@@ -80,13 +80,13 @@ class LLVMKernelArgs(common.KernelArgs):
                 continue
             dtype = buffer_types[outer]
             arg_defs.append(f"ptr readonly %{inner}")
-            call_args.append(self.wrap_ptr_arg(outer, dtype))
+            call_args.append(outer)
         for outer, inner in self.output_buffers.items():
             if outer in self.inplace_buffers or self._buffer_is_marked_removed(inner):
                 continue
             dtype = buffer_types[outer]
             arg_defs.append(f"ptr %{inner}")
-            call_args.append(self.wrap_ptr_arg(outer, dtype))
+            call_args.append(outer)
         for outer, inner in self.sizevars.items():
             arg_defs.append(f"ptr readonly %{inner}")
             call_args.append(self.wrap_size_arg(outer))

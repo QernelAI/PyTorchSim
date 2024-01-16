@@ -332,6 +332,7 @@ class LLVMKernel(llvm_common.BaseLLVMKernel):
         if not V.graph.cpp_wrapper:
             codecache_def.writeline("''')")
 
+        wrapper.add_import_once('\nprint(f\'Wrapper Codegen Path = {__file__}\')')
         wrapper.add_import_once(f'\nfrom extension_codecache import CustomAsyncCompile')
         wrapper.add_import_once(f'\ncustom_async_compile = CustomAsyncCompile()')
 
