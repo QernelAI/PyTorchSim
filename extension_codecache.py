@@ -17,13 +17,17 @@ TORCHSIM_DUMP_PATH = os.environ.get('TORCHSIM_DUMP_PATH',
 OutputPath = ''
 
 def llvm_compile_command(input, output):
-    return re.sub(
-        r"[ \n]+",
-        " ",
+    opt_output = f"{input[:-3]}_opt.ll"
+    return [re.sub(r"[ \n]+", " ",
         f"""
-            llc -march=riscv64 -mattr=+m,+f,+d,+a,+c,+v -O2 {input} -o {output}
+            opt -march=riscv64 -passes=lower-matrix-intrinsics {input} -o {opt_output}
         """,
-    ).strip()
+    ).strip(),
+            re.sub(r"[ \n]+", " ",
+        f"""
+            llc -march=riscv64 -mattr=+m,+f,+d,+a,+c,+v -O2 {opt_output} -o {output}
+        """,
+    ).strip()]
 
 class LLVMCodeCache:
     cache = dict()
@@ -40,9 +44,9 @@ class LLVMCodeCache:
         key, input_path = write(source_code, "ll", specified_dir=write_path)
         output_path = input_path[:-2] + "s"
 
-        cmd = shlex.split(
-            llvm_compile_command(input_path, output_path)
-        )
+        cmds = llvm_compile_command(input_path, output_path)
+        opt_cmd = shlex.split(cmds[0])
+        llc_cmd = shlex.split(cmds[1])
 
         from filelock import FileLock
         lock_dir = get_lock_dir()
@@ -50,7 +54,8 @@ class LLVMCodeCache:
         with lock:
             if not os.path.exists(output_path):
                 try:
-                    subprocess.check_call(cmd)
+                    subprocess.check_call(opt_cmd)
+                    subprocess.check_call(llc_cmd)
                 except subprocess.CalledProcessError as e:
                     assert(0)   # Todo: make LLVMCompileError
             else:
