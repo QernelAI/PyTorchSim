@@ -35,6 +35,7 @@
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/MatrixBuilder.h"
 #include "llvm/IR/PatternMatch.h"
+#include "llvm/IR/InlineAsm.h"
 #include "llvm/InitializePasses.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/Alignment.h"
@@ -1090,6 +1091,29 @@ public:
     return commonAlignment(InitialAlign, ElementSizeInBits / 8);
   }
 
+  CallInst* gemmini_extended_mv(IRBuilder<> &Builder, bool is_mvin, Value* dram_addr, Value* spad_addr, uint64_t cols, uint64_t rows) {
+    StringRef asmString;
+    if (is_mvin)
+      asmString = ".insn r 47, " STR(k_MVIN) ", 4, x0, $0, $1";
+    else
+      asmString = ".insn r 47, " STR(k_MVOUT) ", 4, x0, $0, $1";
+    StringRef constraints = "r,r,~{dirflag},~{fpsr},~{flags}";
+    SmallVector<Value *, 16> args;
+    SmallVector<Type *, 16> ty_args;
+
+    /* Sanity Check */
+    assert(~(rows & ~ROW_MASK || cols & ~COL_MASK));
+    Value* arg2 = Builder.CreateOr(spad_addr, (uint64_t)(rows << (ADDR_LEN + COL_LEN)) | (cols << ADDR_LEN));
+    args.push_back(dram_addr);
+    args.push_back(arg2);
+    ty_args.push_back(dram_addr->getType());
+    ty_args.push_back(arg2->getType());
+    FunctionType *AsmFty = FunctionType::get(Builder.getVoidTy(), ty_args, false);
+    InlineAsm *ia = InlineAsm::get(AsmFty, asmString, constraints, true);
+    CallInst *ptr = Builder.CreateCall(ia, args);
+    return ptr;
+  }
+
   /// Load a matrix with \p Shape starting at \p Ptr and using \p Stride between
   /// vectors.
   MatrixTy loadMatrix(Type *Ty, Value *Ptr, MaybeAlign MAlign, Value *Stride,
@@ -1099,6 +1123,8 @@ public:
     Type *VecTy = FixedVectorType::get(EltTy, Shape.getStride());
     Value *EltPtr = createElementPtr(Ptr, EltTy, Builder);
     MatrixTy Result;
+    Value *dram_addr = Builder.CreatePtrToInt(EltPtr, Builder.getInt64Ty());
+    gemmini_extended_mv(Builder, true, dram_addr, dram_addr, Shape.getStride(), Shape.getNumVectors());
     for (unsigned I = 0, E = Shape.getNumVectors(); I < E; ++I) {
       Value *GEP = computeVectorAddr(
           EltPtr, Builder.getIntN(Stride->getType()->getScalarSizeInBits(), I),
@@ -1180,16 +1206,17 @@ public:
         Builder.CreatePointerCast(TileStart, TilePtrTy, "col.cast");
 
     storeMatrix(TileTy, StoreVal, TilePtr, MAlign,
-                Builder.getInt64(MatrixShape.getStride()), IsVolatile, Builder);
+                Builder.getInt64(MatrixShape.getStride()), IsVolatile, MatrixShape, Builder);
   }
 
   /// Store matrix \p StoreVal starting at \p Ptr and using \p Stride between
   /// vectors.
   MatrixTy storeMatrix(Type *Ty, MatrixTy StoreVal, Value *Ptr,
                        MaybeAlign MAlign, Value *Stride, bool IsVolatile,
-                       IRBuilder<> &Builder) {
+                       ShapeInfo Shape, IRBuilder<> &Builder) {
     auto VType = cast<VectorType>(Ty);
     Value *EltPtr = createElementPtr(Ptr, VType->getElementType(), Builder);
+    Value *dram_addr = Builder.CreatePtrToInt(EltPtr, Builder.getInt64Ty());
     for (auto Vec : enumerate(StoreVal.vectors())) {
       Value *GEP = computeVectorAddr(
           EltPtr,
@@ -1202,6 +1229,7 @@ public:
                                                   MAlign),
                                  IsVolatile);
     }
+    gemmini_extended_mv(Builder, false, dram_addr, dram_addr, Shape.getStride(), Shape.getNumVectors());
     return MatrixTy().addNumStores(getNumOps(StoreVal.getVectorTy()) *
                                    StoreVal.getNumVectors());
   }
@@ -1213,7 +1241,7 @@ public:
     auto StoreVal = getMatrix(Matrix, Shape, Builder);
     finalizeLowering(Inst,
                      storeMatrix(Matrix->getType(), StoreVal, Ptr, A, Stride,
-                                 IsVolatile, Builder),
+                                 IsVolatile, Shape, Builder),
                      Builder);
   }
 
