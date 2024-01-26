@@ -14,6 +14,7 @@ from concurrent.futures import Future
 LOCK_TIMEOUT = 600
 TORCHSIM_DUMP_PATH = os.environ.get('TORCHSIM_DUMP_PATH',
                         default = f"{tempfile.gettempdir()}/torchinductor_{getpass.getuser()}")
+TORCHSIM_DUMP_FILE = 1 if os.environ.get('TORCHSIM_DUMP_FILE', default = "True") == "True" else 0
 
 def hash_prefix(hash_value):
     return hash_value[1:5]
@@ -114,7 +115,8 @@ class CustomAsyncCompile(AsyncCompile):
             result_path = os.path.join(TORCHSIM_DUMP_PATH, "tmp", hash_prefix(self.key))
             print("OUTPUT PATH > ", result_path)
 
-            dump_args(args, result_path)
+            if TORCHSIM_DUMP_FILE:
+                dump_args(args, result_path)
 
             assembly_path = os.path.join(result_path, f'{self.key}.s')
             try:
