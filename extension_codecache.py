@@ -1,4 +1,3 @@
-import functools
 import getpass
 import tempfile
 import os
@@ -7,14 +6,12 @@ import shlex
 import subprocess
 
 import torch
-from torch._inductor.codecache import AsyncCompile, code_hash, get_path, get_lock_dir, get_hash, write, write_atomic
-
-from concurrent.futures import Future
+from torch._inductor.codecache import AsyncCompile, get_lock_dir, get_hash, write
 
 LOCK_TIMEOUT = 600
 TORCHSIM_DUMP_PATH = os.environ.get('TORCHSIM_DUMP_PATH',
                         default = f"{tempfile.gettempdir()}/torchinductor_{getpass.getuser()}")
-TORCHSIM_DUMP_FILE = 1 if os.environ.get('TORCHSIM_DUMP_FILE', default = "True") == "True" else 0
+TORCHSIM_DUMP_FILE = int(os.environ.get('TORCHSIM_DUMP_FILE', default="True") == "True")
 
 def hash_prefix(hash_value):
     return hash_value[1:5]
