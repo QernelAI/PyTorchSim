@@ -9,7 +9,10 @@ from . import llvm_common
 from torch._inductor.scheduler import BaseScheduling
 from torch._inductor.virtualized import V
 from torch._inductor.utils import IndentedBuffer
+from torch._inductor.codecache import write
+import extension_codecache
 import sympy
+import os
 
 tile_size = 16 # FIXME. hard coded
 tile_row = 4 # FIXME. hard coded
@@ -573,6 +576,7 @@ class MatrixLLVMKernel(LLVMKernel):
 
     def codegen_loops(self):
         code = common.BracesBuffer()
+        loop_info = ""
         # Loop body part
         loops_args = [[var, size, idx] for idx, (var, size) in enumerate(zip(self.itervars, self.ranges))]
         outer_loops = [LoopLevel(var, size, idx) for var, size, idx in loops_args[:-2]]
@@ -585,17 +589,22 @@ class MatrixLLVMKernel(LLVMKernel):
         with contextlib.ExitStack() as stack:
             if self.reduction_vars:
                 reduction_alloc(code, stack, self.reduction_vars)
-            loops.codegen(code, stack)
+            loop_info += loops.codegen(code, stack)
             with contextlib.ExitStack() as stack_outer:
                 code.splice(self.reduction_prefix)
                 with contextlib.ExitStack() as stack:
-                    reductions.codegen(code, stack)
+                    loop_info += reductions.codegen(code, stack)
                     code.splice(self.loads)
                     code.splice(self.compute)
                     code.splice(self.stores)
                 code.splice(self.reductions_suffix)
         code.writeline(f"ret void")
+        self.dump_loop_info(loop_info)
         return code
+
+    def dump_loop_info(self, loop_info):
+        write_path = os.path.join(extension_codecache.TORCHSIM_DUMP_PATH, "tmp")
+        key, input_path = write(loop_info, "txt", specified_dir=write_path)
 
 @dataclasses.dataclass
 class LoopLevel:
@@ -776,6 +785,7 @@ class LoopNest:
     def codegen(self, code, stack):
         size_list = []
         stride_list = []
+        loop_info = ""
         for loop in self.loops:
             stride_list.append(loop.size)
         stride_list.append(1)
@@ -788,6 +798,8 @@ class LoopNest:
 
         for loop, stride in zip(self.loops, stride_list):
             stack.enter_context(loop.lines(code, stride=stride))
+            loop_info += f"{stride * tile_row}, {loop.start}, {loop.size}\n"
+        return loop_info
 
 class LLVMScheduling(BaseScheduling):
     count = 0
