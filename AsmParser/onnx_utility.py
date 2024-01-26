@@ -13,17 +13,17 @@ class node:
 
     def add_parent(self, parent):
         self.__parents.add(parent)
-        
+
     def to_onnx(self):
         attr_dict = {}
 
-        inputs = [p.name + "_output" for p in self.__parents] 
+        inputs = [p.name + "_output" for p in self.__parents]
         outputs = [self.name + "_output"]
 
         # Iterate all member variables
         for var in [attr for attr in dir(self) if not callable(getattr(self, attr)) and attr.startswith("torchsim")]:
             attr_dict[var] = getattr(self, var)
-        
+
         for idx, asm_line in enumerate(self.inst):
             attr_dict[f"inst{idx}"] = asm_line
 
@@ -40,7 +40,7 @@ class loop_index_node(node):
         self.torchsim_end = end
         self.torchsim_stride = stride
 
-    
+
 class memory_node(node):
     def __init__(self, inst_list=list(), node_id=0):
         super().__init__(node_id)
@@ -52,7 +52,7 @@ class memory_node(node):
         self.torchsim_element_size = 2
 
 class load_node(memory_node):
-    pass 
+    pass
 
 class store_node(memory_node):
     pass
@@ -77,7 +77,7 @@ def dump_onnx_graph(name, node_list):
     model_def = onnx.helper.make_model(graph_def, producer_name="PyTorchSim")
     model_def.opset_import[0].version = 13
 
-    onnx.save(model_def, name) 
+    onnx.save(model_def, name)
 
 if __name__ == "__main__":
     load_node1 = load_node(0)

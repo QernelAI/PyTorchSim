@@ -115,7 +115,7 @@ R64_INSTRUCTION_TEMPLATE = {
     "sllw": R_TEMPLATE,
     "srlw": R_TEMPLATE,
     "sraw": R_TEMPLATE,
- 
+
     "ld": LOAD_TEMPLATE,
     "lwu": LOAD_TEMPLATE,
     "sd": STORE_TEMPLATE
@@ -211,7 +211,7 @@ FLOATING_INSTRUCTION_TEMPLATE = {
     # RV32F/64F
     "flw": LOAD_TEMPLATE,
     "fsw": STORE_TEMPLATE,
-    
+
     "fmadd.s": R4_TEMPLATE,
     "fmsub.s": R4_TEMPLATE,
     "fnmsub.s": R4_TEMPLATE,
@@ -222,7 +222,7 @@ FLOATING_INSTRUCTION_TEMPLATE = {
     "fdiv.s": R_TEMPLATE,
     "fsqrt.s": R2_TEMPLATE,
     "fmin.s" : R_TEMPLATE,
-    "fmax.s" : R_TEMPLATE, 
+    "fmax.s" : R_TEMPLATE,
 
     "fcvt.w.s": R2_TEMPLATE,
     "fcvt.wu.s": R2_TEMPLATE,
@@ -244,7 +244,7 @@ FLOATING_INSTRUCTION_TEMPLATE = {
     "fcvt.lu.s": R2_TEMPLATE,
     "fcvt.s.l": R2_TEMPLATE,
     "fcvt.s.lu": R2_TEMPLATE,
-    
+
     "fld": LOAD_TEMPLATE,
     "fsd": STORE_TEMPLATE,
 
@@ -259,14 +259,14 @@ FLOATING_INSTRUCTION_TEMPLATE = {
     "fsqrt.d": R2_TEMPLATE,
     "fmin.d" : R_TEMPLATE,
     "fmax.d" : R_TEMPLATE,
-    
+
     "fcvt.d.s": R2_TEMPLATE,
     "fcvt.s.d": R2_TEMPLATE,
     "fcvt.w.d": R2_TEMPLATE,
     "fcvt.wu.d": R2_TEMPLATE,
     "fcvt.d.w": R2_TEMPLATE,
     "fcvt.d.wu": R2_TEMPLATE,
-    
+
     "fsgnj.d": R_TEMPLATE,
     "fsgnjn": R_TEMPLATE,
     "fsgnjx": R_TEMPLATE,
@@ -286,7 +286,7 @@ FLOATING_INSTRUCTION_TEMPLATE = {
 }
 
 VECTOR_INSTRUCTION_TEMPLATE = {
-    # Vector mask is not supported 
+    # Vector mask is not supported
     "vle8.v": VECTOR_LOAD_TEMPLATE,
     "vle16.v": VECTOR_LOAD_TEMPLATE,
     "vle32.v": VECTOR_LOAD_TEMPLATE,
@@ -359,22 +359,22 @@ VECTOR_INSTRUCTION_TEMPLATE = {
     "vs1re16.v": VECTOR_STORE_TEMPLATE,
     "vs1re32.v": VECTOR_STORE_TEMPLATE,
     "vs1re64.v": VECTOR_STORE_TEMPLATE,
- 
+
     "vs2re8.v": VECTOR_STORE_TEMPLATE,
     "vs2re16.v": VECTOR_STORE_TEMPLATE,
     "vs2re32.v": VECTOR_STORE_TEMPLATE,
     "vs2re64.v": VECTOR_STORE_TEMPLATE,
-  
+
     "vs4re8.v": VECTOR_STORE_TEMPLATE,
     "vs4re16.v": VECTOR_STORE_TEMPLATE,
     "vs4re32.v": VECTOR_STORE_TEMPLATE,
     "vs4re64.v": VECTOR_STORE_TEMPLATE,
-   
+
     "vs8re8.v": VECTOR_STORE_TEMPLATE,
     "vs8re16.v": VECTOR_STORE_TEMPLATE,
     "vs8re32.v": VECTOR_STORE_TEMPLATE,
     "vs8re64.v": VECTOR_STORE_TEMPLATE,
-    
+
     "vl1r.v": VECTOR_LOAD_TEMPLATE,
     "vl2r.v": VECTOR_LOAD_TEMPLATE,
     "vl4r.v": VECTOR_LOAD_TEMPLATE,
@@ -384,7 +384,7 @@ VECTOR_INSTRUCTION_TEMPLATE = {
     "vs2r.v": VECTOR_STORE_TEMPLATE,
     "vs4r.v": VECTOR_STORE_TEMPLATE,
     "vs8r.v": VECTOR_STORE_TEMPLATE,
-    
+
     # For arithmetic vector instuction
     ".vv": VECTOR_VV_TEMPLATE,
     ".vx": VECTOR_VX_TEMPLATE,
@@ -397,7 +397,7 @@ VECTOR_INSTRUCTION_TEMPLATE = {
 }
 
 SUPPORTED_INSTRUCTION = [
-    R32_INSTUCTION_TEMPLATE, 
+    R32_INSTUCTION_TEMPLATE,
     R64_INSTRUCTION_TEMPLATE,
     PSEUDO_INSTRUCTION_TEMPLATE,
     CSR_INSTURCTION_TEMPLATE,
@@ -434,17 +434,17 @@ class rv_operand:
             self.value = value
 
     def is_imm(self):
-        return self.type == IMMEDIATE 
-    
+        return self.type == IMMEDIATE
+
     def is_reg(self):
         return self.type == REGISTER
-    
+
     def is_source(self):
         return not self.dest
-    
+
     def is_destination(self):
         return self.dest
-    
+
     def type_to_str(self):
         if self.type == REGISTER:
             return "register"
@@ -457,7 +457,7 @@ class rv_operand:
         return "undefined"
 
     def __str__(self) -> str:
-        value = f"Type:{self.type_to_str()}, Value:{self.value}"        
+        value = f"Type:{self.type_to_str()}, Value:{self.value}"
         return value
 
 class rv_instruction:
@@ -474,15 +474,15 @@ class rv_instruction:
         for inst_list in SUPPORTED_INSTRUCTION:
             if self.opcode not in inst_list:
                 continue
-            
+
             if len(inst_list[self.opcode]) != len(target_list[1:]):
                 print(f"[Warn] {self.opcode}'s template mismatch in '{assembly_code}'")
 
             for op_type, value in zip(inst_list[self.opcode], target_list[1:]):
                 self.operands.append(rv_operand(op_type, value))
-            
+
             return
-        
+
         # For vector extension code
         if self.opcode[0] == "v":
             for category, template in VECTOR_INSTRUCTION_TEMPLATE.items():
@@ -511,18 +511,18 @@ class rv_instruction:
         target_list = assembly_code.strip().replace(",", " ")
         comment_pos = target_list.find("#")
         if comment_pos != -1:
-           target_list = target_list[0: comment_pos] 
+           target_list = target_list[0: comment_pos]
 
         target_list = target_list.split()
         return target_list
-    
+
     @classmethod
     def is_label(cls, assembly_code:str):
         target_list = cls.split_assembly(assembly_code)
 
         if len(target_list) == 1:
             if target_list[0][-1] == ":":
-                return True 
+                return True
         return False
 
     def __str__(self) -> str:
@@ -542,12 +542,12 @@ class loop:
             self.loop_path[idx] = bb
 
     def __equal__(self, path):
-        return set(self.loop_path.values()) == set(path) 
-    
+        return set(self.loop_path.values()) == set(path)
+
     def __str__(self) -> str:
         join_str = "->"
         return join_str.join([str(bb.name) for bb in self.loop_path.values()])
-    
+
     def iter_insts(self):
         return chain.from_iterable([iter(bb) for bb in self.loop_path.values()])
 
@@ -567,17 +567,17 @@ class basic_block:
             self.name = f"BasicBlock{NR_BLOCK}"
             NR_BLOCK += 1
         self.insts = []
-    
+
     def connect(self, new_block):
         self.outputs.append(new_block)
         new_block.inputs.append(self)
-    
+
     def add_inst(self, inst):
         self.insts.append(inst)
         inst.basic_block = self
 
     def to_onnx(self):
-        inputs = [i.name + "_output" for i in self.inputs] 
+        inputs = [i.name + "_output" for i in self.inputs]
         outputs = [self.name + "_output"]
         #asm = "\n"
         lines = {}
@@ -608,16 +608,16 @@ class basic_block:
             child.dfs(start, path)
         path.pop(-1)
         self.visited = False
-    
+
     def __iter__(self):
         return iter(self.insts)
-        
+
 class riscv_parser:
     def __init__(self) -> None:
         self.inst_list = []
         self.bb_list = []
         self.cycle_list = []
-    
+
     def load_file(self, name):
         f = open("vectoradd.s")
         asm_lines = f.readlines()[1:]
@@ -629,10 +629,10 @@ class riscv_parser:
                 continue
             self.inst_list.append(rv_instruction(label, asm_line))
             label = ""
-    
+
     def basic_block_analysis(self):
         # Construct Basic Block
-        bb = basic_block() 
+        bb = basic_block()
         self.bb_list.append(bb)
         for inst in self.inst_list:
             if inst.label != "":
@@ -652,7 +652,7 @@ class riscv_parser:
         for inst in self.inst_list[1:]:
             if prev_inst.basic_block != inst.basic_block and prev_inst.opcode not in UNCONDITIONAL_JUMP:
                 prev_inst.basic_block.connect(inst.basic_block)
-                
+
             if inst.opcode in BRANCHES:
                 labels = [op.value for op in inst.operands if op.type & LABEL]
                 for label in labels:
@@ -669,7 +669,7 @@ class riscv_parser:
         onnx_node_list = []
         for bb in self.bb_list:
             onnx_node_list.append(bb.to_onnx())
-    
+
         graph_def = onnx.helper.make_graph(
             inputs=[],#load_tile_name1, load_tile_name2],
             outputs=[],#store_tile_name],
@@ -690,11 +690,11 @@ class riscv_parser:
                     self.cycle_list.append(bb_cycle)
 
     def print_cycles(self):
-        for cycle in self.cycle_list: 
+        for cycle in self.cycle_list:
             print(f"Cycle-path: {cycle}")
-    
+
     def cycle_analysis(self, *args, **kwargs):
-        for idx, cycle in enumerate(self.cycle_list): 
+        for idx, cycle in enumerate(self.cycle_list):
             # Construct rough instruction dependency
             scoreboard = {}
             for inst in cycle.iter_insts():
@@ -737,7 +737,7 @@ class riscv_parser:
                     for source_node in check_load:
                         connect_nodes(source_node, tmp_node)
                     current_pointer[inst] = tmp_node
-        
+
         onnx_node_list = [node.to_onnx() for node in current_pointer.values()]
         if onnx_node_list:
             dump_onnx_graph(f"{name}_{suffix}.onnx", onnx_node_list)
