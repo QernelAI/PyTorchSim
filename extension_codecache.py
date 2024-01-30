@@ -16,6 +16,8 @@ TORCHSIM_DUMP_PATH = os.environ.get('TORCHSIM_DUMP_PATH',
 TORCHSIM_DUMP_FILE = int(os.environ.get('TORCHSIM_DUMP_FILE', default="True") == "True")
 TORCHSIM_LLVM_PATH = os.environ.get('TORCHSIM_LLVM_PATH', default="/usr/bin")
 TORCHSIM_CUSTOM_PASS_PATH = os.environ.get('TORCHSIM_CUSTOM_PASS_PATH', default="./GemminiLowerPass/build")
+TORCHSIM_DIR = os.environ.get('TORCHSIM_DIR', default='/workspace/TorchSim')
+TORCHSIM_ONNXIM_CONFIG = os.environ.get('TORCHSIM_CONFIG', default='configs/systolic_ws_8x8_c1_simple_noc.json')
 
 def hash_prefix(hash_value):
     return hash_value[1:5]
@@ -104,6 +106,14 @@ class LLVMCodeCache:
                 pass
         return key
 
+def get_onnxim_command(model_path):
+    base_dir = os.path.join(TORCHSIM_DIR, "ONNXim")
+    bin = os.path.join(base_dir, "build/bin/Simulator")
+    config = os.path.join(base_dir, TORCHSIM_ONNXIM_CONFIG)
+    model_list = os.path.join(base_dir, "models_list.json") # TODO: file format will be changed
+    cmd = f"{bin} --config {config} --model {model_path} --models_list {model_list}"
+    return cmd.strip()
+
 class CustomAsyncCompile(AsyncCompile):
     def __init__(self):
         pass
@@ -133,4 +143,6 @@ class CustomAsyncCompile(AsyncCompile):
                 print(f'{assembly_path} not found.')
             except Exception as e:
                 print(f"Error while reading.")
+            cmd = get_onnxim_command(result_path)
+            subprocess.check_call(shlex.split(cmd))
         return dummy_simulator
