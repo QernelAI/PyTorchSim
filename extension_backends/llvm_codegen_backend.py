@@ -14,10 +14,6 @@ from torch._inductor.codecache import write, get_hash
 import extension_codecache
 import sympy
 
-tile_size = 16 # FIXME. hard coded
-tile_row = 4 # FIXME. hard coded
-tile_col = 4 # FIXME. hard coded
-
 def reduction_alloc(code, stack, vars):
     # FIXME. USE VARIABLES' TYPE...
     REDUCTION_TYPE = "float"
@@ -71,7 +67,7 @@ def vector_reduction_combine(reduction_type, start_value, vector_value):
         raise NotImplementedError()
     raise AssertionError(reduction_type)
 
-def matrix_reduction_combine(reduction_type, start_value, vector_value):
+def matrix_reduction_combine(reduction_type, start_value, vector_value, tile_row=4):
     if reduction_type == "sum":
         return f"tail call float @llvm.vector.reduce.fadd.nxv2f32(float %{start_value}, <{tile_row} x float> %{vector_value})"
     if reduction_type == "prod":
@@ -88,7 +84,7 @@ def matrix_reduction_combine(reduction_type, start_value, vector_value):
         raise NotImplementedError()
     raise AssertionError(reduction_type)
 
-def matrix_partial_reduction_combine(reduction_type, vector_value):
+def matrix_partial_reduction_combine(reduction_type, vector_value, tile_row=4):
     if reduction_type == "sum":
         return f"tail call float @llvm.vector.reduce.fadd.nxv2f32(float 0.0, <{tile_row} x float> %{vector_value})"
     if reduction_type == "prod":
@@ -103,54 +99,54 @@ class ExtensionOverrides(common.OpOverrides):
     """Map element-wise ops to LLVM IR"""
 
     @staticmethod
-    def add(operand1, operand2):
+    def add(operand1, operand2, **kwargs):
         return f'fadd float %{operand1}, %{operand2}' # TODO: separate float and integer
 
     @staticmethod
-    def sub(operand1, operand2):
+    def sub(operand1, operand2, **kwargs):
         return f'fsub float %{operand1}, %{operand2}'
 
     @staticmethod
-    def mul(operand1, operand2):
+    def mul(operand1, operand2, **kwargs):
         return f'fmul float %{operand1}, %{operand2}'
 
     @staticmethod
-    def div(operand1, operand2):
+    def div(operand1, operand2, **kwargs):
         return f'fdiv float %{operand1}, %{operand2}'
 
 class VectorOverrides(ExtensionOverrides):
     @staticmethod
-    def vector_add(operand1, operand2):
+    def vector_add(operand1, operand2, **kwargs):
         return f'fadd <vscale x 2 x float> %{operand1}, %{operand2}'
 
     @staticmethod
-    def vector_sub(operand1, operand2):
+    def vector_sub(operand1, operand2, **kwargs):
         return f'fsub <vscale x 2 x float> %{operand1}, %{operand2}'
 
     @staticmethod
-    def vector_mul(operand1, operand2):
+    def vector_mul(operand1, operand2, **kwargs):
         return f'fmul <vscale x 2 x float> %{operand1}, %{operand2}'
 
     @staticmethod
-    def vector_div(operand1, operand2):
+    def vector_div(operand1, operand2, **kwargs):
         return f'fdiv <vscale x 2 x float> %{operand1}, %{operand2}'
 
 class MatrixOverrides(ExtensionOverrides):
     @staticmethod
-    def add(operand1, operand2):
+    def add(operand1, operand2, tile_size=16):
         return f'fadd <{tile_size} x float> %{operand1}, %{operand2}'
 
     @staticmethod
-    def sub(operand1, operand2):
-        return f'fsub <{tile_size} %{operand1}, %{operand2}'
+    def sub(operand1, operand2, tile_size=4):
+        return f'fsub <{tile_size} x float> %{operand1}, %{operand2}'
 
     @staticmethod
-    def mul(operand1, operand2):
-        return f'fmul <{tile_size} %{operand1}, %{operand2}'
+    def mul(operand1, operand2, tile_size=4):
+        return f'fmul <{tile_size} x float> %{operand1}, %{operand2}'
 
     @staticmethod
-    def div(operand1, operand2):
-        return f'fdiv <{tile_size} %{operand1}, %{operand2}'
+    def div(operand1, operand2, tile_size=4):
+        return f'fdiv <{tile_size} x float> %{operand1}, %{operand2}'
 
 SYMPY_TO_LLVM = {
     sympy.core.mul.Mul: "mul",
@@ -332,28 +328,8 @@ class LLVMKernel(llvm_common.BaseLLVMKernel):
 
     def codegen_kernel(self, wrapper):
         arg_defs, call_args = self.args.llvm_argdefs()
-        arg_defs = ",\n".ljust(25).join(arg_defs)
-        code = common.BracesBuffer()
-
-        # Todo. kernel name custom
         kernel_name = f"Extensin_Kernel"
-        kernel_decl_name = kernel_name if V.graph.cpp_wrapper else "kernel"
-        code.writeline(f'define void @{kernel_decl_name}({arg_defs})')
-        with code.indent():
-            for old, new in self.args.aliases():
-                code.writeline(f"auto {old} = {new};")
-            # Loop body part
-            code.splice(self.codegen_loops())
-
-        # Add llvm intrinsics definition
-        code.writeline(f'declare i64 @llvm.vscale.i64() #2')
-        code.writeline(f'declare i32 @llvm.vscale.i32() #2')
-        code.writeline(f'declare i64 @llvm.umax.i64(i64, i64) #1')
-        code.writeline(f'declare i32 @llvm.umax.i32(i32, i32) #1')
-        code.writeline(f'declare <{tile_size} x float> @llvm.matrix.column.major.load.v{tile_size}f32.p0f32(ptr , i64, i1, i32, i32) #2')
-        code.writeline(f'declare <{tile_size} x float> @llvm.matrix.multiply.v{tile_size}f32.v16f32.v16f32(<16 x float>, <16 x float>, i32, i32, i32) #1')
-        code.writeline(f'declare void @llvm.matrix.column.major.store.v{tile_size}f32.p0f32(<{tile_size} x float>, ptr , i64, i1, i32, i32) #3')
-        code.writeline(f'declare float @llvm.vector.reduce.fadd.nxv2f32(float, <{tile_row} x float>)')
+        code = self._codegen_kernel(arg_defs, kernel_name)
 
         codecache_def = IndentedBuffer()
         if not V.graph.cpp_wrapper:
@@ -376,6 +352,23 @@ class LLVMKernel(llvm_common.BaseLLVMKernel):
         # generate the code to call this
         wrapper.generate_kernel_call(kernel_name, call_args, cuda=False)
         return code.getvalue()
+
+    def _codegen_kernel(self, arg_defs, kernel_name):
+        arg_defs = ",\n".ljust(25).join(arg_defs)
+        code = common.BracesBuffer()
+
+        # Todo. kernel name custom
+        kernel_decl_name = kernel_name if V.graph.cpp_wrapper else "kernel"
+        code.writeline(f'define void @{kernel_decl_name}({arg_defs})')
+        with code.indent():
+            for old, new in self.args.aliases():
+                code.writeline(f"auto {old} = {new};")
+            # Loop body part
+            code.splice(self.codegen_loops())
+        code.writeline(f'declare i64 @llvm.umax.i64(i64, i64) #1')
+        code.writeline(f'declare i32 @llvm.umax.i32(i32, i32) #1')
+        return code
+
 
     def set_ranges(self, lengths, reduction_lengths):
         if self.call_ranges:
@@ -502,11 +495,23 @@ class VectorizedLLVMKernel(LLVMKernel):
         code.writeline(f"ret void")
         return code
 
+    def _codegen_kernel(self, arg_defs, kernel_name):
+        code = super()._codegen_kernel(arg_defs, kernel_name)
+        # Add vector llvm intrinsics definition
+        code.writeline(f'declare i64 @llvm.vscale.i64() #2')
+        code.writeline(f'declare i32 @llvm.vscale.i32() #2')
+        return code
+
 class MatrixLLVMKernel(LLVMKernel):
     overrides = MatrixOverrides
 
     def __init__(self):
         super().__init__()
+        # Defaulat tile setting
+        self.tile_row = 4
+        self.tile_col = 4
+        self.tile_size = self.tile_row * self.tile_col
+
 
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
@@ -516,14 +521,14 @@ class MatrixLLVMKernel(LLVMKernel):
 
         index = self.rename_indexing(index)
         cv = self.get_constant_vector(index)
-        self.add_desc(True, name, align, cv, [tile_row, tile_col])
+        self.add_desc(True, name, align, cv, [self.tile_row, self.tile_col])
         index = self.depth_first_traverse(index, self.loads, self.index_cse)
         line = f"mul nsw i64 %{index}, {align}"
         offset = self.cse.generate(self.loads, line)
         line = f"getelementptr inbounds {type_name}, ptr %{var}, i64 %{offset}"
         var = self.cse.generate(self.loads, line)
         stride = self.ranges[-1] * align # stride is input row size
-        line = f"call <{tile_size} x {type_name}> @llvm.matrix.column.major.load.v{tile_size}f32.p0f32(ptr %{var}, i64 {stride}, i1 0, i32 {tile_row}, i32 {tile_col})"
+        line = f"call <{self.tile_size} x {type_name}> @llvm.matrix.column.major.load.v{self.tile_size}f32.p0f32(ptr %{var}, i64 {stride}, i1 0, i32 {self.tile_row}, i32 {self.tile_col})"
         return self.cse.generate(self.loads, line)
 
     def store(self, name: str, index: sympy.Expr, value, *args, **kwargs):
@@ -534,7 +539,7 @@ class MatrixLLVMKernel(LLVMKernel):
 
         index = self.rename_indexing(index)
         cv = self.get_constant_vector(index)
-        self.add_desc(False, name, align, cv, [tile_row, tile_col])
+        self.add_desc(False, name, align, cv, [self.tile_row, self.tile_col])
         index = self.depth_first_traverse(index, self.stores, self.index_cse)
         line = f"mul nsw i64 %{index}, {align}"
         offset = self.cse.generate(self.stores, line)
@@ -543,7 +548,7 @@ class MatrixLLVMKernel(LLVMKernel):
         stride = self.ranges[-1] * align
         if (isinstance(value, list)):
             value = value[0]
-        line = f"call void @llvm.matrix.column.major.store.v{tile_size}f32.p0f32(<{tile_size} x {type_name}> %{value}, ptr %{var}, i64 {stride}, i1 0, i32 {tile_row}, i32 {tile_col})"
+        line = f"call void @llvm.matrix.column.major.store.v{self.tile_size}f32.p0f32(<{self.tile_size} x {type_name}> %{value}, ptr %{var}, i64 {stride}, i1 0, i32 {self.tile_row}, i32 {self.tile_col})"
         self.cse.generate(self.stores, line, assignment = False)
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
@@ -559,15 +564,15 @@ class MatrixLLVMKernel(LLVMKernel):
             type_name = llvm_common.DTYPE_TO_LLVM[dtype]
             align = llvm_common.DTYPE_SIZE[dtype]
             self.reduction_prefix.writeline(f"store {type_name} {reduction_init(reduction_type, dtype)}, ptr %{acc}, align {align}")
-            line = f"load <{tile_row} x {type_name}>, ptr %{acc}, align {align}"
+            line = f"load <{self.tile_row} x {type_name}>, ptr %{acc}, align {align}"
 
             # NOTE. To keep below line be under the compute, used store buffers
             temp = self.cse.generate(self.stores, line)
             output = []
             comma = ", "
-            for i in range(tile_col):
-                indexes = [f"i32 {i*tile_row+j}" for j in range(tile_row)]
-                line = f"shufflevector <{tile_size} x {type_name}> %{value}, <{tile_size} x {type_name}> undef, <{tile_row} x i32> <{comma.join(indexes)}>"
+            for i in range(self.tile_col):
+                indexes = [f"i32 {i*self.tile_row+j}" for j in range(self.tile_row)]
+                line = f"shufflevector <{self.tile_size} x {type_name}> %{value}, <{self.tile_size} x {type_name}> undef, <{self.tile_row} x i32> <{comma.join(indexes)}>"
                 split_vector = self.cse.generate(self.stores, line)
                 output.append(self.cse.generate(self.stores, matrix_partial_reduction_combine(reduction_type, split_vector)))
             length = len(output)
@@ -580,16 +585,16 @@ class MatrixLLVMKernel(LLVMKernel):
                     temp_vec = self.cse.generate(self.stores, line)
                     line = f"insertelement <2 x {type_name}> %{temp_vec}, {type_name} %{op2}, i32 1"
                 else:
-                    indexes = [f"i32 {j}" for j in range(tile_row)]
+                    indexes = [f"i32 {j}" for j in range(self.tile_row)]
                     line = f"shufflevector <{size} x {type_name}> %{op1}, <{size} x {type_name}> %{op2}, <{size * 2} x i32> <{comma.join(indexes)}>"
                 out = self.cse.generate(self.stores, line)
                 output.append(out)
                 if (len(output) == length / 2):
                     size *= 2
                     length = len(output)
-            line = f"fadd <{tile_row} x {type_name}> %{temp}, %{output[0]}"
+            line = f"fadd <{self.tile_row} x {type_name}> %{temp}, %{output[0]}"
             output = self.cse.generate(self.stores, line)
-            line = f"store <{tile_row} x {type_name}> %{output}, ptr %{acc}, align {align}"
+            line = f"store <{self.tile_row} x {type_name}> %{output}, ptr %{acc}, align {align}"
             self.cse.generate(self.stores, line, assignment = False)
             self.reduction_cse.reduction_cache[reduction_key] = acc
         return acc
@@ -601,15 +606,15 @@ class MatrixLLVMKernel(LLVMKernel):
         dtype = V.graph.get_dtype(name)
         type_name = llvm_common.DTYPE_TO_LLVM[dtype]
         align = llvm_common.DTYPE_SIZE[dtype]
-        line = f"load <{tile_row} x {type_name}>, ptr %{value}, align {align}"
+        line = f"load <{self.tile_row} x {type_name}>, ptr %{value}, align {align}"
         value = self.reduction_cse.generate(self.reductions_suffix, line)
         line = f"mul nsw i64 %{index}, {align}"
         offset = self.cse.generate(self.reductions_suffix, line)
-        line = f"mul nsw i64 %{offset}, {tile_row}"
+        line = f"mul nsw i64 %{offset}, {self.tile_row}"
         offset = self.cse.generate(self.reductions_suffix, line)
         line = f"getelementptr inbounds {type_name}, ptr %{var}, i64 %{offset}"
         var = self.cse.generate(self.reductions_suffix, line)
-        line = f"store <{tile_row} x {type_name}> %{value}, ptr %{var}, align {align}"
+        line = f"store <{self.tile_row} x {type_name}> %{value}, ptr %{var}, align {align}"
         self.cse.generate(self.reductions_suffix, line, assignment = False)
 
     def codegen_loops(self):
@@ -618,7 +623,7 @@ class MatrixLLVMKernel(LLVMKernel):
         # Loop body part
         loops_args = [[var, size, idx] for idx, (var, size) in enumerate(zip(self.itervars, self.ranges))]
         outer_loops = [LoopLevel(var, size, idx) for var, size, idx in loops_args[:-2]]
-        loops = [MatrixLoopLevel(var, size, idx) for var, size, idx in loops_args[-2:]]
+        loops = [MatrixLoopLevel(var, size, idx, tile_row=self.tile_row) for var, size, idx in loops_args[-2:]]
         loops = outer_loops + loops
         loops, reductions = [LoopNest(loops[: self.reduction_depth]),
                              LoopNest(loops[self.reduction_depth :])]
@@ -637,6 +642,25 @@ class MatrixLLVMKernel(LLVMKernel):
                     code.splice(self.stores)
                 code.splice(self.reductions_suffix)
         code.writeline(f"ret void")
+        return code
+
+    def set_ranges(self, lengths, reduction_lengths):
+        ret = super().set_ranges(lengths, reduction_lengths)
+
+        # FIXME. this doesn't look pretty...
+        # We have to change this logic to configurable tile_size
+        if len(self.itervars) == 1:
+            self.tile_row = self.tile_size
+            self.tile_col = 1
+        return ret
+
+    def _codegen_kernel(self, arg_defs, kernel_name):
+        code = super()._codegen_kernel(arg_defs, kernel_name)
+        # Add llvm matrix intrinsics definition
+        code.writeline(f'declare <{self.tile_size} x float> @llvm.matrix.column.major.load.v{self.tile_size}f32.p0f32(ptr , i64, i1, i32, i32) #2')
+        code.writeline(f'declare <{self.tile_size} x float> @llvm.matrix.multiply.v{self.tile_size}f32.v16f32.v16f32(<16 x float>, <16 x float>, i32, i32, i32) #1')
+        code.writeline(f'declare void @llvm.matrix.column.major.store.v{self.tile_size}f32.p0f32(<{self.tile_size} x float>, ptr , i64, i1, i32, i32) #3')
+        code.writeline(f'declare float @llvm.vector.reduce.fadd.nxv2f32(float, <{self.tile_row} x float>)')
         return code
 
 
@@ -760,11 +784,13 @@ class VectorLoopLevel(LoopLevel):
             line.writeline(f"{scalar_index_ph} = phi {self.INDEX_TYPE} [ 0, %{entry_label} ], [ {ph_vec}, %{middle_label} ]")
         return ctx()
 
+@dataclasses.dataclass
 class MatrixLoopLevel(LoopLevel):
     var: sympy.Expr
     size: sympy.Expr
     idx: int
     start: int = 0
+    tile_row: int = 4
     reduction_vars: Dict[str, str] = None
 
     # Todo. Type change for reduction
@@ -773,7 +799,7 @@ class MatrixLoopLevel(LoopLevel):
 
     def lines(self, line, stride=1):
         loop_index = self.idx
-        self.stride = stride * tile_row
+        self.stride = stride * self.tile_row
         @contextlib.contextmanager
         def ctx():
             entry_label = f"entry{loop_index}"
@@ -794,7 +820,7 @@ class MatrixLoopLevel(LoopLevel):
             yield
             line.writeline(f"br label %{for_inc_label}")
             line.writeline(f"\n{for_inc_label}:")
-            line.writeline(f"{index_next} = add nsw {self.INDEX_TYPE} {index}, {stride * tile_row}")
+            line.writeline(f"{index_next} = add nsw {self.INDEX_TYPE} {index}, {stride * self.tile_row}")
             line.writeline(f"{cmp_var} = icmp eq {self.INDEX_TYPE} {index_next}, {self.size}")
             line.writeline(f"br i1 {cmp_var}, label %{for_end_label}, label %{for_body_label}")
 

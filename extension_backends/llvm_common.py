@@ -118,6 +118,7 @@ class BaseLLVMKernel(common.CodeGen):
         # set in set_current_node
         self.current_node = None
         self.node_to_bounds: Optional[Dict[torch.fx.Node, ValueRanges]] = None
+        self.tile_size = None
 
     @contextlib.contextmanager
     def set_current_node(self, node):
@@ -212,7 +213,7 @@ class BaseLLVMKernel(common.CodeGen):
                         args = (args[0][1], args[1][1])
                     csevar = self.cse.generate(
                         self.compute,
-                        getattr(parent_handler, name)(*args, **kwargs),  # type: ignore[has-type]
+                        getattr(parent_handler, name)(*args, tile_size=self.tile_size, **kwargs),  # type: ignore[has-type]
                         bounds=buf_bounds,
                     )
                     csevar.update_on_args(name, args, kwargs)
