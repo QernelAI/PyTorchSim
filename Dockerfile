@@ -48,6 +48,8 @@ RUN cd llvm-project && git checkout release/17.x && mkdir build && cd build && \
 
 # Store RISC-V LLVM for TorchSim
 ENV TORCHSIM_LLVM_PATH /riscv-llvm/bin
+ENV TORCHSIM_LLVM_INCLUDE_PATH /riscv-llvm/include
+ENV LLVM_DIR /riscv-llvm
 
 # Download RISC-V tool chain
 RUN apt install -y wget && \
@@ -67,3 +69,6 @@ RUN git clone https://github.com/riscv-software-src/riscv-isa-sim.git && cd risc
 # Install Proxy kernel
 RUN git clone https://github.com/riscv-software-src/riscv-pk.git && cd riscv-pk && git checkout v1.0.0 && mkdir build && cd build && \
     ../configure --prefix=$RISCV --host=riscv64-unknown-elf && make -j && make install
+
+# Install torchsim prepare
+RUN apt install ninja-build && pip install onnx

@@ -9,12 +9,11 @@ set(LT_LLVM_INSTALL_DIR "" CACHE PATH "LLVM installation directory")
 
 # Add the location of LLVMConfig.cmake to CMake search paths (so that
 # find_package can locate it)
-list(APPEND CMAKE_MODULE_PATH ${LLVM_DIR}/llvm-project/build/lib/cmake/llvm/)
+list(APPEND CMAKE_MODULE_PATH ${LLVM_DIR})
 
-find_package(LLVM CONFIG)
-if("${LLVM_VERSION_MAJOR}" VERSION_LESS 17)
-  message(FATAL_ERROR "Found LLVM ${LLVM_VERSION_MAJOR}, but need LLVM 17 or above")
-endif()
+find_package(LLVM REQUIRED CONFIG)
+message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
+message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
 
 #===============================================================================
 # 2. LLVM-TUTOR BUILD CONFIGURATION
@@ -36,3 +35,4 @@ add_library(LowerGemminiPass SHARED LowerGemminiPass.cpp)
 # behaviour on Linux)
 target_link_libraries(LowerGemminiPass
   "$<$<PLATFORM_ID:Darwin>:-undefined dynamic_lookup>")
+include_directories($ENV{TORCHSIM_LLVM_INCLUDE_PATH})
