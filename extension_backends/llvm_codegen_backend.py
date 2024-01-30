@@ -327,7 +327,7 @@ class LLVMKernel(llvm_common.BaseLLVMKernel):
             wrapper.define_kernel(kernel_name, src_code, cuda=False)
 
     def codegen_kernel(self, wrapper):
-        arg_defs, call_args = self.args.llvm_argdefs()
+        arg_defs, call_args, arg_attributes = self.args.llvm_argdefs()
         kernel_name = f"Extensin_Kernel"
         code = self._codegen_kernel(arg_defs, kernel_name)
 
@@ -339,7 +339,8 @@ class LLVMKernel(llvm_common.BaseLLVMKernel):
             codecache_def.writeline("''', ")
             codecache_def.writeline("loop_info=loop_info,")
             codecache_def.writeline("load_tile_info=load_tile_info,")
-            codecache_def.writeline("store_tile_info=store_tile_info)")
+            codecache_def.writeline("store_tile_info=store_tile_info,")
+            codecache_def.writeline("arg_attributes=arg_attributes)")
 
         wrapper.add_import_once('\nprint(f\'Wrapper Codegen Path = {__file__}\')')
         wrapper.add_import_once(f'\nfrom extension_codecache import CustomAsyncCompile')
@@ -348,6 +349,7 @@ class LLVMKernel(llvm_common.BaseLLVMKernel):
         wrapper.add_import_once(f"loop_info = {self.loop_info}")
         wrapper.add_import_once(f"load_tile_info = {self.load_desc}")
         wrapper.add_import_once(f"store_tile_info = {self.store_desc}")
+        wrapper.add_import_once(f"arg_attributes = {arg_attributes}")
         self.define_kernel(wrapper, codecache_def.getvalue(), kernel_name)
         # generate the code to call this
         wrapper.generate_kernel_call(kernel_name, call_args, cuda=False)

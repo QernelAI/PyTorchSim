@@ -54,6 +54,11 @@ DTYPE_LOWP_FP = [
 ]
 
 class LLVMKernelArgs(common.KernelArgs):
+    LLVM_ARGS_IN = 0x01
+    LLVM_ARGS_OUT = 0x02
+    LLVM_ARGS_INOUT = 0x04
+    LLVM_ARGS_VAR = 0x08
+
     def llvm_argdefs(self):
         buffer_types = {x.get_name(): x.get_dtype() for x in V.graph.buffers}
         for name, val in V.graph.graph_inputs.items():
@@ -67,6 +72,7 @@ class LLVMKernelArgs(common.KernelArgs):
 
         call_args = []
         arg_defs = []
+        arg_attributes = {}
         for inplaced in unique(self.inplace_buffers.values()):
             if self._buffer_is_marked_removed(inplaced):
                 continue
@@ -74,24 +80,27 @@ class LLVMKernelArgs(common.KernelArgs):
             inner = inplaced.inner_name
             dtype = buffer_types[outer]
             arg_defs.append(f"ptr %{inner}")
-            call_args.append(self.wrap_ptr_arg(outer, dtype))
+            call_args.append(outer)
+            arg_attributes[outer] = self.LLVM_ARGS_INOUT
         for outer, inner in self.input_buffers.items():
             if outer in self.inplace_buffers:
                 continue
             dtype = buffer_types[outer]
             arg_defs.append(f"ptr readonly %{inner}")
             call_args.append(outer)
+            arg_attributes[outer] = self.LLVM_ARGS_IN
         for outer, inner in self.output_buffers.items():
             if outer in self.inplace_buffers or self._buffer_is_marked_removed(inner):
                 continue
             dtype = buffer_types[outer]
             arg_defs.append(f"ptr %{inner}")
             call_args.append(outer)
+            arg_attributes[outer] = self.LLVM_ARGS_OUT
         for outer, inner in self.sizevars.items():
             arg_defs.append(f"ptr readonly %{inner}")
-            call_args.append(self.wrap_size_arg(outer))
-        return arg_defs, call_args
-
+            call_args.append(outer)
+            arg_attributes[outer] = self.LLVM_ARGS_VAR
+        return arg_defs, call_args, arg_attributes
 
 class BaseLLVMKernel(common.CodeGen):
     newvar_prefix = "%"
