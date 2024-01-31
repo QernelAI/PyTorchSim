@@ -234,9 +234,7 @@ class LLVMKernel(llvm_common.BaseLLVMKernel):
         dtype = V.graph.get_dtype(name)
         type_name = llvm_common.DTYPE_TO_LLVM[dtype]
         align = llvm_common.DTYPE_SIZE[dtype]
-        line = f"mul nsw i64 %{index}, {align}"
-        offset = self.cse.generate(self.loads, line)
-        line = f"getelementptr inbounds {type_name}, ptr %{var}, i64 %{offset}"
+        line = f"getelementptr inbounds {type_name}, ptr %{var}, i64 %{index}"
         var = self.cse.generate(self.loads, line)
         line = f"load {type_name}, ptr %{var}, align {align}"
         return self.cse.generate(self.loads, line)
@@ -248,9 +246,7 @@ class LLVMKernel(llvm_common.BaseLLVMKernel):
         dtype = V.graph.get_dtype(name)
         type_name = llvm_common.DTYPE_TO_LLVM[dtype]
         align = llvm_common.DTYPE_SIZE[dtype]
-        line = f"mul nsw i64 %{index}, {align}"
-        offset = self.cse.generate(self.stores, line)
-        line = f"getelementptr inbounds {type_name}, ptr %{var}, i64 %{offset}"
+        line = f"getelementptr inbounds {type_name}, ptr %{var}, i64 %{index}"
         var = self.cse.generate(self.stores, line)
         if (isinstance(value, list)):
             value = value[1]
@@ -289,9 +285,7 @@ class LLVMKernel(llvm_common.BaseLLVMKernel):
         align = llvm_common.DTYPE_SIZE[dtype]
         line = f"load {type_name}, ptr %{value}, align {align}"
         value = self.reduction_cse.generate(self.reductions_suffix, line)
-        line = f"mul nsw i64 %{index}, {align}"
-        offset = self.cse.generate(self.reductions_suffix, line)
-        line = f"getelementptr inbounds {type_name}, ptr %{var}, i64 %{offset}"
+        line = f"getelementptr inbounds {type_name}, ptr %{var}, i64 %{index}"
         var = self.cse.generate(self.reductions_suffix, line)
         line = f"store {type_name} %{value}, ptr %{var}, align {align}"
         self.cse.generate(self.reductions_suffix, line, assignment = False)
@@ -408,9 +402,7 @@ class VectorizedLLVMKernel(LLVMKernel):
         dtype = V.graph.get_dtype(name)
         type_name = llvm_common.DTYPE_TO_LLVM[dtype]
         align = llvm_common.DTYPE_SIZE[dtype]
-        line = f"mul nsw i64 %{index}, {align}"
-        offset = self.vector_cse.generate(self.vector_loads, line)
-        line = f"getelementptr inbounds {type_name}, ptr %{var}, i64 %{offset}"
+        line = f"getelementptr inbounds {type_name}, ptr %{var}, i64 %{index}"
         var = self.vector_cse.generate(self.vector_loads, line)
 
         # NOTE. Since clang 16.0 always used this constant, 2 is hard coded
@@ -426,9 +418,7 @@ class VectorizedLLVMKernel(LLVMKernel):
         dtype = V.graph.get_dtype(name)
         type_name = llvm_common.DTYPE_TO_LLVM[dtype]
         align = llvm_common.DTYPE_SIZE[dtype]
-        line = f"mul nsw i64 %{index}, {align}"
-        offset = self.vector_cse.generate(self.vector_stores, line)
-        line = f"getelementptr inbounds {type_name}, ptr %{var}, i64 %{offset}"
+        line = f"getelementptr inbounds {type_name}, ptr %{var}, i64 %{index}"
         var = self.vector_cse.generate(self.vector_stores, line)
 
         # NOTE. Since clang 16.0 always used this constant, 2 is hard coded
@@ -525,9 +515,7 @@ class MatrixLLVMKernel(LLVMKernel):
         cv = self.get_constant_vector(index)
         self.add_desc(True, name, align, cv, [self.tile_row, self.tile_col])
         index = self.depth_first_traverse(index, self.loads, self.index_cse)
-        line = f"mul nsw i64 %{index}, {align}"
-        offset = self.cse.generate(self.loads, line)
-        line = f"getelementptr inbounds {type_name}, ptr %{var}, i64 %{offset}"
+        line = f"getelementptr inbounds {type_name}, ptr %{var}, i64 %{index}"
         var = self.cse.generate(self.loads, line)
         stride = self.ranges[-1] * align # stride is input row size
         line = f"call <{self.tile_size} x {type_name}> @llvm.matrix.column.major.load.v{self.tile_size}f32.p0f32(ptr %{var}, i64 {stride}, i1 0, i32 {self.tile_row}, i32 {self.tile_col})"
@@ -543,9 +531,7 @@ class MatrixLLVMKernel(LLVMKernel):
         cv = self.get_constant_vector(index)
         self.add_desc(False, name, align, cv, [self.tile_row, self.tile_col])
         index = self.depth_first_traverse(index, self.stores, self.index_cse)
-        line = f"mul nsw i64 %{index}, {align}"
-        offset = self.cse.generate(self.stores, line)
-        line = f"getelementptr inbounds {type_name}, ptr %{var}, i64 %{offset}"
+        line = f"getelementptr inbounds {type_name}, ptr %{var}, i64 %{index}"
         var = self.cse.generate(self.stores, line)
         stride = self.ranges[-1] * align
         if (isinstance(value, list)):
@@ -610,9 +596,7 @@ class MatrixLLVMKernel(LLVMKernel):
         align = llvm_common.DTYPE_SIZE[dtype]
         line = f"load <{self.tile_row} x {type_name}>, ptr %{value}, align {align}"
         value = self.reduction_cse.generate(self.reductions_suffix, line)
-        line = f"mul nsw i64 %{index}, {align}"
-        offset = self.cse.generate(self.reductions_suffix, line)
-        line = f"mul nsw i64 %{offset}, {self.tile_row}"
+        line = f"mul nsw i64 %{index}, {self.tile_row}"
         offset = self.cse.generate(self.reductions_suffix, line)
         line = f"getelementptr inbounds {type_name}, ptr %{var}, i64 %{offset}"
         var = self.cse.generate(self.reductions_suffix, line)
