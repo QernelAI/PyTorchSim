@@ -6,14 +6,17 @@ import shlex
 import subprocess
 
 import torch
-from torch._inductor.codecache import AsyncCompile, get_lock_dir, get_hash, write
+from torch._inductor.codecache import AsyncCompile, get_lock_dir, get_hash, write, write_atomic
 from AsmParser.riscv_parser import riscv_parser
 from extension_backends.llvm_common import LLVMKernelArgs
+from extension_backends.llvm_caller_codegen import LLVMKernelCallerCodeGen
+from Validation.functional_simulator import FunctionalSimulator
 
 LOCK_TIMEOUT = 600
 TORCHSIM_DUMP_PATH = os.environ.get('TORCHSIM_DUMP_PATH',
                         default = f"{tempfile.gettempdir()}/torchinductor_{getpass.getuser()}")
 TORCHSIM_DUMP_FILE = int(os.environ.get('TORCHSIM_DUMP_FILE', default="True") == "True")
+TORCHSIM_VALIDATION_MODE = int(os.environ.get('TORCHSIM_VALIDATION_MODE', default="True") == "True")
 TORCHSIM_LLVM_PATH = os.environ.get('TORCHSIM_LLVM_PATH', default="/usr/bin")
 TORCHSIM_CUSTOM_PASS_PATH = os.environ.get('TORCHSIM_CUSTOM_PASS_PATH', default="./GemminiLowerPass/build")
 TORCHSIM_DIR = os.environ.get('TORCHSIM_DIR', default='/workspace/TorchSim')
@@ -29,7 +32,7 @@ def dump_metadata(args, arg_attributes, path):
 
     with open(meta_path, "a") as file:
         for (arg_name, arg_attribute), arg in zip(arg_attributes.items(), args):
-            file.write(f'{arg_name}=({arg_attribute}, {arg.dtype}, {arg.shape})\n')
+            file.write(f'{arg_name}=({arg_attribute[0]}, {arg.dtype}, {arg.shape})\n')
     return
 
 def write_arg(arg, path, name):
@@ -44,11 +47,14 @@ def write_arg(arg, path, name):
         t_arr.tofile(data_path)
     else:
         assert(0)
+    return index
 
 def dump_args(args, arg_attributes, path):
+    index = 0
     for (arg_name, arg_attribute), arg in zip(arg_attributes.items(), args):
-        if arg_attribute == LLVMKernelArgs.LLVM_ARGS_IN or arg_attribute == LLVMKernelArgs.LLVM_ARGS_INOUT:
-            write_arg(arg, path, arg_name)
+        if LLVMKernelArgs.is_llvm_arg_in(arg_attribute[0]):
+            index = write_arg(arg, path, arg_name)
+    return index
 
 def llvm_compile_command(input, output):
     opt_output = f"{input[:-3]}_opt.ll"
@@ -72,8 +78,9 @@ class LLVMCodeCache:
         pass
 
     @classmethod
-    def load(cls, source_code, loop_info={}, load_tile_info={}, store_tile_info={}, **kwargs):
-        global TORCHSIM_DUMP_PATH
+    def load(cls, source_code, validation_wrapper_name="validation_wrapper",
+             validation_binary_name="validation_bin", arg_attributes={}, loop_info={},
+             load_tile_info={}, store_tile_info={}, **kwargs):
         write_path = os.path.join(TORCHSIM_DUMP_PATH, "tmp", hash_prefix(get_hash(source_code)))
         key, input_path = write(source_code, "ll", specified_dir=write_path)
         output_path = input_path[:-2] + "s"
@@ -102,6 +109,11 @@ class LLVMCodeCache:
                 if TORCHSIM_DUMP_FILE:
                     tile_graph_generator.dump_basic_block_graph(os.path.join(write_path, "basic_block.onnx"))
                 tile_graph_generator.cycle_analysis(name=os.path.join(write_path, "tile_graph"))
+
+                # Generate LLVM kernel calller and binary
+                llvm_caller = LLVMKernelCallerCodeGen(TORCHSIM_VALIDATION_MODE, arg_attributes)
+                llvm_caller.generate_wrapper_file(write_path, validation_wrapper_name)
+                llvm_caller.compile_wih_kernel(write_path, key, validation_wrapper_name, validation_binary_name)
             else:
                 pass
         return key
@@ -116,23 +128,34 @@ def get_onnxim_command(model_path):
 
 class CustomAsyncCompile(AsyncCompile):
     def __init__(self):
-        pass
+        self.key = None
+        self.validation_wrapper_name = "validation_wrapper"
+        self.validation_binary_name = "validation_binary"
 
     def llvm(self, source_code, arg_attributes={}, **kwargs):
         def task():
-            self.key = LLVMCodeCache.load(source_code, **kwargs)
+            self.key = LLVMCodeCache.load(source_code,
+                                          valdiation_wrapper_name=self.validation_binary_name,
+                                          validation_binary_name=self.validation_binary_name,
+                                          arg_attributes=arg_attributes, **kwargs)
             return
         future = self.submit(task)
 
         def dummy_simulator(*args, **kwargs):
+            # Wait for compilation
             future.result()
-            os.system('echo "Running dummy simulator!"')
+
+            # Run simulator pass
             result_path = os.path.join(TORCHSIM_DUMP_PATH, "tmp", hash_prefix(self.key))
+            print("Running dummy simulator!")
             print("OUTPUT PATH > ", result_path)
 
+            # Dump arguments and meta data
             dump_metadata(args, arg_attributes, result_path)
-            if TORCHSIM_DUMP_FILE:
-                dump_args(args, arg_attributes, result_path)
+            if TORCHSIM_VALIDATION_MODE:
+                n_call = dump_args(args, arg_attributes, result_path)
+                funcsim = FunctionalSimulator(result_path, self.key, arg_attributes, args)
+                funcsim.run_spike(n_call, os.path.join(result_path, self.validation_binary_name))
 
             assembly_path = os.path.join(result_path, f'{self.key}.s')
             try:
