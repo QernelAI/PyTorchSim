@@ -6,11 +6,11 @@ import shlex
 import subprocess
 
 import torch
-from torch._inductor.codecache import AsyncCompile, get_lock_dir, get_hash, write, write_atomic
+from torch._inductor.codecache import AsyncCompile, get_lock_dir, get_hash, write
 from AsmParser.riscv_parser import riscv_parser
 from extension_backends.llvm_common import LLVMKernelArgs
 from extension_backends.llvm_caller_codegen import LLVMKernelCallerCodeGen
-from Validation.functional_simulator import FunctionalSimulator
+from Simulator.simulator import FunctionalSimulator, CycleSimulator
 
 LOCK_TIMEOUT = 600
 TORCHSIM_DUMP_PATH = os.environ.get('TORCHSIM_DUMP_PATH',
@@ -18,9 +18,15 @@ TORCHSIM_DUMP_PATH = os.environ.get('TORCHSIM_DUMP_PATH',
 TORCHSIM_DUMP_FILE = int(os.environ.get('TORCHSIM_DUMP_FILE', default="True") == "True")
 TORCHSIM_VALIDATION_MODE = int(os.environ.get('TORCHSIM_VALIDATION_MODE', default="True") == "True")
 TORCHSIM_LLVM_PATH = os.environ.get('TORCHSIM_LLVM_PATH', default="/usr/bin")
-TORCHSIM_CUSTOM_PASS_PATH = os.environ.get('TORCHSIM_CUSTOM_PASS_PATH', default="./GemminiLowerPass/build")
 TORCHSIM_DIR = os.environ.get('TORCHSIM_DIR', default='/workspace/TorchSim')
-TORCHSIM_ONNXIM_CONFIG = os.environ.get('TORCHSIM_CONFIG', default='configs/systolic_ws_8x8_c1_simple_noc.json')
+TORCHSIM_CUSTOM_PASS_PATH = os.environ.get('TORCHSIM_CUSTOM_PASS_PATH',
+                                           default=f"{TORCHSIM_DIR}/GemminiLowerPass/build")
+TORCHSIM_ONNXIM_CONFIG = os.environ.get('TORCHSIM_CONFIG',
+                                        default=f'{TORCHSIM_DIR}/ONNXim/configs/systolic_ws_8x8_c1_simple_noc.json')
+GEM5_PATH = os.environ.get('GEM5_PATH',
+                           default = f"{TORCHSIM_DIR}/../gem5/build/RISCV/gem5.opt")
+GEM5_SCRIPT_PATH = os.environ.get('GEM5_SCRIPT_PATH',
+                                  default = f"{TORCHSIM_DIR}/gem5_script/script.py")
 
 def hash_prefix(hash_value):
     return hash_value[1:5]
@@ -78,12 +84,19 @@ class LLVMCodeCache:
         pass
 
     @classmethod
-    def load(cls, source_code, validation_wrapper_name="validation_wrapper",
-             validation_binary_name="validation_bin", arg_attributes={}, loop_info={},
+    def load(cls, source_code,
+             validation_wrapper_name="validation_wrapper",
+             validation_binary_name="validation_bin",
+             cycle_wrapper_name="cycle_wrapper",
+             cycle_binary_name="cycle_bin",
+             arg_attributes={}, loop_info={},
              load_tile_info={}, store_tile_info={}, **kwargs):
         write_path = os.path.join(TORCHSIM_DUMP_PATH, "tmp", hash_prefix(get_hash(source_code)))
         key, input_path = write(source_code, "ll", specified_dir=write_path)
         output_path = input_path[:-2] + "s"
+
+        assembly_path = os.path.join(write_path, f'{key}.s')
+        binary_path = os.path.join(write_path, f'{key}.o')
 
         cmds = llvm_compile_command(input_path, output_path)
         opt_cmd = shlex.split(cmds[0])
@@ -100,22 +113,31 @@ class LLVMCodeCache:
                 except subprocess.CalledProcessError as e:
                     assert(0)   # Todo: make LLVMCompileError
 
+                # Generate LLVM kernel calller and binary for validation
+                if TORCHSIM_VALIDATION_MODE:
+                    val_llvm_caller = LLVMKernelCallerCodeGen(TORCHSIM_VALIDATION_MODE, arg_attributes)
+                    val_llvm_caller.generate_wrapper_file(write_path, validation_wrapper_name)
+                    val_llvm_caller.compile_wih_kernel(write_path, key, validation_wrapper_name, validation_binary_name)
+
+                # Generate LLVM kernel calller and binary for cycle calculation
+                cycle_llvm_caller = LLVMKernelCallerCodeGen(False, arg_attributes)
+                cycle_llvm_caller.generate_wrapper_file(write_path, cycle_wrapper_name)
+                cycle_llvm_caller.compile_wih_kernel(write_path, key, cycle_wrapper_name, cycle_binary_name)
+
+                # Run cyclesim
+                cyclesim = CycleSimulator()
+                ticks = cyclesim.compile_and_simulate(os.path.join(write_path, cycle_binary_name))
+
                 # launch tile graph generator
                 tile_graph_generator = riscv_parser()
                 tile_graph_generator.load_file(output_path,
                                                loop_info=loop_info,
                                                load_tile_info=load_tile_info,
                                                store_tile_info=store_tile_info)
+
                 if TORCHSIM_DUMP_FILE:
                     tile_graph_generator.dump_basic_block_graph(os.path.join(write_path, "basic_block.onnx"))
                 tile_graph_generator.cycle_analysis(name=os.path.join(write_path, "tile_graph"))
-
-                # Generate LLVM kernel calller and binary
-                llvm_caller = LLVMKernelCallerCodeGen(TORCHSIM_VALIDATION_MODE, arg_attributes)
-                llvm_caller.generate_wrapper_file(write_path, validation_wrapper_name)
-                llvm_caller.compile_wih_kernel(write_path, key, validation_wrapper_name, validation_binary_name)
-            else:
-                pass
         return key
 
 def get_onnxim_command(model_path):
@@ -131,6 +153,8 @@ class CustomAsyncCompile(AsyncCompile):
         self.key = None
         self.validation_wrapper_name = "validation_wrapper"
         self.validation_binary_name = "validation_binary"
+        self.cycle_wrapper_name = "cycle_wrapper"
+        self.cycle_binary_name = "cycle_binary"
 
     def llvm(self, source_code, arg_attributes={}, **kwargs):
         def task():

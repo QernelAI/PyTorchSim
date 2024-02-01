@@ -6,6 +6,7 @@ import torch
 import numpy as np
 
 from extension_backends.llvm_common import LLVMKernelArgs
+import extension_codecache
 
 class FunctionalSimulator():
     def __init__(self, path, key, arg_attributes, args):
@@ -35,3 +36,19 @@ class FunctionalSimulator():
         for (arg_name, arg_attribute), arg in zip(self.arg_attributes.items(), self.args):
             if LLVMKernelArgs.is_llvm_arg_out(arg_attribute[0]):
                 self.load_tensor(arg, arg_name, arg_attribute, n_call)
+
+class CycleSimulator():
+    def __init__(self) -> None:
+        pass
+
+    def compile_and_simulate(self, target_binary):
+        try:
+            gem5_cmd = [extension_codecache.GEM5_PATH, extension_codecache.GEM5_SCRIPT_PATH, target_binary]
+            output = subprocess.check_output(gem5_cmd)
+            lines = output.decode('utf-8').split('\n')
+            ticks = int(lines[-2] if lines[-1] == '' else lines[-1])
+        except subprocess.CalledProcessError as e:
+            print(e)
+            assert(0)
+
+        return ticks
