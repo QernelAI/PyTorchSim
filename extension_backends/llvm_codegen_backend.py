@@ -22,6 +22,14 @@ def reduction_alloc(code, stack, vars):
         line = f"%{var} = alloca {REDUCTION_TYPE}, align {REDUCTION_SIZE}"
         code.writeline(line)
 
+def matrix_reduction_alloc(code, stack, vars, tile_row):
+    # FIXME. USE VARIABLES' TYPE...
+    REDUCTION_TYPE = "float"
+    REDUCTION_SIZE = 4
+    for var in vars:
+        line = f"%{var} = alloca {REDUCTION_TYPE}, i32 {tile_row}, align {REDUCTION_SIZE}"
+        code.writeline(line)
+
 def reduction_init(reduction_type, dtype):
     if dtype in cpp.DTYPE_LOWP_FP:
         # Since load promotes all half-precision inputs to float, the initial
@@ -517,7 +525,7 @@ class MatrixLLVMKernel(LLVMKernel):
         index = self.depth_first_traverse(index, self.loads, self.index_cse)
         line = f"getelementptr inbounds {type_name}, ptr %{var}, i64 %{index}"
         var = self.cse.generate(self.loads, line)
-        stride = self.ranges[-1] * align # stride is input row size
+        stride = self.ranges[-1] # stride is input row size
         line = f"call <{self.tile_size} x {type_name}> @llvm.matrix.column.major.load.v{self.tile_size}f32.p0f32(ptr %{var}, i64 {stride}, i1 0, i32 {self.tile_row}, i32 {self.tile_col})"
         return self.cse.generate(self.loads, line)
 
@@ -533,7 +541,7 @@ class MatrixLLVMKernel(LLVMKernel):
         index = self.depth_first_traverse(index, self.stores, self.index_cse)
         line = f"getelementptr inbounds {type_name}, ptr %{var}, i64 %{index}"
         var = self.cse.generate(self.stores, line)
-        stride = self.ranges[-1] * align
+        stride = self.ranges[-1]
         if (isinstance(value, list)):
             value = value[0]
         line = f"call void @llvm.matrix.column.major.store.v{self.tile_size}f32.p0f32(<{self.tile_size} x {type_name}> %{value}, ptr %{var}, i64 {stride}, i1 0, i32 {self.tile_row}, i32 {self.tile_col})"
@@ -551,13 +559,14 @@ class MatrixLLVMKernel(LLVMKernel):
             self.reduction_vars[acc] = reduction_type
             type_name = llvm_common.DTYPE_TO_LLVM[dtype]
             align = llvm_common.DTYPE_SIZE[dtype]
-            self.reduction_prefix.writeline(f"store {type_name} {reduction_init(reduction_type, dtype)}, ptr %{acc}, align {align}")
+            comma = ", "
+            array_line = [f"{type_name} {reduction_init(reduction_type, dtype)}" for _ in range(self.tile_row)]
+            self.reduction_prefix.writeline(f"store <{self.tile_row} x {type_name}> <{comma.join(array_line)}>, ptr %{acc}, align {align}")
             line = f"load <{self.tile_row} x {type_name}>, ptr %{acc}, align {align}"
 
             # NOTE. To keep below line be under the compute, used store buffers
             temp = self.cse.generate(self.stores, line)
             output = []
-            comma = ", "
             for i in range(self.tile_col):
                 indexes = [f"i32 {i*self.tile_row+j}" for j in range(self.tile_row)]
                 line = f"shufflevector <{self.tile_size} x {type_name}> %{value}, <{self.tile_size} x {type_name}> undef, <{self.tile_row} x i32> <{comma.join(indexes)}>"
@@ -596,11 +605,9 @@ class MatrixLLVMKernel(LLVMKernel):
         align = llvm_common.DTYPE_SIZE[dtype]
         line = f"load <{self.tile_row} x {type_name}>, ptr %{value}, align {align}"
         value = self.reduction_cse.generate(self.reductions_suffix, line)
-        line = f"mul nsw i64 %{index}, {self.tile_row}"
-        offset = self.cse.generate(self.reductions_suffix, line)
-        line = f"getelementptr inbounds {type_name}, ptr %{var}, i64 %{offset}"
+        line = f"getelementptr inbounds {type_name}, ptr %{var}, i64 %{index}"
         var = self.cse.generate(self.reductions_suffix, line)
-        line = f"store <{self.tile_row} x {type_name}> %{value}, ptr %{var}, align {align}"
+        line = f"call void @llvm.matrix.column.major.store.v{self.tile_row}f32.p0f32(<{self.tile_row} x {type_name}> %{value}, ptr %{var}, i64 {align}, i1 0, i32 {self.tile_row}, i32 1)"
         self.cse.generate(self.reductions_suffix, line, assignment = False)
 
     def codegen_loops(self):
@@ -617,7 +624,7 @@ class MatrixLLVMKernel(LLVMKernel):
 
         with contextlib.ExitStack() as stack:
             if self.reduction_vars:
-                reduction_alloc(code, stack, self.reduction_vars)
+                matrix_reduction_alloc(code, stack, self.reduction_vars, self.tile_row)
             self.loop_info.update(loops.codegen(code, stack))
             with contextlib.ExitStack() as stack_outer:
                 code.splice(self.reduction_prefix)
@@ -646,6 +653,8 @@ class MatrixLLVMKernel(LLVMKernel):
         code.writeline(f'declare <{self.tile_size} x float> @llvm.matrix.column.major.load.v{self.tile_size}f32.p0f32(ptr , i64, i1, i32, i32) #2')
         code.writeline(f'declare <{self.tile_size} x float> @llvm.matrix.multiply.v{self.tile_size}f32.v16f32.v16f32(<16 x float>, <16 x float>, i32, i32, i32) #1')
         code.writeline(f'declare void @llvm.matrix.column.major.store.v{self.tile_size}f32.p0f32(<{self.tile_size} x float>, ptr , i64, i1, i32, i32) #3')
+        if self.tile_size != self.tile_row:
+            code.writeline(f'declare void @llvm.matrix.column.major.store.v{self.tile_row}f32.p0f32(<{self.tile_row} x float>, ptr , i64, i1, i32, i32) #3')
         code.writeline(f'declare float @llvm.vector.reduce.fadd.nxv2f32(float, <{self.tile_row} x float>)')
         return code
 

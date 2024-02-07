@@ -26,7 +26,7 @@ TORCHSIM_CUSTOM_PASS_PATH = os.environ.get('TORCHSIM_CUSTOM_PASS_PATH',
 TORCHSIM_ONNXIM_CONFIG = os.environ.get('TORCHSIM_CONFIG',
                                         default=f'{TORCHSIM_DIR}/ONNXim/configs/systolic_ws_8x8_c1_simple_noc.json')
 GEM5_PATH = os.environ.get('GEM5_PATH',
-                           default = f"{TORCHSIM_DIR}/../gem5/build/RISCV/gem5.opt")
+                           default = f"/workspace/gem5/build/RISCV/gem5.opt")
 GEM5_SCRIPT_PATH = os.environ.get('GEM5_SCRIPT_PATH',
                                   default = f"{TORCHSIM_DIR}/gem5_script/script.py")
 

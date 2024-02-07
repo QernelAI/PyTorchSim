@@ -37,7 +37,7 @@ RUN pip install mypy pre-commit
 
 # Build Gem5
 ENV LD_LIBRARY_PATH /opt/conda/lib:$LD_LIBRARY_PATH
-RUN git clone https://github.com/gem5/gem5
+RUN git clone https://github.com/PSAL-POSTECH/gem5.git --branch TorchSim
 RUN cd gem5 && scons build/RISCV/gem5.opt -j $(nproc)
 
 # Build LLVM RISC-V
