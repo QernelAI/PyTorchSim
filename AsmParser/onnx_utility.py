@@ -12,8 +12,14 @@ class node:
     def add_child(self, child):
         self.__children.add(child)
 
+    def get_child(self):
+        return list(self.__children)
+
     def add_parent(self, parent):
         self.__parents.add(parent)
+
+    def get_parent(self):
+        return list(self.__parents)
 
     def to_onnx(self):
         attr_dict = {}

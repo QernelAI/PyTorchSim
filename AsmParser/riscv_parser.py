@@ -813,6 +813,8 @@ class riscv_parser:
         last_node = []
         index_node = []
         end_node = []
+        # For keep topological order
+        all_nodes = []
 
         for bb in cycle.loop_path.values():
             if bb.prefix_node is not None:
@@ -820,6 +822,7 @@ class riscv_parser:
                     connect_nodes(ln, bb.prefix_node)
                 last_node = [bb.prefix_node]
                 index_node.append(bb.prefix_node)
+                all_nodes.append(bb.prefix_node)
 
             local_load_nodes = []
             local_store_nodes = []
@@ -827,16 +830,19 @@ class riscv_parser:
             # Create compute node for basic block
             bb_compute_node = compute_node([], compute_ticks, len(compute_nodes))
             compute_nodes.append(bb_compute_node)
+            all_nodes.append(bb_compute_node)
 
             for inst in bb.insts:
                 if inst.opcode in DRAM_LOAD:
                     tmp_node = load_node(self.load_tile_info[f"load{len(load_nodes)}"], [inst.asm], len(load_nodes)+len(local_load_nodes))
                     local_load_nodes.append(tmp_node)
+                    all_nodes.append(tmp_node)
                     inst_to_node[inst] = tmp_node
                     connect_nodes(tmp_node, bb_compute_node)
                 elif inst.opcode in DRAM_STORE:
                     tmp_node = store_node(self.store_tile_info[f"store{len(store_nodes)}"], [inst.asm], len(store_nodes)+len(local_store_nodes))
                     local_store_nodes.append(tmp_node)
+                    all_nodes.append(tmp_node)
                     inst_to_node[inst] = tmp_node
                     connect_nodes(bb_compute_node, tmp_node)
                 elif inst.opcode in SRAM_LOAD or inst.opcode[:2] == "vl":
@@ -866,6 +872,7 @@ class riscv_parser:
                     connect_nodes(ln, bb.suffix_node)
                 last_node = [bb.suffix_node]
                 end_node.append(bb.suffix_node)
+                all_nodes.append(bb.suffix_node)
 
             # Update to global list
             load_nodes += local_load_nodes
@@ -873,11 +880,20 @@ class riscv_parser:
 
         # NOTE. Since current custom_mvin instruciton has no dependency between following vload instruction.
         # So, Make dependency forcefully
-        onnx_node_list = [node.to_onnx() for node in index_node] + \
-                            [node.to_onnx() for node in load_nodes] + \
-                            [node.to_onnx() for node in compute_nodes] + \
-                            [node.to_onnx() for node in store_nodes] + \
-                            [node.to_onnx() for node in end_node]
+        # Topological sort
+        graph = {node:node.get_parent() for node in all_nodes}
+        sorted_list = []
+        while (len(graph)):
+            for node, parents in graph.items():
+                if len(parents):
+                  continue
+                for child in node.get_child():
+                    graph[child].pop(graph[child].index(node))
+                sorted_list.append(node)
+                graph.pop(node)
+                break
+
+        onnx_node_list = [node.to_onnx() for node in sorted_list]
         if onnx_node_list:
             dump_onnx_graph(f"{name}.onnx", onnx_node_list)
         return index_node, end_node, onnx_node_list

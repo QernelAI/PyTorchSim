@@ -134,7 +134,7 @@ class ExtensionBackendTests(TestCase):
             return torch.sum(a + b, axis=-1)
 
         metrics.reset()
-        opt_fn = torch.compile()(vectoradd)
+        opt_fn = torch.compile()(reduce_sum)
         res = opt_fn(x, y)
         self.assertEqual(ref, res.to(device="cpu"))
 
