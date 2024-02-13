@@ -3,7 +3,7 @@ import onnx
 class node:
     def __init__(self, node_id=0):
         self.id = node_id
-        self.name = self.__class__.__name__ + str(self.id)
+        self.torchsim_name = self.__class__.__name__ + str(self.id)
 
         self.__parents = set()
         self.__children = set()
@@ -24,8 +24,8 @@ class node:
     def to_onnx(self):
         attr_dict = {}
 
-        inputs = [p.name + "_output" for p in self.__parents]
-        outputs = [self.name + "_output"]
+        inputs = [p.torchsim_name + "_output" for p in self.__parents]
+        outputs = [self.torchsim_name + "_output"]
 
         # Iterate all member variables
         for var in [attr for attr in dir(self) if not callable(getattr(self, attr)) and attr.startswith("torchsim")]:
