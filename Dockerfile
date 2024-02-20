@@ -23,7 +23,7 @@
 # THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-FROM pytorch/pytorch:2.1.0-cuda12.1-cudnn8-runtime
+FROM pytorch/pytorch:2.2.0-cuda12.1-cudnn8-runtime
 
 # Copied from Gem5 Docker file
 ENV DEBIAN_FRONTEND=noninteractive
@@ -72,4 +72,4 @@ RUN git clone https://github.com/riscv-software-src/riscv-pk.git && cd riscv-pk 
 
 # Install torchsim dependency
 RUN apt install ninja-build && pip install onnx && pip install --user conan==1.56.0
-ENV PATH $PATH:/root/.local.bin
+ENV PATH $PATH:/root/.local/bin
