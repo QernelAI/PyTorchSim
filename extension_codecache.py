@@ -93,12 +93,9 @@ class LLVMCodeCache:
              cycle_binary_name="cycle_bin",
              arg_attributes={}, loop_info={},
              load_tile_info={}, store_tile_info={}, **kwargs):
-        write_path = os.path.join(TORCHSIM_DUMP_PATH, "tmp", hash_prefix(get_hash(source_code)))
+        write_path = os.path.join(TORCHSIM_DUMP_PATH, "tmp", hash_prefix(get_hash(source_code.strip())))
         key, input_path = write(source_code, "ll", specified_dir=write_path)
         output_path = input_path[:-2] + "s"
-
-        assembly_path = os.path.join(write_path, f'{key}.s')
-        binary_path = os.path.join(write_path, f'{key}.o')
 
         cmds = llvm_compile_command(input_path, output_path)
         opt_cmd = shlex.split(cmds[0])

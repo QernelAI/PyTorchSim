@@ -1,8 +1,12 @@
-from torch._inductor.common import KernelTemplate
-from torch._inductor.common import ChoiceCaller
-from torch._inductor.common import Kernel
+import torch
+from torch._inductor.codegen.common import KernelTemplate
+from torch._inductor.codegen.common import ChoiceCaller
+from torch._inductor.codegen.common import Kernel
 from torch._inductor.ir import TensorBox
 from torch._inductor.ir import TemplateBuffer
+from torch._inductor.utils import override_lowering
+
+aten = torch.ops.aten
 
 class LLVMTemplateKernel(Kernel):
     def __init__(self) -> None:
@@ -68,7 +72,7 @@ class LLVMGemmTemplate(LLVMTemplate):
     def render(self):
         pass
 
-@register_lowering(aten.mm)
+@override_lowering(aten.mm)
 def tuned_mm(mat1, mat2, * ,layout=None):
     llvm_template = LLVMGemmTemplate()
 

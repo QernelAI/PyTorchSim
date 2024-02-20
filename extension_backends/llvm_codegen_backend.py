@@ -1,18 +1,16 @@
-import os
 import dataclasses
 import contextlib
+import sympy
 from typing import List
-from typing import Set
 from typing import Dict
 import torch
 from torch._inductor.codegen import cpp, wrapper, common
-from . import llvm_common
 from torch._inductor.scheduler import BaseScheduling
 from torch._inductor.virtualized import V
 from torch._inductor.utils import IndentedBuffer
-from torch._inductor.codecache import write, get_hash
-import extension_codecache
-import sympy
+
+from . import llvm_common
+from . import llvm_template
 
 def reduction_alloc(code, stack, vars):
     # FIXME. USE VARIABLES' TYPE...

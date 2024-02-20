@@ -3,15 +3,13 @@ from torch._inductor.codegen import common
 from torch._inductor.virtualized import V
 import sympy
 
-import contextlib
-from typing import Callable, Dict, Optional
+from typing import Callable
 
 import sympy
 
 import torch.fx
 from torch.utils._sympy.value_ranges import ValueRanges
 
-from torch._inductor import metrics
 from torch._inductor.utils import (
     free_symbol_startswith,
     get_sympy_Expr_dtype,
@@ -107,7 +105,7 @@ class LLVMKernelArgs(common.KernelArgs):
             arg_attributes[outer] = [self.LLVM_ARGS_VAR] + buffer_types[outer]
         return arg_defs, call_args, arg_attributes
 
-class BaseLLVMKernel(common.CodeGen):
+class BaseLLVMKernel(common.Kernel):
     newvar_prefix = "%"
     name_prefix = "body"
     vector_prefix = "vector_body"
@@ -117,65 +115,15 @@ class BaseLLVMKernel(common.CodeGen):
     store_format = None
 
     def __init__(self, args=None):
-        super().__init__()
-        metrics.generated_kernel_count += 1
-        self.args = args or common.KernelArgs()
-        self.loads = IndentedBuffer()
-        self.compute = IndentedBuffer()
+        super().__init__(args)
         self.vector_compute = IndentedBuffer()
-        self.stores = IndentedBuffer()
         self.reductions_suffix = IndentedBuffer()
         self.cse = common.CSE(self.newvar_prefix, self.suffix, self.name_prefix)
         self.vector_cse = common.CSE(self.newvar_prefix, self.suffix, self.vector_prefix)
-        self.must_keep_buffers = set()
-        self.store_buffer_names = set()
-        # set in set_current_node
-        self.current_node = None
-        self.node_to_bounds: Optional[Dict[torch.fx.Node, ValueRanges]] = None
         self.tile_size = None
-
-    @contextlib.contextmanager
-    def set_current_node(self, node):
-        prior = self.current_node
-        self.current_node = node
-        self.node_to_bounds = node._body.bounds().get_bounds()
-        try:
-            yield
-        finally:
-            self.current_node = prior
-
-    @contextlib.contextmanager
-    def swap_buffers(self, lb, cb=None, sb=None):
-        if cb is None:
-            cb = lb
-        loads = self.loads
-        compute = self.compute
-        stores = self.stores
-        cse = self.cse
-        self.loads = lb
-        self.compute = cb
-        self.stores = sb
-        self.cse = cse.clone()
-        try:
-            yield
-        finally:
-            self.loads = loads
-            self.compute = compute
-            self.stores = stores
-            self.cse = cse
 
     def load(self, name: str, index: sympy.Expr):
         raise NotImplementedError()
-
-    def indirect_load(self, name: str, index: sympy.Expr):
-        """A load the depends on an index we have read"""
-        prior = self.loads
-        try:
-            # put the load in the compute section as it might have deps
-            self.loads = self.compute
-            return self.load(name, index)
-        finally:
-            self.loads = prior
 
     def store_reduction(self, name, index, value):
         raise NotImplementedError()
@@ -184,19 +132,6 @@ class BaseLLVMKernel(common.CodeGen):
         raise NotImplementedError()
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
-        raise NotImplementedError()
-
-    def bucketize(
-        self,
-        values,
-        offsets_name: str,
-        offsets_size: sympy.Expr,
-        indexing_dtype: torch.dtype,
-        right: bool,
-    ):
-        """
-        See [Note: Inductor bucketize op]
-        """
         raise NotImplementedError()
 
     def __enter__(self):
@@ -314,11 +249,6 @@ class BaseLLVMKernel(common.CodeGen):
         self.exit_stack.enter_context(V.set_kernel_handler(self))
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        if V.graph.scheduler:
-            V.graph.scheduler.remove_kernel_local_buffers()
-        super().__exit__(exc_type, exc_val, exc_tb)
-
     def rename_indexing(self, index) -> sympy.Expr:
         # adds the necessary kernel args for index expressions
         # and renames variables in index expressions to kernel arg names
@@ -332,6 +262,3 @@ class BaseLLVMKernel(common.CodeGen):
             if x.name.startswith("s") or x.name.startswith("ps")
         }
         return sympy_subs(index, replacements)
-
-    def create_cse_var(self, *args, **kwargs):
-        return common.CSEVariable(*args, **kwargs)

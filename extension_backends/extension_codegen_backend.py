@@ -1,7 +1,6 @@
 import dataclasses
 import contextlib
 from typing import List
-from typing import Set
 from typing import Dict
 from torch._inductor.codegen import cpp, wrapper, common
 from torch._inductor.scheduler import BaseScheduling

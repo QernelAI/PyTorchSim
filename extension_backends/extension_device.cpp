@@ -3,6 +3,7 @@
 
 #include <torch/csrc/Device.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
+#include <c10/core/MemoryFormat.h>
 #include <c10/macros/Macros.h>
 #include <torch/extension.h>
 
@@ -124,6 +125,14 @@ at::Tensor custom_empty_strided(c10::IntArrayRef size, c10::IntArrayRef stride, 
   return  at::detail::empty_strided_generic(size, stride, &global_custom_alloc, private_use_ks, dtype);
 }
 
+at::Tensor custom_empty(c10::IntArrayRef size, c10::optional<at::ScalarType> dtype_opt, c10::optional<at::Layout> layout_opt, c10::optional<at::Device> device_opt, c10::optional<bool> pin_memory_opt, c10::optional<c10::MemoryFormat> optional_memory_format) {
+  op_counter += 1;
+
+  constexpr c10::DispatchKeySet private_use_ks(c10::DispatchKey::PrivateUse1);
+  auto dtype = c10::dtype_or_default(dtype_opt);
+  return  at::detail::empty_generic(size, &global_custom_alloc, private_use_ks, dtype, optional_memory_format);
+}
+
 // This macro does the heavy lifting.
 // With TORCH_LIBRARY_IMPL, you can register custom kernels for your backend.
 // For open registration, we're registering all of our kernels to the PrivateUse1 dispatch key.
@@ -140,6 +149,7 @@ TORCH_LIBRARY_IMPL(aten, PrivateUse1, m) {
   m.impl("fill_.Scalar", &custom_fill__scalar);
   m.impl("_copy_from", &custom__copy_from);
   m.impl("empty_strided", &custom_empty_strided);
+  m.impl("empty.memory_format", &custom_empty);
 }
 
 // This basic implementation doesn't bother dealing with different device indices
