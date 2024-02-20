@@ -27,21 +27,7 @@ from torch._inductor.codegen.common import (
     register_backend_for_device,
 )
 from torch.testing._internal.common_utils import IS_MACOS
-
-try:
-    try:
-        from . import test_torchinductor
-    except ImportError:
-        import test_torchinductor
-except unittest.SkipTest:
-    if __name__ == "__main__":
-        sys.exit(0)
-    raise
-
-
-run_and_get_cpp_code = test_torchinductor.run_and_get_cpp_code
-TestCase = test_torchinductor.TestCase
-
+from torch.testing._internal.common_utils import TestCase
 
 def remove_build_path():
     if sys.platform == "win32":
@@ -132,6 +118,9 @@ class ExtensionBackendTests(TestCase):
 
         def reduce_sum(a, b):
             return torch.sum(a + b, axis=-1)
+
+        def custom_matmul(a, b):
+            return torch.matmul(a, b)
 
         metrics.reset()
         opt_fn = torch.compile()(reduce_sum)
