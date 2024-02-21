@@ -686,8 +686,8 @@ class riscv_parser:
         self.store_tile_info = {}
 
     def load_file(self, name, loop_info={}, load_tile_info={}, store_tile_info={}):
-        f = open(name)
-        asm_lines = f.readlines()[1:]
+        with open(name) as file:
+            asm_lines = file.readlines()[1:]
 
         label = ""
         for asm_line in asm_lines:
