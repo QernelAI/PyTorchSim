@@ -637,12 +637,12 @@ public:
           }
         }
       }
-
+      /**/
       if (Propagate) {
         NewWorkList.push_back(Inst);
-        for (auto *User : Inst->users())
-          if (ShapeMap.count(User) == 0)
-            WorkList.push_back(cast<Instruction>(User));
+        // for (auto *User : Inst->users())
+        //   if (ShapeMap.count(User) == 0)
+        //     WorkList.push_back(cast<Instruction>(User));
       }
     }
 
