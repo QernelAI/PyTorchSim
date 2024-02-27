@@ -23,6 +23,49 @@ class LLVMTemplateKernel(Kernel):
         super().__init__(LLVMKernelArgs())
         self.kernel_name = kernel_name
         self.named_nodes = {}
+        self.loop_info = {}
+        self.load_desc = {}
+        self.store_desc = {}
+
+    def load_matrix(self, row, col, dtype, stype, ptr, base_addr, data_size):
+        suffix = f"v{row*col}{stype}.p0{stype}"
+        argument = f"(ptr {ptr}, i64 {col}, i1 0, i32 {row}, i32 {col})"
+        code = f"<{row*col} x {dtype}> @llvm.matrix.column.major.load.{suffix} {argument}"
+
+        self.add_desc(True, base_addr, data_size, [col, 1], [row, col])
+        return f"call {code}"
+
+    def store_matrix(self, row, col, dtype, stype, ptr, vec, base_addr, data_size):
+        suffix = f"v{row*col}{stype}.p0{stype}"
+        argument = f"(<{row*col} x {dtype}> {vec}, ptr {ptr}, i64 {col}, i1 0, i32 {row}, i32 {col})"
+        code = f"void @llvm.matrix.column.major.store.{suffix} {argument}"
+
+        self.add_desc(False, base_addr, data_size, [col, 1], [row, col])
+        return f"call {code}"
+
+    def add_desc(self, is_load, base_addr, element_size, stride_list, tile_size):
+        if is_load:
+            key = f"load{len(self.load_desc)}"
+            self.load_desc[key] = {
+                "base_addr": base_addr,
+                "element_size": element_size,
+                "stride_list": stride_list,
+                "tile_size": tile_size,
+                "tile_stride": stride_list[-2:]
+            }
+        else:
+            key = f"store{len(self.store_desc)}"
+            self.store_desc[key] = {
+                "base_addr": base_addr,
+                "element_size": element_size,
+                "stride_list": stride_list,
+                "tile_size": tile_size,
+                "tile_stride": stride_list[-2:]
+            }
+
+    def add_loop_info(self, mat_size, tile_size):
+        for idx, (loop_size, stride) in enumerate(zip(mat_size, tile_size)):
+            self.loop_info[f"index{idx}"] = [0, loop_size, stride]
 
     def meta_kernel(self):
         wrapper = V.graph.wrapper_code
@@ -31,9 +74,9 @@ class LLVMTemplateKernel(Kernel):
         wrapper.add_import_once(f'\nfrom extension_codecache import CustomAsyncCompile')
         wrapper.add_import_once(f'\ncustom_async_compile = CustomAsyncCompile()')
         # Dump loop and load/store information
-        wrapper.add_import_once(f"loop_info = dict()")
-        wrapper.add_import_once(f"load_tile_info = dict()")
-        wrapper.add_import_once(f"store_tile_info = dict()")
+        wrapper.add_import_once(f"loop_info = {self.loop_info}")
+        wrapper.add_import_once(f"load_tile_info = {self.load_desc}")
+        wrapper.add_import_once(f"store_tile_info = {self.store_desc}")
         wrapper.add_import_once(f"arg_attributes = {arg_attributes}")
 
     def call_kernel(self):

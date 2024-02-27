@@ -36,7 +36,7 @@ for.body4:
 
 for.cond.cleanup7:
   %add.ptr22 = getelementptr inbounds {{ DATA_TYPE }}, ptr %add.ptr20, i64 %indvars.iv47
-  call void @llvm.matrix.column.major.store.v{{ TILE_M * TILE_N }}{{ DATA_STYPE }}.p0{{ DATA_STYPE }}(<{{ TILE_M * TILE_N }} x {{ DATA_TYPE }}> %call18, ptr %add.ptr22, i64 {{ TILE_N }}, i1 0, i32 {{ TILE_M }}, i32 {{ TILE_N }})
+  {{ kernel.store_matrix(TILE_M, TILE_N, DATA_TYPE, DATA_STYPE, "%add.ptr22", "%call18", "W", DATA_SIZE) }}
   %indvars.iv.next48 = add nuw nsw i64 %indvars.iv47, {{ TILE_N }}
   %cmp2 = icmp ult i64 %indvars.iv47, {{ N - TILE_N }}
   br i1 %cmp2, label %for.body4, label %for.cond.cleanup3
@@ -44,10 +44,10 @@ for.cond.cleanup7:
 for.body8:
   %indvars.iv = phi i64 [ 0, %for.body4 ], [ %indvars.iv.next, %for.body8 ]
   %add.ptr10 = getelementptr inbounds {{ DATA_TYPE }}, ptr %add.ptr, i64 %indvars.iv
-  %call = call <{{ TILE_M * TILE_K}} x {{ DATA_TYPE }}> @llvm.matrix.column.major.load.v{{ TILE_M * TILE_K }}{{ DATA_STYPE }}.p0{{ DATA_STYPE }}(ptr %add.ptr10, i64 {{ TILE_K }}, i1 0, i32 {{ TILE_M }}, i32 {{ TILE_K }})
+  %call = {{ kernel.load_matrix(TILE_M, TILE_K, DATA_TYPE, DATA_STYPE, "%add.ptr10", "X", DATA_SIZE)}}
   %2 = mul nuw nsw i64 %indvars.iv, {{ N }}
   %gep = getelementptr inbounds {{ DATA_TYPE }}, ptr %invariant.gep, i64 %2
-  %call16 = call <{{ TILE_N * TILE_K}} x {{ DATA_TYPE }}> @llvm.matrix.column.major.load.v{{ TILE_N * TILE_K }}{{ DATA_STYPE }}.p0{{ DATA_STYPE }}(ptr %gep, i64 {{ TILE_N }}, i1 0, i32 {{ TILE_K }}, i32 {{ TILE_K }})
+  %call16 = {{ kernel.load_matrix(TILE_K, TILE_N, DATA_TYPE, DATA_STYPE, "%gep", "Y", DATA_SIZE)}}
   %call17 = call <{{ TILE_M * TILE_N }} x {{ DATA_TYPE }}> @llvm.matrix.multiply.v{{ TILE_M*TILE_K }}{{ DATA_STYPE }}.v{{ TILE_K*TILE_N }}{{ DATA_STYPE }}.v{{ TILE_M*TILE_N }}{{ DATA_STYPE }}(<{{ TILE_M * TILE_K}} x {{ DATA_TYPE }}> %call, <{{ TILE_N * TILE_K}} x {{ DATA_TYPE }}> %call16, i32 {{ TILE_M }}, i32 {{ TILE_K }}, i32 {{ TILE_N }})
   %tmp_acc = load <{{ TILE_M * TILE_N }} x {{ DATA_TYPE }}>, ptr @sram_accum, align 64
   %call18 = fadd <{{ TILE_M * TILE_N }} x {{ DATA_TYPE }} > %call17, %tmp_acc
@@ -87,6 +87,7 @@ class LLVMGemmTemplate(LLVMTemplate):
 
         options = dict(
             KERNEL_NAME=self.name,
+            kernel=kernel,
             M=X.get_size()[0],
             N=W.get_size()[1],
             K=X.get_size()[1],
@@ -98,5 +99,6 @@ class LLVMGemmTemplate(LLVMTemplate):
             DATA_SIZE=4,
         )
         code = self._template_from_string(GEMM_TEMPLATE).render(**options)
+        kernel.add_loop_info([options["M"], options["N"], options["K"]], [options["TILE_M"], options["TILE_N"], options["TILE_K"]])
         kernel.def_kernel(inputs=[X, W, Bias], outputs=[Y], names_str="X, W, Bias, Y", input_reorder=self.input_reorder)
         return code
