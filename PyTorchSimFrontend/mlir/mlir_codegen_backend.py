@@ -17,6 +17,47 @@ import extension_codecache
 
 from . import mlir_common
 
+def reduction_init(reduction_type, dtype):
+    if dtype in cpp.DTYPE_LOWP_FP:
+        # Since load promotes all half-precision inputs to float, the initial
+        # constant for reduction must be promoted as well
+        dtype = torch.float32
+    if reduction_type in ("xor_sum", "sum", "any"):
+        return "0.0"
+    if reduction_type == "prod":
+        return "1.0"
+    if reduction_type in {"max", "argmax"}:
+        return "0.0"
+    if reduction_type in {"min", "argmin"}:
+        return "0.0"
+    raise AssertionError(reduction_type)
+
+def reduction_combine(reduction_type, start_value, vector_value, tile_size=64):
+    if reduction_type == "sum":
+        return f"arith.addf %{start_value}, %{vector_value} : vector<{tile_size}xf32>"
+    if reduction_type == "prod":
+        return f"arith.mulf %{start_value}, %{vector_value} : vector<{tile_size}xf32>"
+    if reduction_type == "xor_sum":
+        raise NotImplementedError() # TODO: implement
+    if reduction_type == "any":
+        raise NotImplementedError()
+    if reduction_type in ("min", "max"):
+        raise NotImplementedError()
+    if reduction_type == "welford_reduce":
+        raise NotImplementedError()
+    if reduction_type == "welford_combine":
+        raise NotImplementedError()
+    raise AssertionError(reduction_type)
+
+def reduction_combine_vec(reduction_type, vector_value, tile_size=64):
+    if reduction_type == "sum":
+        return f"vector.reduction <add>, %{vector_value} : vector<{tile_size}xf32> into f32"
+    if reduction_type == "prod":
+        return f"vector.reduction <mul>, %{vector_value} : vector<{tile_size}xf32> into f32"
+    if reduction_type in ("min", "max"):
+        raise NotImplementedError()
+    raise AssertionError(reduction_type)
+
 class ExtensionWrapperCodegen(wrapper.WrapperCodeGen):
     def __init__(self):
         super().__init__()
@@ -78,9 +119,9 @@ class ExtensionOverrides(common.OpOverrides):
     def exp(operand, tile_size=16):
         return f'math.exp %{operand} : vector<{tile_size}xf32>'
 
-SYMPY_TO_MLIR = {
-    sympy.core.mul.Mul: "arith.mulf",
-    sympy.core.add.Add: "arith.addf",
+RTYPE_TO_MLIR = {
+    "sum": "add",
+    "prod": "mul",
 }
 
 class MLIRKernel(mlir_common.BaseMLIRKernel):
@@ -95,73 +136,77 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         self.reduction_depth = None
         self.reduction_prefix = IndentedBuffer()
         self.reduction_suffix = IndentedBuffer()
+        self.global_vars = IndentedBuffer()
         self.reduction_vars = {}
         self.reduction_cse = common.CSE(self.newvar_prefix, self.suffix, name_prefix="tmp_acc")
-        self.index_cse = common.CSE(self.newvar_prefix, self.suffix, name_prefix="tmp_idx")
+        self.iterator_cse = common.CSE(self.newvar_prefix, self.suffix, name_prefix="iter")
+        self.init_cse = common.CSE(self.newvar_prefix, self.suffix, name_prefix="init")
+        self.init_vec_cse = common.CSE(self.newvar_prefix, self.suffix, name_prefix="init_vec")
+        self.map_cse = common.CSE("#", self.suffix, name_prefix="map")
         self.loop_info = {}
         self.load_desc = {}
         self.store_desc = {}
+        self.tiling_indices = [0, 1]
 
-    def get_constant_vector(self, expr):
-        constant_vector = [int(expr.coeff(var)) for var in self.itervars]
-        return constant_vector
-
-    def add_desc(self, is_load, base_addr, element_size, stride_list, tile_size):
-        if is_load:
-            key = f"load{len(self.load_desc)}"
-            self.load_desc[key] = {
-                "base_addr": base_addr,
-                "element_size": element_size,
-                "stride_list": stride_list,
-                "tile_size": tile_size,
-                "tile_stride": stride_list[-2:]
-            }
-        else:
-            key = f"store{len(self.store_desc)}"
-            self.store_desc[key] = {
-                "base_addr": base_addr,
-                "element_size": element_size,
-                "stride_list": stride_list,
-                "tile_size": tile_size,
-                "tile_stride": stride_list[-2:]
-            }
-
-    def depth_first_traverse(self, expr, buffer, cse):
-        child_var = []
-        for arg in expr.args:
-            child_var.append(self.depth_first_traverse(arg, buffer, cse))
-
-        while len(child_var) >= 3:
-            first = child_var.pop(0)
-            second = child_var.pop(0)
-            first_prefix = "" if first.is_number else "%"
-            second_prefix = "" if second.is_number else "%"
-
-            line = f"{SYMPY_TO_MLIR[expr.func]} nsw i64 {first_prefix}{first}, {second_prefix}{second}"
-            var = cse.generate(buffer, line)
-            var = sympy.symbols(f"{var}")
-            child_var.append(var)
-
+    def parse_indices(self, expr):
         if len(expr.args) == 0:
             return expr
-
-        elif len(child_var) == 2:
-            first = child_var[1]
-            second = child_var[0]
-            first_prefix = "" if first.is_number else "%"
-            second_prefix = "" if second.is_number else "%"
-            line = f"{SYMPY_TO_MLIR[expr.func]} nsw i64 {first_prefix}{first}, {second_prefix}{second}"
-            var = cse.generate(buffer, line)
-            var = sympy.symbols(f"{var}")
-            return var
-        else:
-            raise Exception()
+        pattern = r'index\d+'
+        indices = re.findall(pattern, str(expr))
+        args = ", ".join(map(str, indices))
+        self.map_cse.generate(self.global_vars, f"affine_map<({args}) -> ({expr})>")
+        args = ", ".join([f"%{i}" for i in indices])
+        index = self.cse.generate(self.loads, f"affine.apply #map0({args})")
+        return index
 
     def codegen_nodes(self, nodes, kernel_name):
         _, (group, reduction_group) = max(
             nodes, key=lambda x: int(x.is_reduction())
         ).group
 
+        def select_tiling_indices():
+            all_index = []
+            for node in nodes:
+                rw = dependencies.extract_read_writes(node._body, *node._sizes)
+                all_index += [dep.index for dep in itertools.chain(rw.reads, rw.writes)]
+            contig_vars = set()
+            contig_vars_list = []
+            non_contig_stride_const = set()
+            non_contig_stride_other = set()
+            for index in all_index:
+                for var in index.free_symbols:
+                    if not re.search(r"^d\d+$", var.name):
+                        continue
+                    stride = cpp.stride_at(var, index)
+                    if stride == 1:
+                        contig_vars.add(int(var.name[1:]))
+                        contig_vars_list.append(int(var.name[1:]))
+                    elif all(s.name.startswith("s") for s in stride.free_symbols):
+                        non_contig_stride_const.add(int(var.name[1:]))
+                    else:
+                        non_contig_stride_other.add(int(var.name[1:]))
+            contig_only = (
+                contig_vars - non_contig_stride_const - non_contig_stride_other
+            )
+            if len(contig_vars) == 0:
+                # no contiguous vars
+                return [len(self.itervars) - 1]
+            if contig_only:
+                return sorted(contig_only)[-1:]
+            contig_and_const_stride = (
+                contig_vars & non_contig_stride_const
+            ) - non_contig_stride_other
+            contig_vars_sorted = sorted(contig_vars)
+            if (
+                len(contig_vars_sorted) == 2
+                and contig_vars_sorted[-1] in contig_and_const_stride
+                and contig_vars_sorted[-1] == len(self.itervars) - 1
+            ):
+                return contig_vars_sorted
+            return sorted(contig_vars_sorted, key=contig_vars_list.count)[-1:]
+
+        self.set_ranges(group, reduction_group)
+        self.tiling_indices = select_tiling_indices()
         _, _, _, self.buffer_types = self.args.mlir_argdefs()
         with self as kernel:
             for node in nodes:
@@ -174,39 +219,78 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
 
     def load(self, name: str, index: sympy.Expr):
         index = self.rename_indexing(index)
-        index = self.depth_first_traverse(index, self.loads, self.index_cse)
+        indices = self.parse_indices(index)
         var = self.args.input(name)
         dtype = V.graph.get_dtype(name)
         type_name = mlir_common.DTYPE_TO_MLIR[dtype]
-        line = f"affine.vector_load %{var}[%{index}] : memref<{self.buffer_types[name][1]}x{type_name}>, vector<{self.tile_size}x{type_name}>"
+        line = f"affine.vector_load %{var}[%{indices}] : memref<{self.buffer_types[name][1]}x{type_name}>, vector<{self.tile_size}x{type_name}>"
         return self.cse.generate(self.loads, line)
 
     def store(self, name: str, index: sympy.Expr, value, *args, **kwargs):
         index = self.rename_indexing(index)
-        index = self.depth_first_traverse(index, self.stores, self.index_cse)
+        indices = self.parse_indices(index)
         var = self.args.output(name)
         dtype = V.graph.get_dtype(name)
         type_name = mlir_common.DTYPE_TO_MLIR[dtype]
-        line = f"affine.vector_store %{value}, %{var}[%{index}] : memref<{self.buffer_types[name][1]}x{type_name}>, vector<{self.tile_size}x{type_name}>"
+        line = f"affine.vector_store %{value}, %{var}[%{indices}] : memref<{self.buffer_types[name][1]}x{type_name}>, vector<{self.tile_size}x{type_name}>"
         self.cse.generate(self.stores, line, assignment = False)
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
-        raise NotImplementedError()
+        argmax_or_argmin = reduction_type in {"argmax", "argmin"}
+        if argmax_or_argmin:
+            raise NotImplementedError() #TODO: argmin, argmax
+        else:
+            reduction_key = src_dtype, reduction_type, value
+            acc = self.reduction_cse.generate(
+                self.loads, f"reduction {reduction_key}", write=False
+            )
+            iterator = self.iterator_cse.generate(
+                self.loads, f"reduction {reduction_key}", write=False
+            )
+            init = self.init_cse.generate(
+                self.loads, f"reduction {reduction_key}", write=False
+            )
+            type_name = mlir_common.DTYPE_TO_MLIR[dtype]
+            self.reduction_vars[acc] = (reduction_type, iterator, init, type_name)
+            self.reduction_prefix.writeline(f"%{init} = arith.constant {reduction_init(reduction_type, dtype)} : {type_name}")
+            if self.tiling_idx >= self.reduction_depth: # horizontal reduction
+                out = self.cse.generate(self.compute, reduction_combine_vec(reduction_type, value, tile_size=self.tile_size))
+                out = self.cse.generate(self.compute, f"arith.{RTYPE_TO_MLIR[reduction_type]}f %{iterator}, %{out} : {type_name}")
+                self.cse.generate(self.stores, f"affine.yield %{out} : {type_name}", assignment = False)
+            else:
+                init_vec = self.init_vec_cse.generate(
+                    self.loads, f"reduction {reduction_key}", write=False
+                )
+                self.reduction_prefix.writeline(f"%{init_vec} = vector.broadcast %{init} : {type_name} to vector<{self.tile_size}x{type_name}>")
+                out = self.cse.generate(self.compute, reduction_combine(reduction_type, iterator, value, tile_size=self.tile_size))
+                self.cse.generate(self.compute, f"affine.yield %{out} : vector<{self.tile_size}x{type_name}>", assignment = False)
+                self.reduction_vars[acc] = (reduction_type, iterator, init_vec, f"vector<{self.tile_size}x{type_name}>")
+            self.reduction_cse.reduction_cache[reduction_key] = acc
+            self.iterator_cse.reduction_cache[reduction_key] = iterator
+            self.init_cse.reduction_cache[reduction_key] = init
+        return acc
 
     def store_reduction(self, name, index, value):
-        raise NotImplementedError()
+        var = self.args.output(name)
+        dtype = V.graph.get_dtype(name)
+        type_name = mlir_common.DTYPE_TO_MLIR[dtype]
+        index = self.rename_indexing(index)
+        indices = self.parse_indices(index)
+        if self.tiling_idx >= self.reduction_depth: # horizontal reduction
+            self.cse.generate(self.reductions_suffix, f"affine.store %{value}, %{var}[%{indices}] : memref<{self.buffer_types[name][1]}x{type_name}>", assignment = False)
+        else:
+            self.cse.generate(self.reductions_suffix, f"affine.vector_store %{value}, %{var}[%{indices}] : memref<{self.buffer_types[name][1]}x{type_name}>, vector<{self.tile_size}x{type_name}>", assignment = False)
 
     def codegen_loops(self):
         code = common.BracesBuffer()
         # Loop body part
-        loops = [LoopLevel(var, size, idx, tile_size=self.tile_size) for idx, (var, size) in enumerate(zip(self.itervars, self.ranges))]
+        loops = [LoopLevel(var, size, idx, tile_size=1) for idx, (var, size) in enumerate(zip(self.itervars, self.ranges))]
+        loops[self.tiling_idx].tile_size = self.tile_size #innermost vector tile
         loops, reductions = [LoopNest(loops[: self.reduction_depth]),
                              LoopNest(loops[self.reduction_depth :])]
         reductions.mark_reduction(self.reduction_vars)
 
         with contextlib.ExitStack() as stack:
-            if self.reduction_vars:
-                raise NotImplementedError()
             for loop in loops.loops:
                 loop_lines = loop.lines()
                 if loop_lines is None:
@@ -216,6 +300,12 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
                 with contextlib.ExitStack() as stack_outer:
                     code.splice(self.reduction_prefix)
                     with contextlib.ExitStack() as stack:
+                        for reduction in reductions.loops:
+                            reduction_lines = reduction.lines()
+                            if reduction_lines is None:
+                                return
+                            code.writelines(reduction_lines)
+                            stack.enter_context(code.indent())
                         code.splice(self.loads)
                         code.splice(self.compute)
                         code.splice(self.stores)
@@ -252,7 +342,8 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         arg_defs = ",\n".ljust(25).join(arg_defs)
         code = common.BracesBuffer()
 
-        # Todo. kernel name custom
+        code.splice(self.global_vars)
+        #TODO:. kernel name custom
         kernel_decl_name = kernel_name if V.graph.cpp_wrapper else "kernel"
         code.writeline(f'func.func @{kernel_decl_name}({arg_defs})')
         with code.indent():
@@ -274,6 +365,20 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
             self.ranges = [self.rename_indexing(x) for x in self.call_ranges]
             self.itervars = [sympy.Symbol(f"index{n}") for n in range(len(self.ranges))]
             self.reduction_depth = len(lengths)
+        # do vertical reduction as the tail loop
+        if len(self.itervars) > 1:
+            if len(self.tiling_indices) == 1:
+                self.tiling_idx = self.tiling_indices[0]
+                self.outer_idx = None
+            else:
+                self.outer_idx, self.tiling_idx = (
+                    self.tiling_indices
+                    if self.tiling_indices[1] < self.reduction_depth
+                    else reversed(self.tiling_indices)
+                )
+        else:
+            self.tiling_idx = self.tiling_indices[0]
+            self.outer_idx = None
         return (
             self.itervars[: self.reduction_depth],
             self.itervars[self.reduction_depth :],
@@ -290,7 +395,13 @@ class LoopLevel:
 
     def lines(self):
         loop_index = self.idx
-        line = f"affine.for %index{loop_index} = {self.start} to {self.size} step {self.tile_size}"
+        if self.reduction_vars:
+            acc = ', '.join([acc.name for acc in self.reduction_vars.keys()])
+            args = ', '.join([f"%{iter.name} = %{init.name}" for (_, iter, init, _) in self.reduction_vars.values()])
+            dtype = ', '.join([f"{dtype}" for (_, _, _, dtype) in self.reduction_vars.values()])
+            line = f"%{acc} = affine.for %index{loop_index} = {self.start} to {self.size} step {self.tile_size} iter_args({args}) -> ({dtype})"
+        else:
+            line = f"affine.for %index{loop_index} = {self.start} to {self.size} step {self.tile_size}"
 
         return [line]
 

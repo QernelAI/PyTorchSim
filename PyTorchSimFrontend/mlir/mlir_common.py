@@ -102,9 +102,7 @@ class BaseMLIRKernel(common.Kernel):
         self.reductions_suffix = IndentedBuffer()
         self.cse = common.CSE(self.newvar_prefix, self.suffix)
         # Defaulat tile setting
-        self.tile_row = 2
-        self.tile_col = 2
-        self.tile_size = self.tile_row * self.tile_col
+        self.tile_size = 4
 
     def load(self, name: str, index: sympy.Expr):
         raise NotImplementedError()
