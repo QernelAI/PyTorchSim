@@ -149,6 +149,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         self.init_cse = common.CSE(self.newvar_prefix, self.suffix, name_prefix="init")
         self.init_vec_cse = common.CSE(self.newvar_prefix, self.suffix, name_prefix="init_vec")
         self.map_cse = common.CSE("#", self.suffix, name_prefix="map")
+        self.spad_cse = common.CSE("memref.global @", self.suffix, name_prefix="spad")
         self.loop_info = {}
         self.load_desc = {}
         self.store_desc = {}
@@ -231,11 +232,13 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         dtype = V.graph.get_dtype(name)
         type_name = mlir_common.DTYPE_TO_MLIR[dtype]
         tile_size = min(self.tile_size, self.buffer_types[name][1])
-        code = f"affine.dma_start %{var}[{prefix}{indices}], %{name}_spad[0], %{name}_tag[0], %c{tile_size}, %c1, %c{tile_size} : memref<{self.buffer_types[name][1]}x{type_name}>, memref<{self.tile_size}x{type_name}, 1>, memref<1xi32>"
+        self.spad_cse.generate(self.global_vars, f"memref.global @{name}_spad : memref<{tile_size}x{type_name}, 1>", assignment = False)
+        buffer = self.cse.generate(self.loads, f"memref.get_global @{name}_spad : memref<{tile_size}x{type_name}, 1>")
+        code = f"affine.dma_start %{var}[{prefix}{indices}], %{buffer}[0], %{name}_tag[0], %c{tile_size}, %c1, %c{tile_size} : memref<{self.buffer_types[name][1]}x{type_name}>, memref<{self.tile_size}x{type_name}, 1>, memref<1xi32>"
         self.cse.generate(self.loads, code, assignment = False)
         operation = "affine.vector_load" if tile_size > 1 else "affine.load"
         shape = f", vector<{tile_size}x{type_name}>" if tile_size > 1 else ""
-        line = f"{operation} %{name}_spad[0] : memref<{tile_size}x{type_name}, 1>{shape}"
+        line = f"{operation} %{buffer}[0] : memref<{tile_size}x{type_name}, 1>{shape}"
         out = self.cse.generate(self.loads, line)
         self.tile_info[out] = tile_size, dtype
         return out
@@ -248,11 +251,13 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         dtype = V.graph.get_dtype(name)
         type_name = mlir_common.DTYPE_TO_MLIR[dtype]
         tile_size = min(self.tile_size, self.buffer_types[name][1])
+        self.spad_cse.generate(self.global_vars, f"memref.global @{name}_spad : memref<{tile_size}x{type_name}, 1>", assignment = False)
+        buffer = self.cse.generate(self.stores, f"memref.get_global @{name}_spad : memref<{tile_size}x{type_name}, 1>")
         operation = "affine.vector_store" if tile_size > 1 else "affine.store"
         shape = f", vector<{tile_size}x{type_name}>" if tile_size > 1 else ""
-        line = f"{operation} %{value}, %{name}_spad[0] : memref<{tile_size}x{type_name}, 1>{shape}"
+        line = f"{operation} %{value}, %{buffer}[0] : memref<{tile_size}x{type_name}, 1>{shape}"
         self.cse.generate(self.stores, line, assignment = False)
-        code = f"affine.dma_start %{name}_spad[0], %{var}[{prefix}{indices}], %{name}_tag[0], %c{tile_size}, %c1, %c{tile_size} : memref<{self.tile_size}x{type_name}, 1>, memref<{self.buffer_types[name][1]}x{type_name}>, memref<1xi32>"
+        code = f"affine.dma_start %{buffer}[0], %{var}[{prefix}{indices}], %{name}_tag[0], %c{tile_size}, %c1, %c{tile_size} : memref<{self.tile_size}x{type_name}, 1>, memref<{self.buffer_types[name][1]}x{type_name}>, memref<1xi32>"
         self.cse.generate(self.stores, code, assignment = False)
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
@@ -309,7 +314,6 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         for name, (_, dtype, size) in arg_attributes.items():
             tile_size = min(self.tile_size, size)
             type_name = mlir_common.DTYPE_TO_MLIR[dtype]
-            code.writeline(f"%{name}_spad = memref.alloc() : memref<{tile_size}x{type_name}, 1>")
             code.writeline(f"%{name}_tag = memref.alloc() : memref<1xi32>")
             tiles.add(tile_size)
         for tile_size in tiles:
