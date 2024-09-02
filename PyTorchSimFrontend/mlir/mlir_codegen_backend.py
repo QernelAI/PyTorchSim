@@ -231,9 +231,11 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         dtype = V.graph.get_dtype(name)
         type_name = mlir_common.DTYPE_TO_MLIR[dtype]
         tile_size = min(self.tile_size, self.buffer_types[name][1])
+        code = f"affine.dma_start %{var}[{prefix}{indices}], %{name}_spad[0], %{name}_tag[0], %c{tile_size}, %c1, %c{tile_size} : memref<{self.buffer_types[name][1]}x{type_name}>, memref<{self.tile_size}x{type_name}, 1>, memref<1xi32>"
+        self.cse.generate(self.loads, code, assignment = False)
         operation = "affine.vector_load" if tile_size > 1 else "affine.load"
         shape = f", vector<{tile_size}x{type_name}>" if tile_size > 1 else ""
-        line = f"{operation} %{var}[{prefix}{indices}] : memref<{self.buffer_types[name][1]}x{type_name}>{shape}"
+        line = f"{operation} %{name}_spad[0] : memref<{tile_size}x{type_name}, 1>{shape}"
         out = self.cse.generate(self.loads, line)
         self.tile_info[out] = tile_size, dtype
         return out
@@ -248,8 +250,10 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         tile_size = min(self.tile_size, self.buffer_types[name][1])
         operation = "affine.vector_store" if tile_size > 1 else "affine.store"
         shape = f", vector<{tile_size}x{type_name}>" if tile_size > 1 else ""
-        line = f"{operation} %{value}, %{var}[{prefix}{indices}] : memref<{self.buffer_types[name][1]}x{type_name}>{shape}"
+        line = f"{operation} %{value}, %{name}_spad[0] : memref<{tile_size}x{type_name}, 1>{shape}"
         self.cse.generate(self.stores, line, assignment = False)
+        code = f"affine.dma_start %{name}_spad[0], %{var}[{prefix}{indices}], %{name}_tag[0], %c{tile_size}, %c1, %c{tile_size} : memref<{self.tile_size}x{type_name}, 1>, memref<{self.buffer_types[name][1]}x{type_name}>, memref<1xi32>"
+        self.cse.generate(self.stores, code, assignment = False)
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
         argmax_or_argmin = reduction_type in {"argmax", "argmin"}
@@ -297,6 +301,21 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
             self.cse.generate(self.reductions_suffix, f"affine.store %{value}, %{var}[{prefix}{indices}] : memref<{self.buffer_types[name][1]}x{type_name}>", assignment = False)
         else:
             self.cse.generate(self.reductions_suffix, f"affine.vector_store %{value}, %{var}[{prefix}{indices}] : memref<{self.buffer_types[name][1]}x{type_name}>, vector<{self.tile_size}x{type_name}>", assignment = False)
+
+    def codegen_init(self):
+        code = IndentedBuffer()
+        _, _, arg_attributes, _ = self.args.mlir_argdefs()
+        tiles = set()
+        for name, (_, dtype, size) in arg_attributes.items():
+            tile_size = min(self.tile_size, size)
+            type_name = mlir_common.DTYPE_TO_MLIR[dtype]
+            code.writeline(f"%{name}_spad = memref.alloc() : memref<{tile_size}x{type_name}, 1>")
+            code.writeline(f"%{name}_tag = memref.alloc() : memref<1xi32>")
+            tiles.add(tile_size)
+        for tile_size in tiles:
+            code.writeline(f"%c{tile_size} = arith.constant {tile_size} : index")
+        code.writeline(f"%c1 = arith.constant 1 : index") # for stride TODO: matrix dma stride should be col_size
+        return code
 
     def codegen_loops(self):
         code = common.BracesBuffer()
@@ -368,6 +387,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
             for old, new in self.args.aliases():
                 code.writeline(f"auto {old} = {new};")
             # Loop body part
+            code.splice(self.codegen_init())
             code.splice(self.codegen_loops())
         return code
 
