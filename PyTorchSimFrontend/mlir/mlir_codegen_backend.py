@@ -530,9 +530,7 @@ class MLIRScheduling(BaseScheduling):
             wrapper.src_to_kernel[src_code] = kernel_name
 
             codecache_def = IndentedBuffer()
-            codecache_def.writeline("custom_async_compile.mlir('''")
-            codecache_def.splice(src_code)
-            codecache_def.writeline("''', ")
+            codecache_def.writeline(f"custom_async_compile.mlir('''{src_code}''', ")
             codecache_def.writeline("loop_info=loop_info,")
             codecache_def.writeline("load_tile_info=load_tile_info,")
             codecache_def.writeline("store_tile_info=store_tile_info,")

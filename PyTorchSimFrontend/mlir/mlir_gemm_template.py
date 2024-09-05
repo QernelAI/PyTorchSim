@@ -1,3 +1,4 @@
+import os
 from typing import List, Optional, cast
 
 from PyTorchSimFrontend.mlir.mlir_template import MLIRTemplate
@@ -5,26 +6,42 @@ from PyTorchSimFrontend.mlir.mlir_template import MLIRTemplateKernel
 from torch._inductor.ir import Buffer
 from torch._inductor.ir import IRNode
 from torch._inductor.ir import ReinterpretView
+from torch._inductor.codecache import write_atomic
+import extension_codecache
 
 GEMM_TEMPLATE = r"""
+#map0 = affine_map<(d0, d1) -> (d0 * {{ K }} + d1)>
+#map1 = affine_map<(d0, d1) -> (d0 * {{ N }} + d1)>
+memref.global @X_spad : memref<{{ TILE_M }}x{{ TILE_K }}xf32, 1>
+memref.global @W_spad : memref<{{ TILE_K }}x{{ TILE_N }}xf32, 1>
+memref.global @Y_spad : memref<{{ TILE_M }}x{{ TILE_N }}xf32, 1>
+
 func.func @{{ KERNEL_NAME }}{{kernel.def_kernel(inputs=[X, W, Bias], outputs=[Y], names_str="X, W, Bias, Y", input_reorder=input_reorder)}} {
-  %zero = arith.constant 0 : index
+  %c{{ TILE_M }} = arith.constant {{ TILE_M }} : index{% if TILE_N != TILE_M %}
+  %c{{ TILE_N }} = arith.constant {{ TILE_N }} : index{% endif %}{% if TILE_K != TILE_M and TILE_K != TILE_N %}
+  %c{{ TILE_K }} = arith.constant {{ TILE_K }} : index{% endif %}
+  %c{{ TILE_M * TILE_K }} = arith.constant {{ TILE_M * TILE_K }} : index{% if TILE_M != TILE_N %}
+  %c{{ TILE_K * TILE_N }} = arith.constant {{ TILE_K * TILE_N }} : index{% endif %}{% if TILE_M != TILE_K and TILE_K != TILE_N %}
+  %c{{ TILE_M * TILE_N }} = arith.constant {{ TILE_M * TILE_N }} : index{% endif %}
   %M = arith.constant {{ M }} : index
   %N = arith.constant {{ N }} : index
   %K = arith.constant {{ K }} : index
-  %X_2d = memref.view %X[%zero][] : memref<{{M*K}}x{{DATA_STYPE}}> to memref<{{M}}x{{K}}x{{DATA_STYPE}}>
-  %W_2d = memref.view %W[%zero][] : memref<{{K*N}}x{{DATA_STYPE}}> to memref<{{K}}x{{N}}x{{DATA_STYPE}}>
-  %Y_2d = memref.view %Y[%zero][] : memref<{{M*N}}x{{DATA_STYPE}}> to memref<{{M}}x{{N}}x{{DATA_STYPE}}>
+  %X_buffer = memref.get_global @X_spad : memref<{{ TILE_M }}x{{ TILE_K }}xf32, 1>
+  %W_buffer = memref.get_global @W_spad : memref<{{ TILE_K }}x{{ TILE_N }}xf32, 1>
+  %Y_buffer = memref.get_global @Y_spad : memref<{{ TILE_M }}x{{ TILE_N }}xf32, 1>
+  %tag = memref.alloc() : memref<1xi32>
 
   affine.for %t_m = 0 to %M step {{ TILE_M }} {
     affine.for %t_n = 0 to %N step {{ TILE_N }} {
       affine.for %t_k = 0 to %K step {{ TILE_K }} {
-        %A_tile = memref.subview %X_2d[%t_m, %t_k] [{{ TILE_M }}, {{ TILE_K }}] [1, 1] : memref<?x?x{{ DATA_STYPE }}> to memref<{{ TILE_M }}x{{ TILE_K }}x{{ DATA_STYPE }}, strided<[?, 1], offset: ?>>
-        %B_tile = memref.subview %W_2d[%t_k, %t_n] [{{ TILE_K }}, {{ TILE_N }}] [1, 1] : memref<?x?x{{ DATA_STYPE }}> to memref<{{ TILE_K }}x{{ TILE_N }}x{{ DATA_STYPE }}, strided<[?, 1], offset: ?>>
-        %C_tile = memref.subview %Y_2d[%t_m, %t_n] [{{ TILE_M }}, {{ TILE_N }}] [1, 1] : memref<?x?x{{ DATA_STYPE }}> to memref<{{ TILE_M }}x{{ TILE_N }}x{{ DATA_STYPE }}, strided<[?, 1], offset: ?>>
-
-        linalg.matmul ins(%A_tile, %B_tile : memref<{{ TILE_M }}x{{ TILE_K }}x{{ DATA_STYPE }}, strided<[?, 1], offset: ?>>, memref<{{ TILE_K }}x{{ TILE_N }}x{{ DATA_STYPE }}, strided<[?, 1], offset: ?>>)
-                outs(%C_tile : memref<{{ TILE_M }}x{{ TILE_N }}x{{ DATA_STYPE }}, strided<[?, 1], offset: ?>>)
+        %index0 = affine.apply #map0(%t_m, %t_k)
+        %index1 = affine.apply #map1(%t_k, %t_n)
+        %index2 = affine.apply #map1(%t_m, %t_n)
+        affine.dma_start %X[%index0], %X_buffer[0, 0], %tag[0], %c{{ TILE_M * TILE_K }}, %K, %c{{ TILE_K }} : memref<{{ M * K }}xf32>, memref<{{ TILE_M }}x{{ TILE_K }}xf32, 1>, memref<1xi32>
+        affine.dma_start %W[%index1], %W_buffer[0, 0], %tag[0], %c{{ TILE_K * TILE_N }}, %N, %c{{ TILE_N }} : memref<{{ K * N }}xf32>, memref<{{ TILE_K }}x{{ TILE_N }}xf32, 1>, memref<1xi32>
+        linalg.matmul ins(%X_buffer, %W_buffer : memref<{{ TILE_M }}x{{ TILE_K }}x{{ DATA_STYPE }}, 1>, memref<{{ TILE_K }}x{{ TILE_N }}x{{ DATA_STYPE }}, 1>)
+                outs(%Y_buffer : memref<{{ TILE_M }}x{{ TILE_N }}x{{ DATA_STYPE }}, 1>)
+        affine.dma_start %Y_buffer[0, 0], %Y[%index2], %tag[0], %c{{ TILE_M * TILE_N }}, %c{{ TILE_N }}, %c{{ TILE_N }} : memref<{{ TILE_M }}x{{ TILE_N }}xf32, 1>, memref<{{ M * N }}xf32>, memref<1xi32>
       }
     }
   }
@@ -86,5 +103,14 @@ class MLIRGemmTemplate(MLIRTemplate):
             input_reorder = self.input_reorder
         )
         code = self._template_from_string(GEMM_TEMPLATE).render(**options)
+        write_path = extension_codecache.get_write_path(code)
+        if not os.path.exists(write_path):
+            os.makedirs(write_path)
+        write_path = os.path.join(write_path, "global_var.h")
+        header = f"float X_spad[{TILE_M}][{TILE_K}] __attribute__ ((section(\".spad\")));\n"
+        header += f"float W_spad[{TILE_K}][{TILE_N}] __attribute__ ((section(\".spad\")));\n"
+        header += f"float Y_spad[{TILE_M}][{TILE_N}] __attribute__ ((section(\".spad\")));\n"
+        if not os.path.exists(write_path):
+            write_atomic(write_path, header)
         kernel.add_loop_info([options["M"], options["N"], options["K"]], [options["TILE_M"], options["TILE_N"], options["TILE_K"]])
         return code

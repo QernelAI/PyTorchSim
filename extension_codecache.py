@@ -61,28 +61,8 @@ def llvm_compile_command(input, output):
 
 def mlir_compile_command(filename):
     return [re.sub(r"[ \n]+", " ",
-        # f"""
-        #     {TORCHSIM_LLVM_PATH}/mlir-opt -lower-affine -test-memref-to-gemmini -finalize-memref-to-llvm -convert-arith-to-llvm -convert-scf-to-cf -convert-cf-to-llvm -convert-func-to-llvm -convert-index-to-llvm -convert-vector-to-llvm -reconcile-unrealized-casts {filename}.mlir -o {filename}_llvm.mlir
-        # """,
         f"""
-        {   TORCHSIM_LLVM_PATH}/mlir-opt \
-            -eliminate-empty-tensors \
-            -empty-tensor-to-alloc-tensor \
-            -one-shot-bufferize="bufferize-function-boundaries" \
-            -convert-linalg-to-loops \
-            -convert-shape-to-std \
-            -fold-memref-alias-ops \
-            -lower-affine \
-            -finalize-memref-to-llvm \
-            -convert-arith-to-llvm \
-            -convert-scf-to-cf \
-            -convert-cf-to-llvm \
-            -convert-func-to-llvm \
-            -convert-index-to-llvm \
-            -canonicalize \
-            -split-input-file \
-            -cse \
-            {filename}.mlir -o {filename}_llvm.mlir
+            {TORCHSIM_LLVM_PATH}/mlir-opt -test-pytorchsim-to-vcix='systolic-array-size=16' -lower-affine -convert-vector-to-llvm -test-memref-to-gemmini -finalize-memref-to-llvm -convert-arith-to-llvm -convert-scf-to-cf -convert-cf-to-llvm -convert-func-to-llvm -convert-index-to-llvm -reconcile-unrealized-casts {filename}.mlir -o {filename}_llvm.mlir
         """,
     ).strip(),
             re.sub(r"[ \n]+", " ",

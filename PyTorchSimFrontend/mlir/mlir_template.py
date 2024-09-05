@@ -44,11 +44,10 @@ class MLIRTemplateKernel(Kernel):
         wrapper.add_import_once(f"arg_attributes = {arg_attributes}")
 
     def call_kernel(self, kernel_name):
-        pass
-    #     wrapper = V.graph.wrapper_code
-    #     _, call_args, _, _ = self.args.mlir_argdefs()
-    #    # generate the code to call this
-    #     wrapper.generate_kernel_call(kernel_name, call_args, cuda=False)
+        wrapper = V.graph.wrapper_code
+        _, call_args, _, _ = self.args.mlir_argdefs()
+       # generate the code to call this
+        wrapper.generate_kernel_call(kernel_name, call_args, cuda=False)
 
     def def_kernel(
         self,
