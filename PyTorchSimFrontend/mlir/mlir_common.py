@@ -118,7 +118,12 @@ class BaseMLIRKernel(common.Kernel):
         self.reductions_suffix = IndentedBuffer()
         self.cse = common.CSE(self.newvar_prefix, self.suffix)
         # Default HW setting
-        self.vector_lane = 4
+        self.vector_lane = 8
+        self.spad_info = {
+            "spad_vaddr" : 0x0B000000,
+            "spad_paddr" : 0xD0000000,
+            "spad_size" : 128 << 10 # 128KB per Lane
+        }
         self.tile_row = 4
         self.tile_size = self.tile_row * self.vector_lane
         self.tile_info = {}

@@ -45,7 +45,3 @@ class MLIRKernelCallerCodeGen(LLVMKernelCallerCodeGen):
 
             self.write_exit()
         self.writeline(self.closed_bracket)
-
-    def compile_wih_kernel(self, write_path, llvm_name, wrapper_name, binary_name):
-        link_option = "-Wl,--section-start=.spad=0x0A000000"
-        super().compile_wih_kernel(write_path, llvm_name, wrapper_name, binary_name, link_option)

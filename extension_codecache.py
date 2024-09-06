@@ -91,7 +91,7 @@ class MLIRCodeCache:
              cycle_wrapper_name="cycle_wrapper",
              cycle_binary_name="cycle_bin",
              arg_attributes={}, loop_info={},
-             load_tile_info={}, store_tile_info={}, vectorlane_size=16, **kwargs):
+             load_tile_info={}, store_tile_info={}, vectorlane_size=16, spad_info=None, **kwargs):
         write_path = get_write_path(source_code)
         key, input_path = write(source_code, "mlir", specified_dir=write_path)
 
@@ -99,6 +99,10 @@ class MLIRCodeCache:
         opt_cmd = shlex.split(cmds[0])
         translate_cmd = shlex.split(cmds[1])
         llc_cmd = shlex.split(cmds[2])
+        if spad_info is not None:
+            link_option = f"-Wl,--section-start=.spad=0x{spad_info['spad_vaddr']:x}"
+        else:
+            link_option = ""
 
         from filelock import FileLock
         lock_dir = get_lock_dir()
@@ -117,7 +121,8 @@ class MLIRCodeCache:
             if TORCHSIM_VALIDATION_MODE:
                 val_llvm_caller = MLIRKernelCallerCodeGen(TORCHSIM_VALIDATION_MODE, arg_attributes)
                 val_llvm_caller.generate_wrapper_file(write_path, validation_wrapper_name)
-                val_llvm_caller.compile_wih_kernel(write_path, key, validation_wrapper_name, validation_binary_name)
+                val_llvm_caller.compile_wih_kernel(write_path, key, validation_wrapper_name,
+                                                   validation_binary_name, link_option)
 
         return key
 
@@ -204,12 +209,13 @@ class CustomAsyncCompile(AsyncCompile):
         self.cycle_wrapper_name = "cycle_wrapper"
         self.cycle_binary_name = "cycle_binary"
 
-    def mlir(self, source_code, arg_attributes={}, vectorlane_size=16, **kwargs):
+    def mlir(self, source_code, arg_attributes={}, vectorlane_size=16, spad_info=None, **kwargs):
         def task():
             key = MLIRCodeCache.load(source_code,
                                           valdiation_wrapper_name=self.validation_binary_name,
                                           validation_binary_name=self.validation_binary_name,
-                                          arg_attributes=arg_attributes, vectorlane_size=vectorlane_size, **kwargs)
+                                          arg_attributes=arg_attributes, vectorlane_size=vectorlane_size,
+                                          spad_info=spad_info, **kwargs)
             return key
         future = self.submit(task)
 
@@ -225,7 +231,8 @@ class CustomAsyncCompile(AsyncCompile):
                 funcsim = FunctionalSimulator(result_path, key)
                 funcsim.run_spike(args, arg_attributes,
                                   os.path.join(result_path, self.validation_binary_name),
-                                  kwargs['intermediate_op'] if 'intermediate_op' in kwargs else None)
+                                  kwargs['intermediate_op'] if 'intermediate_op' in kwargs else None,
+                                  vectorlane_size=vectorlane_size, spad_info=spad_info)
         return dummy_simulator
 
     def llvm(self, source_code, arg_attributes={}, **kwargs):

@@ -63,7 +63,7 @@ class FunctionalSimulator():
                 file_path.append(os.path.join(path, f'{self.get_biggest_filename(path)}.raw'))
         return array_size, file_path
 
-    def run_spike(self, args, arg_attributes, target_binary, intermediate_op=None):
+    def run_spike(self, args, arg_attributes, target_binary, intermediate_op=None, vectorlane_size=4, spad_info=None):
         load_path = self.path
         dump_path = self.path
 
@@ -81,7 +81,13 @@ class FunctionalSimulator():
         array_size_str = ' '.join(map(str, array_size))
         file_path_str = ' '.join(file_path)
 
-        run = f'spike --isa rv64gcv /workspace/riscv-pk/build/pk {target_binary} {array_size_str} {file_path_str}'
+        # Set hardware information
+        spad_option = f"--scratchpad-base-paddr={spad_info['spad_paddr']} " + \
+            f"--scratchpad-base-vaddr={spad_info['spad_vaddr']} " + \
+            f"--scratchpad-size={spad_info['spad_size']}"
+        vectorlane_option = f"--vectorlane-size={vectorlane_size}"
+        run = f'spike --isa rv64gcv {vectorlane_option} {spad_option} /workspace/riscv-pk/build/pk {target_binary} {array_size_str} {file_path_str}'
+
         print("Spike cmd > ", run)
         run_cmd = shlex.split(run)
         try:
