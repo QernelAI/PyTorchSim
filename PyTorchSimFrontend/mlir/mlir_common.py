@@ -119,7 +119,7 @@ class BaseMLIRKernel(common.Kernel):
         self.cse = common.CSE(self.newvar_prefix, self.suffix)
         # Default HW setting
         self.vector_lane = 4
-        self.tile_row = 1
+        self.tile_row = 4
         self.tile_size = self.tile_row * self.vector_lane
         self.tile_info = {}
 
