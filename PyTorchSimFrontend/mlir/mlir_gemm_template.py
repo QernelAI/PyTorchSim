@@ -30,9 +30,13 @@ func.func @{{ KERNEL_NAME }}{{kernel.def_kernel(inputs=[X, W, Bias], outputs=[Y]
   %W_buffer = memref.get_global @W_spad : memref<{{ TILE_K }}x{{ TILE_N }}xf32, 1>
   %Y_buffer = memref.get_global @Y_spad : memref<{{ TILE_M }}x{{ TILE_N }}xf32, 1>
   %tag = memref.alloc() : memref<1xi32>
+  %v0 = arith.constant dense<0.0> : vector<{{ TILE_N }}xf32>
 
   affine.for %t_m = 0 to %M step {{ TILE_M }} {
     affine.for %t_n = 0 to %N step {{ TILE_N }} {
+      affine.for %i = 0 to {{ TILE_M}} {
+        affine.vector_store %v0, %Y_buffer[%i, 0] : memref<{{ TILE_M }}x{{ TILE_N }}xf32, 1>, vector<{{ TILE_N }}xf32>
+      }
       affine.for %t_k = 0 to %K step {{ TILE_K }} {
         %index0 = affine.apply #map0(%t_m, %t_k)
         %index1 = affine.apply #map1(%t_k, %t_n)
@@ -76,9 +80,9 @@ class MLIRGemmTemplate(MLIRTemplate):
         Y = self.output_node
         Bias = None if len(self.input_nodes) == 2 else self.input_nodes[2]
 
-        TILE_M = min(16, X.get_size()[0]) # TODO:: This should be determined by the size of the SRAM
-        TILE_N = min(16, W.get_size()[1]) # FIXME: 16 is hard-coded
-        TILE_K = min(16, X.get_size()[1])
+        TILE_M = min(4, X.get_size()[0]) # TODO:: This should be determined by the size of the SRAM
+        TILE_N = min(4, W.get_size()[1]) # FIXME: 16 is hard-coded
+        TILE_K = min(4, X.get_size()[1])
 
         W_transposed = self.is_transposed(W)
         X_transposed = self.is_transposed(X)

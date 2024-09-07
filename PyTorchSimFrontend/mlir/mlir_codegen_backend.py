@@ -553,9 +553,11 @@ class MLIRScheduling(BaseScheduling):
                 node.mark_run()
             src_code = render()
 
+        ex_kernel = self.target_kernel()
+
         with V.set_kernel_handler(kernel):
             node_schedule = [template_node, *epilogue_nodes]
             kernel.meta_kernel()
-            kernel_name = self.define_kernel(src_code, kernel.kernel_name)
+            kernel_name = self.define_kernel(src_code, kernel.kernel_name, ex_kernel.vector_lane, ex_kernel.spad_info)
             self.define_function(kernel)
         kernel.call_kernel(kernel_name)
