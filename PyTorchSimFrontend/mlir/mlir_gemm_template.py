@@ -17,12 +17,10 @@ memref.global @W_spad : memref<{{ TILE_K }}x{{ TILE_N }}xf32, 1>
 memref.global @Y_spad : memref<{{ TILE_M }}x{{ TILE_N }}xf32, 1>
 
 func.func @{{ KERNEL_NAME }}{{kernel.def_kernel(inputs=[X, W, Bias], outputs=[Y], names_str="X, W, Bias, Y", input_reorder=input_reorder)}} {
-  %c{{ TILE_M }} = arith.constant {{ TILE_M }} : index{% if TILE_N != TILE_M %}
-  %c{{ TILE_N }} = arith.constant {{ TILE_N }} : index{% endif %}{% if TILE_K != TILE_M and TILE_K != TILE_N %}
-  %c{{ TILE_K }} = arith.constant {{ TILE_K }} : index{% endif %}
-  %c{{ TILE_M * TILE_K }} = arith.constant {{ TILE_M * TILE_K }} : index{% if TILE_M != TILE_N %}
-  %c{{ TILE_K * TILE_N }} = arith.constant {{ TILE_K * TILE_N }} : index{% endif %}{% if TILE_M != TILE_K and TILE_K != TILE_N %}
-  %c{{ TILE_M * TILE_N }} = arith.constant {{ TILE_M * TILE_N }} : index{% endif %}
+  %c1 = arith.constant 1 : index
+  %c2 = arith.constant 2 : index
+  %c3 = arith.constant 3 : index
+  %c{{ TILE_K * 2 + 0}} = arith.constant {{ TILE_K * 2 + 0}} : index
   %M = arith.constant {{ M }} : index
   %N = arith.constant {{ N }} : index
   %K = arith.constant {{ K }} : index
@@ -34,18 +32,18 @@ func.func @{{ KERNEL_NAME }}{{kernel.def_kernel(inputs=[X, W, Bias], outputs=[Y]
 
   affine.for %t_m = 0 to %M step {{ TILE_M }} {
     affine.for %t_n = 0 to %N step {{ TILE_N }} {
-      affine.for %i = 0 to {{ TILE_M}} {
+      affine.for %i = 0 to {{ TILE_M }} {
         affine.vector_store %v0, %Y_buffer[%i, 0] : memref<{{ TILE_M }}x{{ TILE_N }}xf32, 1>, vector<{{ TILE_N }}xf32>
       }
       affine.for %t_k = 0 to %K step {{ TILE_K }} {
         %index0 = affine.apply #map0(%t_m, %t_k)
         %index1 = affine.apply #map1(%t_k, %t_n)
         %index2 = affine.apply #map1(%t_m, %t_n)
-        affine.dma_start %X[%index0], %X_buffer[0, 0], %tag[0], %c{{ TILE_M * TILE_K }}, %K, %c{{ TILE_K }} : memref<{{ M * K }}xf32>, memref<{{ TILE_M }}x{{ TILE_K }}xf32, 1>, memref<1xi32>
-        affine.dma_start %W[%index1], %W_buffer[0, 0], %tag[0], %c{{ TILE_K * TILE_N }}, %N, %c{{ TILE_N }} : memref<{{ K * N }}xf32>, memref<{{ TILE_K }}x{{ TILE_N }}xf32, 1>, memref<1xi32>
+        affine.dma_start %X[%index0], %X_buffer[0, 0], %tag[0], %c2, %K, %c2 : memref<{{ M * K }}xf32>, memref<{{ TILE_M }}x{{ TILE_K }}xf32, 1>, memref<1xi32>
+        affine.dma_start %W[%index1], %W_buffer[0, 0], %tag[0], %c1, %N, %c2 : memref<{{ K * N }}xf32>, memref<{{ TILE_K }}x{{ TILE_N }}xf32, 1>, memref<1xi32>
         linalg.matmul ins(%X_buffer, %W_buffer : memref<{{ TILE_M }}x{{ TILE_K }}x{{ DATA_STYPE }}, 1>, memref<{{ TILE_K }}x{{ TILE_N }}x{{ DATA_STYPE }}, 1>)
                 outs(%Y_buffer : memref<{{ TILE_M }}x{{ TILE_N }}x{{ DATA_STYPE }}, 1>)
-        affine.dma_start %Y_buffer[0, 0], %Y[%index2], %tag[0], %c{{ TILE_M * TILE_N }}, %N, %c{{ TILE_N }} : memref<{{ TILE_M }}x{{ TILE_N }}xf32, 1>, memref<{{ M * N }}xf32>, memref<1xi32>
+        affine.dma_start %Y_buffer[0, 0], %Y[%index2], %tag[0], %c3, %N, %c2 : memref<{{ TILE_M }}x{{ TILE_N }}xf32, 1>, memref<{{ M * N }}xf32>, memref<1xi32>
       }
     }
   }
