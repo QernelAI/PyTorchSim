@@ -135,6 +135,7 @@ class BaseMLIRHardwareInfo():
             "spad_paddr" : 0xD0000000,
             "spad_size" : 128 << 10 # 128KB per Lane
         }
+        self.vlen = 4
 
 class BaseMLIRKernel(common.Kernel, BaseMLIRHardwareInfo):
     newvar_prefix = "%"
@@ -149,7 +150,7 @@ class BaseMLIRKernel(common.Kernel, BaseMLIRHardwareInfo):
         self.reductions_suffix = IndentedBuffer()
         self.cse = common.CSE(self.newvar_prefix, self.suffix)
         self.tile_row = 4
-        self.tile_size = self.tile_row * self.vector_lane
+        self.tile_col = self.vector_lane * self.vlen # FIXME: tile_col is not always vector_lane * vlen
         self.tile_info = {}
 
     def load(self, name: str, index: sympy.Expr):

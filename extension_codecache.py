@@ -63,7 +63,7 @@ def llvm_compile_command(input, output):
 def mlir_compile_command(filename, vectorlane_size):
     return [re.sub(r"[ \n]+", " ",
         f"""
-            {TORCHSIM_LLVM_PATH}/mlir-opt -test-pytorchsim-to-vcix='systolic-array-size={vectorlane_size}' -lower-affine -convert-vector-to-llvm -test-memref-to-gemmini="vectorlane-stride={vectorlane_size}" -finalize-memref-to-llvm -convert-arith-to-llvm -convert-scf-to-cf -convert-cf-to-llvm -convert-func-to-llvm -convert-index-to-llvm -reconcile-unrealized-casts {filename}.mlir -o {filename}_llvm.mlir
+            {TORCHSIM_LLVM_PATH}/mlir-opt -test-pytorchsim-to-vcix='systolic-array-size={vectorlane_size}' -lower-affine -lower-vector-multi-reduction -convert-vector-to-llvm -test-memref-to-gemmini="vectorlane-stride={vectorlane_size}" -finalize-memref-to-llvm -convert-arith-to-llvm -convert-scf-to-cf -convert-cf-to-llvm -convert-func-to-llvm -convert-index-to-llvm -reconcile-unrealized-casts {filename}.mlir -o {filename}_llvm.mlir
         """,
     ).strip(),
             re.sub(r"[ \n]+", " ",
