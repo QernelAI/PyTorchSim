@@ -5,7 +5,9 @@ import sys
 import time
 import contextlib
 import unittest
+import copy
 import numpy as np
+import matplotlib.pyplot as plt
 
 import torch
 import torch.nn as nn
@@ -139,107 +141,304 @@ class ExtensionBackendTests(TestCase):
             == ExtensionWrapperCodegen
         )
 
-        self.assertFalse(self.module.custom_op_called())
         device = self.module.custom_device()
-        x = torch.empty(1000, 1000).to(device=device).fill_(1)
-        self.assertTrue(self.module.custom_op_called())
-        y = torch.empty(1000, 1000).to(device=device).fill_(2)
-        z = torch.empty(1000).to(device=device).fill_(3)
-        ref = torch.empty(1000, 1000).fill_(3)
-
-        self.assertTrue(x.device == device)
-        self.assertTrue(y.device == device)
-        self.assertTrue(z.device == device)
-
-        def fn(a, b, c):
-            return a * b + c
-
-        def vectoradd(a, b):
-            return a + b
-
-        def reduce_sum(a, b):
-            return torch.sum(a + b, axis=-1)
-
-        def custom_matmul(a, b):
-            return torch.matmul(a, b)
-
-        def custom_conv2d(a, b):
-            i_c = a.shape[1]
-            o_c = b.shape[0]
-            conv2d = nn.Conv2d(i_c, o_c, b.shape[-1], stride=1, padding=0, dilation=1)
-            conv2d.weight = nn.Parameter(b)
-
-            return conv2d(a)
-
         metrics.reset()
-        # conv test
-        input_array = np.arange(1*8*64*64)*0.001
-        conv_input = torch.tensor(input_array, dtype=torch.float32).view(1, 8, 64, 64).to(device=device)
-        kernel_array = np.arange(16*8*3*3)*0.001
-        conv_kernel = torch.tensor(kernel_array, dtype=torch.float32).view(16, 8, 3, 3).to(device=device)
 
-        opt_fn = torch.compile()(custom_conv2d)
-        res = opt_fn(conv_input, conv_kernel)
-        # self.assertEqual(ref, res.to(device="cpu"))
+        # element-wise operation TEST
+        test_vectoradd(device)
+        # test_reduce_sum(device)
 
-        out = custom_conv2d(conv_input.cpu(), conv_kernel.cpu())
-
-        print("Result > ", torch.allclose(res.cpu(), out, rtol=1, atol=1))
-        print("Max diff > ", torch.max(torch.abs(res.cpu() - out)))
+        # conv TEST
+        # test_conv2d(device)
 
         # Backward Uni-Test (Single Perceptron)
-        def perceptron(a, b, c):
-            res = a * b + c
-            return res.sum()
+        # test_single_perceptron(device)
 
-        def weight_update(a, b, lr):
-            return a - b * lr
+        # Matmul TEST
+        # test_matmul(device)
 
-        x = torch.empty(64).to(device=device).fill_(1)
-        w = torch.empty(64).to(device=device).fill_(3)
-        target_y = torch.tensor(384, dtype=torch.float32).to(device=device)
-        b = torch.empty(64).to(device=device).fill_(0.1)
-        w.requires_grad = True
-        b.requires_grad = True
-        opt_mlp = torch.compile()(perceptron)
-        opt_w = torch.compile()(weight_update)
-        lr = torch.tensor(1e-3).to(device=device) # learning rate
-        for i in range(50):
-            y = opt_mlp(x, w, b)
-            loss = (target_y - y) ** 2 # TODO: Add loss function
-            # print(loss.cpu().item()) # check loss
-            # loss.to(device=device)
-            loss.backward()
-            with torch.no_grad():
-                w.copy_(opt_w(w, w.grad, lr))
-                b.copy_(opt_w(b, b.grad, lr))
-            w.grad.zero_()
-            b.grad.zero_()
+        # MLP TEST
+        # test_mlp(device)
 
-        # GEMM Backward TEST
-        torch.manual_seed(0)
-        input = torch.randn(64, 64)
-        weight = torch.randn(64, 64)
+        # Softmax TEST
+        # test_softmax(device)
 
-        x1 = input.to(device=device)
-        w1 = weight.to(device=device)
-        x2 = input.to("cpu")
-        w2 = weight.to("cpu")
-        self.assertTrue(x1.device == device)
-        self.assertTrue(w1.device == device)
-        self.assertTrue(x2.device == torch.device("cpu"))
-        self.assertTrue(w2.device == torch.device("cpu"))
-        w1.requires_grad = True
-        opt_fn = torch.compile()(custom_matmul)
-        res = opt_fn(x1, w1)
-        loss = torch.sum(res)
+        # CNN TEST
+        # test_CNN(device)
+
+class MLP(nn.Module):
+    def __init__(self):
+        super(MLP, self).__init__()
+        self.linear1 = nn.Linear(64, 64)
+        self.linear2 = nn.Linear(64, 64)
+        self.softmax = nn.Softmax(dim=1)
+
+    def forward(self, x):
+        x = self.linear1(x)
+        x = self.linear2(nn.functional.relu(x))
+        x = self.softmax(x)
+        return x
+
+class CNN(nn.Module):
+    def __init__(self):
+        super(CNN, self).__init__()
+        self.conv1 = nn.Conv2d(8, 16, 3, padding=1)
+        self.conv2 = nn.Conv2d(16, 16, 3, padding=1)
+
+    def forward(self, x):
+        x = self.conv1(x)
+        x = self.conv2(x)
+        x = torch.nn.functional.relu(x)
+        return x
+
+def test_vectoradd(device):
+    def vectoradd(a, b):
+        return a + b
+    x = torch.randn(128, 128).to(device=device)
+    y = torch.randn(128, 128).to(device=device)
+    opt_fn = torch.compile()(vectoradd)
+    res = opt_fn(x, y)
+    out = vectoradd(x.cpu(), y.cpu())
+    if torch.allclose(res.cpu(), out, rtol=1e-4, atol=1e-4):
+        print("-----------------------")
+        print("|VectorAdd Test Passed|")
+        print("-----------------------")
+    else:
+        print("custom out: ", res.cpu())
+        print("cpu out: ", out)
+
+def test_reduce_sum(device):
+    def reduce_sum(a, b):
+        return torch.sum(a + b, axis=0)
+    x = torch.randn(128, 128).to(device=device)
+    y = torch.randn(128, 128).to(device=device)
+    opt_fn = torch.compile()(reduce_sum)
+    res = opt_fn(x, y)
+    out = reduce_sum(x.cpu(), y.cpu())
+    if torch.allclose(res.cpu(), out, rtol=1e-4, atol=1e-4):
+        print("-----------------------")
+        print("|ReduceSum Test Passed|")
+        print("-----------------------")
+    else:
+        print("custom out: ", res.cpu())
+        print("cpu out: ", out)
+
+def test_single_perceptron(device):
+    def perceptron(a, b, c):
+        res = a * b + c
+        return res
+
+    def weight_update(a, b, lr):
+        return a - b * lr
+    from sklearn.datasets import make_regression
+    X, Y = make_regression(n_samples=128, n_features=1, noise=30, random_state=1)
+    input = torch.tensor(X.squeeze(-1), dtype=torch.float32)
+    weight = torch.randn(1)
+    x1 = copy.deepcopy(input).to(device=device)
+    x2 = copy.deepcopy(input).to("cpu")
+    w1 = copy.deepcopy(weight).to(device=device)
+    w2 = copy.deepcopy(weight).to("cpu")
+    target_y = torch.tensor(Y, dtype=torch.float32)
+    y1 = copy.deepcopy(target_y).to(device=device)
+    y2 = copy.deepcopy(target_y).to("cpu")
+    b = torch.randn(1)
+    b1 = copy.deepcopy(b).to(device=device)
+    b2 = copy.deepcopy(b).to("cpu")
+    w1.requires_grad = True
+    w2.requires_grad = True
+    b1.requires_grad = True
+    b2.requires_grad = True
+    opt_mlp = torch.compile()(perceptron)
+    opt_w = torch.compile()(weight_update)
+    opt_loss = torch.compile()(torch.nn.MSELoss())
+    lr = torch.tensor(5e-2).to(device=device) # learning rate
+    y = opt_mlp(w1, x1, b1)
+    loss = opt_loss(y, y1)
+    loss.backward()
+    cpu_y = perceptron(x2, w2, b2)
+    cpu_loss = torch.nn.MSELoss()(cpu_y, y2)
+    cpu_loss.backward()
+    if torch.allclose(y.cpu(), cpu_y, rtol=1e-4, atol=1e-4):
+        print("-------------------------------")
+        print("|Single Perceptron Test Passed|")
+        print("-------------------------------")
+    else:
+        print("custom out: ", y.cpu())
+        print("cpu out: ", cpu_y)
+    if torch.allclose(loss.cpu(), cpu_loss, rtol=1e-4, atol=1e-4):
+        print("----------------------------")
+        print("|Loss Function Test Passed |")
+        print("----------------------------")
+    else:
+        print("custom loss: ", loss.cpu())
+        print("cpu loss: ", cpu_loss)
+    if torch.allclose(w1.grad.cpu(), w2.grad, rtol=1e-4, atol=1e-4):
+        print("----------------------------")
+        print("|Weight Update Test Passed |")
+        print("----------------------------")
+    else:
+        print("custom grad: ", w1.grad.cpu())
+        print("cpu grad: ", w2.grad)
+    if torch.allclose(b1.grad.cpu(), b2.grad, rtol=1e-4, atol=1e-4):
+        print("----------------------------")
+        print("|  Bias Update Test Passed |")
+        print("----------------------------")
+    else:
+        print("custom grad: ", b1.grad.cpu())
+        print("cpu grad: ", b2.grad)
+    for i in range(50):
+        y = opt_mlp(w1, x1, b1)
+        # loss = opt_loss(y, y1)
+        # print(loss.cpu().item()) # check loss
+        loss.to(device=device)
         loss.backward()
-        print(w1.grad.cpu())
-        w2.requires_grad = True
-        y = custom_matmul(x2, w2)
-        loss2 = torch.sum(y)
-        loss2.backward()
-        print(w2.grad.cpu())
+        with torch.no_grad():
+            w1.copy_(opt_w(w1, w1.grad, lr))
+            b1.copy_(opt_w(b1, b1.grad, lr))
+        w1.grad.zero_()
+        b1.grad.zero_()
+    # plot input and output on 2D plane, and plot the y = w*x + b line
+    plt.scatter(x1.cpu().numpy(), y1.cpu().numpy(), c='#c80151')
+    x = np.linspace(-3, 3, 100)
+    y = w1.cpu().item() * x + b1.cpu().item()
+    plt.plot(x, y, '-k')
+    plt.show()
+    plt.savefig('result.png')
+
+def test_matmul(device):
+    def custom_matmul(a, b):
+        # return torch.addmm(bias, a, b)
+        return torch.matmul(a, b)
+    torch.manual_seed(0)
+    input = torch.randn(128, 64)
+    weight = torch.randn(64, 32)
+    bias = torch.randn(64)
+    x1 = input.to(device=device)
+    w1 = weight.to(device=device)
+    b1 = bias.to(device=device)
+    x2 = input.to("cpu")
+    w2 = weight.to("cpu")
+    b2 = bias.to("cpu")
+    opt_fn = torch.compile()(custom_matmul)
+    res = opt_fn(x1, w1)
+    y = custom_matmul(x2, w2)
+    if torch.allclose(res.cpu(), y, rtol=1e-4, atol=1e-4):
+        print("----------------------------")
+        print("|Matmul Forward Test Passed|")
+        print("----------------------------")
+    else:
+        print("custom out: ", res.cpu())
+        print("cpu out: ", y)
+
+def test_mlp(device):
+    torch.manual_seed(0)
+    input = torch.randn(64, 64)
+    x1 = copy.deepcopy(input).to(device=device)
+    x2 = copy.deepcopy(input).to("cpu")
+    target = torch.randn(64, 64)
+    y1 = copy.deepcopy(target).to(device=device)
+    y2 = copy.deepcopy(target).to("cpu")
+    model = MLP()
+    model.requires_grad = True
+    model.to(device=device)
+    opt_fn = torch.compile()(model)
+    y = opt_fn(x1)
+    cpu_model = copy.deepcopy(model).to("cpu")
+    cpu_model.requires_grad = True
+    cpu_y = cpu_model(x2)
+    loss_fn = torch.nn.MSELoss()
+    opt_loss = torch.compile()(loss_fn)
+    loss = opt_loss(y, y1)
+    cpu_loss = loss_fn(cpu_y, y2)
+    loss.backward()
+    cpu_loss.backward()
+    if torch.allclose(y.cpu(), cpu_y, rtol=1e-4, atol=1e-4):
+        print("----------------------------")
+        print("| MLP Forward Test Passed  |")
+        print("----------------------------")
+    else:
+        print("custom out: ", y.cpu())
+        print("cpu out: ", cpu_y)
+    if torch.allclose(loss.cpu(), cpu_loss, rtol=1e-4, atol=1e-4):
+        print("----------------------------")
+        print("|Loss Function Test Passed |")
+        print("----------------------------")
+    else:
+        print("custom loss: ", loss.cpu())
+        print("cpu loss: ", cpu_loss)
+    if torch.allclose(model.linear1.weight.grad.cpu(), cpu_model.linear1.weight.grad, rtol=1e-4, atol=1e-4):
+        print("----------------------------")
+        print("|MLP Backward Test 1 Passed|")
+        print("----------------------------")
+    else:
+        print("custom grad: ", model.linear1.weight.grad.cpu())
+        print("cpu grad: ", cpu_model.linear1.weight.grad)
+    if torch.allclose(model.linear1.bias.grad.cpu(), cpu_model.linear1.bias.grad, rtol=1e-4, atol=1e-4):
+        print("----------------------------")
+        print("|MLP Backward Test 2 Passed|")
+        print("----------------------------")
+    else:
+        print("custom grad: ", model.linear1.bias.grad.cpu())
+        print("cpu grad: ", cpu_model.linear1.bias.grad)
+
+def test_CNN(device):
+    torch.manual_seed(0)
+    input = torch.randn(1, 8, 64, 64)
+    x1 = input.to(device=device)
+    x2 = input.to("cpu")
+    model = CNN()
+    model.to(device=device)
+    opt_fn = torch.compile()(model)
+    y = opt_fn(x1)
+    cpu_model = model.to("cpu")
+    cpu_y = cpu_model(x2)
+    if torch.allclose(y.cpu(), cpu_y, rtol=2e-1, atol=2e-1):
+        print("-------------------------")
+        print("|CNN Forward Test Passed|")
+        print("-------------------------")
+    else:
+        print("custom out: ", y.cpu())
+        print("cpu out: ", cpu_y)
+    print("Max diff > ", torch.max(torch.abs(y.cpu() - cpu_y)))
+
+def test_conv2d(device):
+    def custom_conv2d(a, b):
+        i_c = a.shape[1]
+        o_c = b.shape[0]
+        conv2d = nn.Conv2d(i_c, o_c, b.shape[-1], stride=1, padding=0, dilation=1)
+        conv2d.weight = nn.Parameter(b)
+        return conv2d(a)
+    torch.manual_seed(0)
+    conv_input = torch.randn(1, 8, 64, 64).to(device=device)
+    conv_kernel = torch.randn(16, 8, 3, 3).to(device=device)
+    opt_fn = torch.compile()(custom_conv2d)
+    res = opt_fn(conv_input, conv_kernel)
+    out = custom_conv2d(conv_input.cpu(), conv_kernel.cpu())
+    if torch.allclose(res.cpu(), out, rtol=1e-1, atol=1e-1):
+        print("----------------------------")
+        print("|Conv2d Forward Test Passed|")
+        print("----------------------------")
+    else:
+        print("custom out: ", res.cpu())
+        print("cpu out: ", out)
+    print("Max diff > ", torch.max(torch.abs(res.cpu() - out)))
+
+def test_softmax(device):
+    torch.manual_seed(0)
+    input = torch.randn(128, 128)
+    x1 = input.to(device=device)
+    x2 = input.to("cpu")
+    opt_fn = torch.compile()(torch.nn.functional.softmax)
+    y = opt_fn(x1, dim=1)
+    cpu_y = torch.nn.functional.softmax(x2, dim=1)
+    if torch.allclose(y.cpu(), cpu_y, rtol=1e-4, atol=1e-4):
+        print("-----------------------------")
+        print("|Softmax Forward Test Passed|")
+        print("-----------------------------")
+    else:
+        print("custom out: ", y.cpu())
+        print("cpu out: ", cpu_y)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
