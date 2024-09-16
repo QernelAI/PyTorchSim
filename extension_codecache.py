@@ -85,7 +85,7 @@ def mlir_gem5_compile_command(filename, sample_filename, tog_file, vectorlane_si
     ).strip(),
             re.sub(r"[ \n]+", " ",
         f"""
-            {TORCHSIM_LLVM_PATH}/mlir-opt -test-pytorchsim-to-vcix='systolic-array-size={vectorlane_size}' -lower-affine -convert-vector-to-llvm -test-memref-to-gemmini="vectorlane-stride={vectorlane_size}" -finalize-memref-to-llvm -convert-arith-to-llvm -convert-scf-to-cf -convert-cf-to-llvm -convert-func-to-llvm -convert-index-to-llvm -reconcile-unrealized-casts {sample_filename}.mlir -o {sample_filename}_llvm.mlir
+            {TORCHSIM_LLVM_PATH}/mlir-opt -test-pytorchsim-to-vcix='systolic-array-size={vectorlane_size}' -lower-affine -lower-vector-multi-reduction -convert-vector-to-llvm -test-memref-to-gemmini="vectorlane-stride={vectorlane_size}" -finalize-memref-to-llvm -convert-arith-to-llvm -convert-scf-to-cf -convert-cf-to-llvm -convert-func-to-llvm -convert-index-to-llvm -reconcile-unrealized-casts {sample_filename}.mlir -o {sample_filename}_llvm.mlir
         """,
     ).strip(),
             re.sub(r"[ \n]+", " ",
