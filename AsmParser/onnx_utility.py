@@ -21,6 +21,9 @@ class node:
     def get_parent(self):
         return list(self.__parents)
 
+    def set_parent(self, parent):
+        self.__parents = set(parent)
+
     def to_onnx(self):
         attr_dict = {}
 

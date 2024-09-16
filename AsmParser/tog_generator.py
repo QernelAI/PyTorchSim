@@ -70,7 +70,6 @@ class tog_generator:
             new_end_node = loop_end_node(loop_idx, self.new_node_id)
             new_end_node.parent = dump_data["parents"][0]
 
-            self.node_dict[self.new_node_id] = new_end_node
             self.loop_end_stack.append(new_end_node)
             self.new_node_id += 1
             # Increase loop depth
@@ -137,15 +136,18 @@ class tog_generator:
         # Link remain end node
         while self.loop_end_stack:
             end_node = self.loop_end_stack.pop()
+            self.node_dict[end_node.id] = end_node
             connect_nodes(prev_node, end_node)
             prev_node = end_node
 
     def generate_tile_graph(self, name="tile_graph", cycle_list=list):
+        node_list = list(self.node_dict.values())[1:]
+        node_list[0].set_parent([])
         for iter_node in self.node_dict.values():
             if isinstance(iter_node, compute_node):
                 iter_node.torchsim_cycle = cycle_list.pop(0)
 
-        onnx_node_list = [node.to_onnx() for node in list(self.node_dict.values())][1:] # Exclude root node
+        onnx_node_list = [node.to_onnx() for node in node_list] # Exclude root node
         dump_onnx_graph(name, onnx_node_list)
 
 if __name__ == "__main__":
