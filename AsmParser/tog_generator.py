@@ -95,11 +95,11 @@ class tog_generator:
             new_node.parent = -1
         else:
             new_node.parent = dump_data["parents"][0]
-        self.node_dict[new_node.id] = new_node
         self.append_depth_stack(new_node)
 
         # Return
         if not prev_node:
+            self.node_dict[new_node.id] = new_node
             return new_node
 
         if prev_node[-1].parent == new_node.parent:
@@ -121,6 +121,7 @@ class tog_generator:
             self.node_dict[end_node.id] = end_node
             connect_nodes(prev_node[-1], end_node)
             connect_nodes(end_node, new_node)
+        self.node_dict[new_node.id] = new_node
         return new_node
 
     def parse_graph(self):
