@@ -54,13 +54,13 @@ def reduction_combine(reduction_type, start_value, vector_value, tile_size=64):
 
 def reduction_combine_vec(reduction_type, vector_value, init_value, axis, shape, reduced_shape):
     if reduction_type == "sum":
-        return f"vector.multi_reduction <add>, %{vector_value}, %{init_value} [{axis}] : vector<{shape}> to vector<{reduced_shape}>"
+        return f"vector.multi_reduction <add>, %{vector_value}, %{init_value} [{axis}] : {shape} to {reduced_shape}"
     if reduction_type == "prod":
-        return f"vector.multi_reduction <mul>, %{vector_value}, %{init_value} [{axis}] : vector<{shape}> to vector<{reduced_shape}>"
+        return f"vector.multi_reduction <mul>, %{vector_value}, %{init_value} [{axis}] : {shape} to {reduced_shape}"
     if reduction_type == "max":
-        return f"vector.multi_reduction <maximumf>, %{vector_value}, %{init_value} [{axis}] : vector<{shape}> to vector<{reduced_shape}>"
+        return f"vector.multi_reduction <maximumf>, %{vector_value}, %{init_value} [{axis}] : {shape} to {reduced_shape}"
     if reduction_type == "min":
-        return f"vector.multi_reduction <minimumf>, %{vector_value}, %{init_value} [{axis}] : vector<{shape}> to vector<{reduced_shape}>"
+        return f"vector.multi_reduction <minimumf>, %{vector_value}, %{init_value} [{axis}] : {shape} to {reduced_shape}"
     raise AssertionError(reduction_type)
 
 class ExtensionWrapperCodegen(wrapper.WrapperCodeGen):
@@ -173,6 +173,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         self.map_cse = common.CSE("#", self.suffix, name_prefix="map")
         self.spad_cse = common.CSE(self.newvar_prefix, self.suffix, name_prefix="spad")
         self.consts = set()
+        self.tags = set()
         self.loop_info = {}
         self.load_desc = {}
         self.store_desc = {}
@@ -189,24 +190,31 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         constant_vector = [int(expr.coeff(var)) for var in self.itervars]
         return constant_vector
 
-    def get_dma_info(self, cv):
-        chunk_size = self.tile_size_per_lane if self.tiling_idx >= self.reduction_depth else self.tile_col_per_lane
-        stride = self.tile_col if len(self.itervars) == 1 else cv[0] * cv[1]
-        is_col_major = 1 if self.tiling_idx >= self.reduction_depth else 0
+    def get_dma_info(self, cv, name):
+        tile_size_per_lane = min(self.tile_size_per_lane, self.buffer_types[name][1])
+        chunk_size = tile_size_per_lane if self.tiling_idx >= self.reduction_depth else self.tile_col_per_lane
+        stride = self.tile_col if len(self.itervars) == 1 else reduce(mul, cv, 1)
+        is_col_major = 1 if self.tiling_idx >= self.reduction_depth and len(self.itervars) > 1 else 0
         tile_shape = self.tile_shape
+        if len(self.itervars) == 1: # FIXME: 1D vectors use only 1 vector lane
+            chunk_size = self.tile_size
+            is_col_major = 0
+            stride = self.tile_size
+            tile_shape = f"1x{self.tile_size}"
+            tile_size_per_lane = min(self.tile_size, self.buffer_types[name][1])
         if len(self.itervars) > 1:
             if cv[1] == 0 or cv[0] == 0:
                 chunk_size = self.tile_col_per_lane
                 is_col_major = 0
                 stride = 0
             if cv[1] == 0:
-                tile_shape = f"{self.vector_lane}x{self.tile_size_per_lane}"
+                tile_shape = f"{self.vector_lane}x{tile_size_per_lane}"
                 if self.reduction_depth > 1:
-                    chunk_size = self.tile_size_per_lane
+                    chunk_size = tile_size_per_lane
                     is_col_major = 1
-                    tile_shape = f"{self.tile_size_per_lane}x{self.vector_lane}"
+                    tile_shape = f"{tile_size_per_lane}x{self.vector_lane}"
         chunk = chunk_size << 1 | is_col_major
-        return stride, chunk, tile_shape
+        return stride, chunk, tile_shape, tile_size_per_lane
 
     def parse_indices(self, expr):
         if len(expr.args) == 0:
@@ -292,8 +300,8 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         dtype = V.graph.get_dtype(name)
         type_name = mlir_common.DTYPE_TO_MLIR[dtype]
         cv = self.get_constant_vector(index)
-        stride, chunk, tile_shape = self.get_dma_info(cv)
-        tile_size = min(self.tile_size, self.buffer_types[name][1])
+        stride, chunk, tile_shape, tile_size_per_lane = self.get_dma_info(cv, name)
+        # tile_size = min(self.tile_size, self.buffer_types[name][1])
         self.header.writeline(f"{mlir_common.DTYPE_TO_C[dtype]} {name}_spad[{self.tile_row}][{self.tile_col}] __attribute__ ((section(\".spad\")));")
         self.spad_cse.generate(self.global_vars, f"memref.global @{name}_spad : memref<{tile_shape}x{type_name}, 1>", assignment = False)
         buffer = self.cse.generate(self.loads, f"memref.get_global @{name}_spad : memref<{tile_shape}x{type_name}, 1>")
@@ -310,14 +318,15 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
             self.consts.add(stride)
             self.consts.add(chunk)
             self.dma_cache[dma_key] = dmaType, stride, chunk
+        self.tags.add(f"{name}_tag")
         code = f"affine.dma_start %{var}[{prefix}{indices}], %{buffer}[0, 0], %{name}_tag[0], %c{dmaType}, %c{stride}, %c{chunk} : memref<{self.buffer_types[name][1]}x{type_name}>, memref<{tile_shape}x{type_name}, 1>, memref<1xi32>"
         self.cse.generate(self.loads, code, assignment = False)
 
-        operation = "affine.vector_load" if self.tile_size > 1 else "affine.load"
-        shape = f", vector<{self.tile_size_per_lane}x{type_name}>" if self.tile_size > 1 else ""
+        operation = "affine.vector_load" if tile_size_per_lane > 1 else "affine.load"
+        shape = f", vector<{tile_size_per_lane}x{type_name}>" if tile_size_per_lane > 1 else ""
         line = f"{operation} %{buffer}[0, 0] : memref<{tile_shape}x{type_name}, 1>{shape}"
         out = self.cse.generate(self.loads, line)
-        self.tile_info[out] = self.tile_size_per_lane, dtype
+        self.tile_info[out] = tile_size_per_lane, dtype
         return out
 
     def store(self, name: str, index: sympy.Expr, value, *args, **kwargs):
@@ -328,23 +337,23 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         dtype = V.graph.get_dtype(name)
         type_name = mlir_common.DTYPE_TO_MLIR[dtype]
         cv = self.get_constant_vector(index)
-        tile_size = min(self.tile_size, self.buffer_types[name][1])
+        stride, chunk, tile_shape, tile_size_per_lane = self.get_dma_info(cv, name)
         self.header.writeline(f"{mlir_common.DTYPE_TO_C[dtype]} {name}_spad[{self.tile_row}][{self.tile_col}] __attribute__ ((section(\".spad\")));")
-        self.spad_cse.generate(self.global_vars, f"memref.global @{name}_spad : memref<{self.tile_shape}x{type_name}, 1>", assignment = False)
-        buffer = self.cse.generate(self.stores, f"memref.get_global @{name}_spad : memref<{self.tile_shape}x{type_name}, 1>")
+        self.spad_cse.generate(self.global_vars, f"memref.global @{name}_spad : memref<{tile_shape}x{type_name}, 1>", assignment = False)
+        buffer = self.cse.generate(self.stores, f"memref.get_global @{name}_spad : memref<{tile_shape}x{type_name}, 1>")
 
         # MVOUT Encoding
         dmaType = 3 # MVIN 2, MVIN2 1, MVIN3 14, MVOUT 3
-        stride, chunk = self.get_dma_info(cv)[:2]
         self.consts.add(dmaType)
         self.consts.add(stride)
         self.consts.add(chunk)
 
-        operation = "affine.vector_store" if self.tile_size > 1 else "affine.store"
-        shape = f", vector<{self.tile_size_per_lane}x{type_name}>" if self.tile_size > 1 else ""
-        line = f"{operation} %{value}, %{buffer}[0, 0] : memref<{self.tile_shape}x{type_name}, 1>{shape}"
+        operation = "affine.vector_store" if tile_size_per_lane > 1 else "affine.store"
+        shape = f", vector<{tile_size_per_lane}x{type_name}>" if tile_size_per_lane > 1 else ""
+        line = f"{operation} %{value}, %{buffer}[0, 0] : memref<{tile_shape}x{type_name}, 1>{shape}"
         self.cse.generate(self.stores, line, assignment = False)
-        code = f"affine.dma_start %{buffer}[0, 0], %{var}[{prefix}{indices}], %{name}_tag[0], %c{dmaType}, %c{stride}, %c{chunk} : memref<{self.tile_shape}x{type_name}, 1>, memref<{self.buffer_types[name][1]}x{type_name}>, memref<1xi32>"
+        self.tags.add(f"{name}_tag")
+        code = f"affine.dma_start %{buffer}[0, 0], %{var}[{prefix}{indices}], %{name}_tag[0], %c{dmaType}, %c{stride}, %c{chunk} : memref<{tile_shape}x{type_name}, 1>, memref<{self.buffer_types[name][1]}x{type_name}>, memref<1xi32>"
         self.cse.generate(self.stores, code, assignment = False)
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
@@ -366,14 +375,20 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
                 self.loads, f"reduction {reduction_key}", write=False
             )
             type_name = mlir_common.DTYPE_TO_MLIR[dtype]
-            self.reduction_vars[acc] = (reduction_type, iterator, init_vec, f"vector<{self.tile_col_per_lane}x{type_name}>")
+            acc_var = init
+            acc_shape = type_name
+            shape = f"vector<{self.tile_size}x{type_name}>"
+            reduced_shape = type_name
             self.reduction_prefix.writeline(f"%{init} = arith.constant {reduction_init(reduction_type, dtype)} : {type_name}")
-            self.reduction_prefix.writeline(f"%{init_vec} = vector.broadcast %{init} : {type_name} to vector<{self.tile_col_per_lane}x{type_name}>")
-            value = self.cse.generate(self.compute, f"vector.shape_cast %{value} : vector<{self.tile_size_per_lane}x{type_name}> to vector<{self.tile_row}x{self.tile_col_per_lane}x{type_name}>")
-            shape = f"{self.tile_row}x{self.tile_col_per_lane}x{type_name}"
-            reduced_shape = f"{self.tile_col_per_lane}x{type_name}"
+            if len(self.itervars) > 1:
+                self.reduction_prefix.writeline(f"%{init_vec} = vector.broadcast %{init} : {type_name} to vector<{self.tile_col_per_lane}x{type_name}>")
+                value = self.cse.generate(self.compute, f"vector.shape_cast %{value} : vector<{self.tile_size_per_lane}x{type_name}> to vector<{self.tile_row}x{self.tile_col_per_lane}x{type_name}>")
+                shape = f"vector<{self.tile_row}x{self.tile_col_per_lane}x{type_name}>"
+                acc_var = init_vec
+                reduced_shape = f"vector<{self.tile_col_per_lane}x{type_name}>"
+            self.reduction_vars[acc] = (reduction_type, iterator, acc_var, reduced_shape)
             out = self.cse.generate(self.compute, reduction_combine_vec(reduction_type, value, iterator, axis=0, shape=shape, reduced_shape=reduced_shape))
-            self.cse.generate(self.stores, f"affine.yield %{out} : vector<{self.tile_col_per_lane}x{type_name}>", assignment = False)
+            self.cse.generate(self.stores, f"affine.yield %{out} : {reduced_shape}", assignment = False)
 
             self.reduction_cse.reduction_cache[reduction_key] = acc
             self.iterator_cse.reduction_cache[reduction_key] = iterator
@@ -387,29 +402,33 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         index = self.rename_indexing(index)
         indices = self.parse_indices(index)
         prefix = "" if index.is_number else "%"
-        self.header.writeline(f"{mlir_common.DTYPE_TO_C[dtype]} {name}_spad[{self.vector_lane}][{self.tile_col_per_lane}] __attribute__ ((section(\".spad\")));")
-        self.spad_cse.generate(self.global_vars, f"memref.global @{name}_spad : memref<{self.vector_lane}x{self.tile_col_per_lane}x{type_name}, 1>", assignment = False)
-        buffer = self.cse.generate(self.reductions_suffix, f"memref.get_global @{name}_spad : memref<{self.vector_lane}x{self.tile_col_per_lane}x{type_name}, 1>")
-        line = f"affine.vector_store %{value}, %{buffer}[0, 0] : memref<{self.vector_lane}x{self.tile_col_per_lane}x{type_name}, 1>, vector<{self.tile_col_per_lane}x{type_name}>"
+        tile_row = self.vector_lane if len(self.itervars) > 1 else 1
+        tile_col = self.tile_col_per_lane if len(self.itervars) > 1 else 1
+        self.header.writeline(f"{mlir_common.DTYPE_TO_C[dtype]} {name}_spad[{tile_row}][{tile_col}] __attribute__ ((section(\".spad\")));")
+        self.spad_cse.generate(self.global_vars, f"memref.global @{name}_spad : memref<{tile_row}x{tile_col}x{type_name}, 1>", assignment = False)
+        buffer = self.cse.generate(self.reductions_suffix, f"memref.get_global @{name}_spad : memref<{tile_row}x{tile_col}x{type_name}, 1>")
+        operation = "affine.vector_store" if self.buffer_types[name][1] > 1 else "affine.store"
+        shape = f", vector<{tile_col}x{type_name}>" if self.buffer_types[name][1] > 1 else ""
+        line = f"{operation} %{value}, %{buffer}[0, 0] : memref<{tile_row}x{tile_col}x{type_name}, 1>{shape}"
         self.cse.generate(self.reductions_suffix, line, assignment = False)
 
          # MVOUT Encoding
         dmaType = 3 # MVIN 2, MVIN2 1, MVIN3 14, MVOUT 3
-        stride = self.tile_col_per_lane
+        stride = tile_col
         is_col_major = 0
-        chunk_size = self.tile_col_per_lane
+        chunk_size = tile_col
         chunk = chunk_size << 1 | is_col_major
         self.consts.add(dmaType)
         self.consts.add(stride)
         self.consts.add(chunk)
-        code = f"affine.dma_start %{buffer}[0, 0], %{var}[{prefix}{indices}], %{name}_tag[0], %c{dmaType}, %c{stride}, %c{chunk} : memref<{self.vector_lane}x{self.tile_col_per_lane}x{type_name}, 1>, memref<{self.buffer_types[name][1]}x{type_name}>, memref<1xi32>"
+        self.tags.add(f"{name}_tag")
+        code = f"affine.dma_start %{buffer}[0, 0], %{var}[{prefix}{indices}], %{name}_tag[0], %c{dmaType}, %c{stride}, %c{chunk} : memref<{tile_row}x{tile_col}x{type_name}, 1>, memref<{self.buffer_types[name][1]}x{type_name}>, memref<1xi32>"
         self.cse.generate(self.reductions_suffix, code, assignment = False)
 
     def codegen_init(self):
         code = IndentedBuffer()
-        _, _, arg_attributes, _ = self.args.mlir_argdefs()
-        for name, (_, _, _) in arg_attributes.items():
-            code.writeline(f"%{name}_tag = memref.alloc() : memref<1xi32>")
+        for tag in self.tags:
+            code.writeline(f"%{tag} = memref.alloc() : memref<1xi32>")
         for const in self.consts:
             code.writeline(f"%c{const} = arith.constant {const} : index")
         return code
@@ -515,7 +534,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         else:
             self.tiling_idx = self.tiling_indices[0]
             self.outer_idx = None
-        if self.tiling_idx >= self.reduction_depth:
+        if self.tiling_idx >= self.reduction_depth and self.reduction_depth > 0:
             self.tile_shape = f"{self.tile_col}x{self.tile_row}"
         return (
             self.itervars[: self.reduction_depth],
