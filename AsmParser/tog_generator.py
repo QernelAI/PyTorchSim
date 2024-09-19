@@ -64,7 +64,8 @@ class tog_generator:
             loop_end = dump_data["loop_end"]
             loop_step  = dump_data["loop_step"]
             loop_idx = dump_data["loop_index"]
-            new_node = loop_index_node(loop_idx, [loop_start, loop_end, loop_step], node_id)
+            loop_type = dump_data["loop_type"]
+            new_node = loop_index_node(loop_idx, [loop_start, loop_end, loop_step, loop_type], node_id)
 
             # Push end node to stack
             new_end_node = loop_end_node(loop_idx, self.new_node_id)
@@ -117,6 +118,7 @@ class tog_generator:
             connect_nodes(prev_node[-1], new_node)
         else:
             end_node = self.loop_end_stack.pop()
+            self.node_dict[end_node.id] = end_node
             connect_nodes(prev_node[-1], end_node)
             connect_nodes(end_node, new_node)
         return new_node

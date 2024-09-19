@@ -54,6 +54,7 @@ class loop_index_node(node):
         self.torchsim_start = loop_info[0]
         self.torchsim_end = loop_info[1]
         self.torchsim_stride = loop_info[2]
+        self.torchsim_loop_type = loop_info[3]
 
 class loop_end_node(node):
     def __init__(self, loop_idx, node_id=0):

@@ -63,7 +63,7 @@ func.func @{{ KERNEL_NAME }}({{ KERNEL_DEF }}) {
             linalg.matmul ins(%X_buffer, %W_buffer : memref<{{ TILE_M }}x{{ TILE_K }}x{{ DATA_STYPE }}, 1>, memref<{{ TILE_K }}x{{ TILE_N }}x{{ DATA_STYPE }}, 1>)
                     outs(%Y_buffer : memref<{{ TILE_M }}x{{ TILE_N }}x{{ DATA_STYPE }}, 1>)
             affine.dma_start %Y_buffer[0, 0], %Y[%index2], %tag[0], %c_mvout, %N, %c_set : memref<{{ TILE_M }}x{{ TILE_N }}xf32, 1>, memref<{{ M * N }}xf32>, memref<1xi32>
-        }
+        } { accumulation_loop=true }
 
         // Load matmul output
         affine.dma_start %Y[%index2], %Y_buffer[0, 0], %tag[0], %c_mvin3, %N, %c_set : memref<{{ M * N }}xf32>, memref<{{ TILE_M }}x{{ TILE_N }}xf32, 1>, memref<1xi32>
@@ -74,10 +74,10 @@ func.func @{{ KERNEL_NAME }}({{ KERNEL_DEF }}) {
             %Y_vec = affine.vector_load %Y_buffer[%r, 0] : memref<{{ TILE_M }}x{{ TILE_N }}xf32, 1>, vector<{{ TILE_N }}xf32>
             %acc_vec = arith.addf %Y_vec, %B_vec : vector<{{ TILE_N }}xf32>
             affine.vector_store %acc_vec, %Y_buffer[%r, 0] : memref<{{ TILE_M }}x{{ TILE_N }}xf32, 1>, vector<{{ TILE_N }}xf32>
-        }
+        } { accumulation_loop=true }
         affine.dma_start %Y_buffer[0, 0], %Y[%index2], %tag[0], %c_mvout, %N, %c_set : memref<{{ TILE_M }}x{{ TILE_N }}xf32, 1>, memref<{{ M * N }}xf32>, memref<1xi32>
-    }
-  }
+    } { outer_loop=true }
+  } { outer_loop=true }
   return
 }
 """
