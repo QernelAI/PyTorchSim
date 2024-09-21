@@ -58,7 +58,8 @@ class tog_generator:
             new_node = node(node_id)
         elif node_type == self.ComputeNodeKind:
             cycle = dump_data["compute_cycle"]
-            new_node = compute_node(cycle=cycle, node_id=node_id)
+            compute_type = dump_data["compute_type"]
+            new_node = compute_node(cycle=cycle, compute_type=compute_type, node_id=node_id)
         elif node_type == self.LoopNodeKind:
             loop_start = dump_data["loop_start"]
             loop_end = dump_data["loop_end"]
