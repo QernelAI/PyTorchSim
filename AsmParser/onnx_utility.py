@@ -70,6 +70,7 @@ class memory_node(node):
         self.torchsim_tile_size = tile_info["tile_size"]
         self.torchsim_tile_stride = tile_info["tile_stride"]
         self.torchsim_element_size = tile_info["element_size"]
+        self.torchsim_loop_idx_list = tile_info["loop_idx_list"]
 
 class load_node(memory_node):
     pass

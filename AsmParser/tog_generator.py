@@ -83,6 +83,7 @@ class tog_generator:
             tile_info["tile_stride"] = dump_data["tile_stride"]
             tile_info["tile_size"] = dump_data["tile_size"]
             tile_info["element_size"] = dump_data["element_size"]
+            tile_info["loop_idx_list"] = dump_data["loop_idx_list"]
             is_write = dump_data["is_write"]
             if is_write:
                 new_node = store_node(tile_info, node_id=node_id)
