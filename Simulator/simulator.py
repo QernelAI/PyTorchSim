@@ -16,7 +16,7 @@ TORCH_TO_NUMPY = {
     torch.int16: np.int16,
     torch.int8: np.int8,
     torch.uint8: np.uint8,
-    torch.bool: np.bool_,
+    torch.bool: np.uint8,
     torch.bfloat16: np.float16,
 }
 
@@ -29,8 +29,10 @@ class FunctionalSimulator():
         # path = os.path.join(dump_path, arg_name, f'{n_call}.raw')
         with open(path, 'rb') as f:
             np_array = np.fromfile(f, dtype=TORCH_TO_NUMPY[arg.dtype])
+            if (arg.dtype == torch.bool):
+                np_array = np.unpackbits(np_array)
             src_tensor = torch.as_strided(torch.from_numpy(np_array), arg.size(), arg.stride())
-            arg.copy_(src_tensor)
+            arg.copy_(src_tensor.to(dtype=arg.dtype))
 
     def get_biggest_filename(self, path):
         return len(os.listdir(path))
@@ -44,6 +46,8 @@ class FunctionalSimulator():
             data_path = os.path.join(dump_path, f'{index}.raw')
             tensor = arg.cpu()
             t_arr = tensor.numpy().flatten()
+            if (tensor.dtype == torch.bool):
+                t_arr = np.packbits(t_arr)
             t_arr.tofile(data_path)
         else:
             assert(0)
@@ -53,7 +57,8 @@ class FunctionalSimulator():
         array_size = []
         file_path = []
         for (arg_name, arg_attribute), arg in zip(arg_attributes.items(), args):
-            array_size.append(arg_attribute[2])
+            size = arg_attribute[2] if arg_attribute[1] != torch.bool else (arg_attribute[2] + 7) // 8
+            array_size.append(size)
             if LLVMKernelArgs.is_llvm_arg_in(arg_attribute[0]):
                 index = self.write_arg(arg, load_path, arg_name)
                 file_path.append(os.path.join(load_path, arg_name, f'{index}.raw'))
