@@ -1,8 +1,8 @@
 {
-  "num_cores" : 1,
+  "num_cores" : 2,
   "core_freq" : 1000,
   "sram_size" : 65536,
-  "core_print_interval" : 1000,
+  "core_print_interval" : 10000,
 
   "dram_type" : "ramulator",
   "dram_freq" : 877,
@@ -19,5 +19,10 @@
   "icnt_config_path" : "../configs/booksim2_configs/fly_c4_m32.icnt",
 
   "precision" : 2,
-  "scheduler" : "simple"
+  "scheduler" : "simple",
+  "num_partition" : 2,
+  "partition": {
+    "core_0":0,
+    "core_1":1
+  }
 }

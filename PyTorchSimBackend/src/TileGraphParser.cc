@@ -318,10 +318,10 @@ TileGraphParser::TileGraphParser(std::string onnx_path, json& attribute_json) {
     exit(EXIT_FAILURE);
   }
 
-  _tile_graph = std::make_unique<TileGraph>(TileGraph());
+  _tile_graph = std::make_unique<TileGraph>(TileGraph(onnx_path));
   int last_outer_idx = -1;
   /* Extract outer loop */
-  for (int i=0;_loop_nodes.size();i++) {
+  for (int i=0;i<_loop_nodes.size();i++) {
     std::shared_ptr<TileLoopNode> outer_loop = std::static_pointer_cast<TileLoopNode>(_loop_nodes.at(i));
     if (outer_loop->get_loop_type() != TileLoopNode::PARALLEL_LOOP)
       break;

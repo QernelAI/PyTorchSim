@@ -22,6 +22,77 @@ bool loadConfig(const std::string& config_path, json& config_json) {
   }
 }
 
+void launchKernel(Simulator* simulator, std::string onnx_path, std::string attribute_path, cycle_type request_time=0, int partiton_id=0) {
+  json attribute_json;
+  loadConfig(attribute_path, attribute_json);
+
+  auto graph_praser = TileGraphParser(onnx_path, attribute_json);
+  std::unique_ptr<TileGraph>& tile_graph = graph_praser.get_tile_graph();
+  tile_graph->set_arrival_time(request_time ? request_time : simulator->get_core_cycle());
+  spdlog::info("Register graph: {}", onnx_path);
+
+  simulator->schedule_graph(partiton_id, std::move(tile_graph));
+}
+
+Simulator* create_simulator(std::string config_path) {
+  json config_json;
+  loadConfig(config_path, config_json);
+  SimulationConfig config = initialize_config(config_json);
+  auto simulator = new Simulator(config);
+  return simulator;
+}
+
+int until(Simulator *simulator, cycle_type until_cycle) {
+  return simulator->until(until_cycle);
+}
+
+void interactive_mode(Simulator* simulator) {
+  std::string command;
+
+  std::cout << "[" << simulator->get_core_cycle() << "] BackendSim> ";
+  while (std::getline(std::cin, command)) {
+
+    std::istringstream iss(command);
+    std::string token;
+    // Parse the first part of the command (e.g., "launch", "until", "quit")
+    iss >> token;
+    if (token == "launch") {
+      std::string onnx_path, attribute_path;
+      cycle_type request_time = 0;
+      int partition_id = 0;
+      iss >> onnx_path >> attribute_path >> request_time >> partition_id;
+
+      // Check if both paths were provided
+      if (onnx_path.empty() || attribute_path.empty()) {
+        spdlog::error("Error: Please provide both ONNX path and Attribute path in the format: launch onnx/path attribute/path");
+      } else {
+        launchKernel(simulator, onnx_path, attribute_path, request_time, partition_id);
+        std::cerr << "launch done" << std::endl;
+      }
+    } else if (token == "until") {
+      cycle_type until_cycle;
+      iss >> until_cycle;
+      int reason;
+
+      if (iss.fail()) {
+        spdlog::error("Error: Please provide a valid cycle number after 'until'");
+      } else {
+        reason = simulator->until(until_cycle);
+        std::cerr << " Until finished: " << reason << std::endl;
+      }
+    } else if (token == "cycle") {
+      cycle_type current_cycle = simulator->get_core_cycle();
+      std::cerr << "Current cycle: " << current_cycle << std::endl;
+    }else if (token == "quit") {
+      spdlog::info("Exiting BackendSim.");
+      break;
+    } else {
+      spdlog::error("Error: unknown command {} Available commands are: launch, until, quit.", token);
+    }
+    std::cout << "[" << simulator->get_core_cycle() << "] BackendSim> ";
+  }
+}
+
 int main(int argc, char** argv) {
   auto start = std::chrono::high_resolution_clock::now();
   // parse command line argumnet
@@ -35,8 +106,7 @@ int main(int argc, char** argv) {
   cmd_parser.add_command_line_option<std::string>(
       "log_level", "Set for log level [trace, debug, info], default = info");
   cmd_parser.add_command_line_option<std::string>(
-      "mode", "choose one_model or two_model");
-
+      "mode", "choose \"trace\" moode and \"iteractive\" mode");
   try {
     cmd_parser.parse(argc, argv);
   } catch (const CommandLineParser::ParsingError& e) {
@@ -45,11 +115,7 @@ int main(int argc, char** argv) {
         e.what());
     throw(e);
   }
-  char* onnxim_path_env = std::getenv("ONNXIM_HOME");
-  std::string onnxim_path = onnxim_path_env != NULL?
-    std::string(onnxim_path_env) : std::string("./");
 
-  std::string model_base_path = fs::path(onnxim_path).append("models");
   std::string level = "info";
   cmd_parser.set_if_defined("log_level", &level);
   if (level == "trace")
@@ -62,24 +128,26 @@ int main(int argc, char** argv) {
   std::string config_path;
   std::string onnx_path;
   std::string attribute_path;
-  json config_json, attribute_json;
+  std::string execution_mode = "trace";
 
+  /* Create simulator */
   cmd_parser.set_if_defined("config", &config_path);
-  cmd_parser.set_if_defined("models_list", &onnx_path);
-  cmd_parser.set_if_defined("attributes_list", &attribute_path);
+  cmd_parser.set_if_defined("mode", &execution_mode);
+  auto simulator = create_simulator(config_path);
 
-  loadConfig(config_path, config_json);
-  loadConfig(attribute_path, attribute_json);
+  if (execution_mode.compare("trace") == 0) {
+    /* Get needed info for launch kernel */
+    cmd_parser.set_if_defined("models_list", &onnx_path);
+    cmd_parser.set_if_defined("attributes_list", &attribute_path);
 
-  SimulationConfig config = initialize_config(config_json);
+    /* launch kernels */
+    launchKernel(simulator, onnx_path, attribute_path);
+    simulator->run_simulator();
+  } else if (execution_mode.compare("interactive") == 0) {
+    /* Get onnx_path, attribute from user input, request_time */
+    interactive_mode(simulator);
+  }
 
-  auto simulator = std::make_unique<Simulator>(config);
-  auto graph_praser = TileGraphParser(onnx_path, attribute_json);
-  std::unique_ptr<TileGraph>& tile_graph = graph_praser.get_tile_graph();
-  spdlog::info("Register graph: {}", onnx_path);
-
-  simulator->schedule_graph(std::move(tile_graph));
-  simulator->run_simulator();
   /* Simulation time measurement */
   auto end = std::chrono::high_resolution_clock::now();
   std::chrono::duration<double> duration = end - start;

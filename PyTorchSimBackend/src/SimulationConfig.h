@@ -33,12 +33,15 @@ struct SimulationConfig {
   uint32_t icnt_print_interval=0;
 
   /* Sheduler config */
+  uint32_t num_patition=1;
   std::string scheduler_type;
+
+  /* Core id, Partiton id mapping */
+  std::map<uint32_t, uint32_t> partiton_map;
 
   /* Other configs */
   uint32_t precision;
   std::string layout;
-  std::map<uint32_t, std::vector<uint32_t>> partiton_map;
 
   uint64_t align_address(uint64_t addr) {
     return addr - (addr % dram_req_size);

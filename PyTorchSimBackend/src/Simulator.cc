@@ -47,7 +47,8 @@ Simulator::Simulator(SimulationConfig config)
     _cores[core_index] = std::make_unique<Core>(core_index, _config);
 
   // Initialize Scheduler
-  _scheduler = std::make_unique<Scheduler>(Scheduler(config, &_core_cycles, &_core_time));
+  for (int i=0; i<config.num_patition;i++)
+    _partition_scheduler.push_back(std::make_unique<Scheduler>(Scheduler(config, &_core_cycles, &_core_time, i)));
 }
 
 void Simulator::run_simulator() {
@@ -59,14 +60,14 @@ void Simulator::core_cycle() {
   for (int core_id = 0; core_id < _n_cores; core_id++) {
     std::shared_ptr<Tile> finished_tile = _cores[core_id]->pop_finished_tile();
     if (finished_tile->get_status() == Tile::Status::FINISH) {
-      _scheduler->finish_tile(std::move(finished_tile));
+      get_partition_scheduler(core_id)->finish_tile(std::move(finished_tile));
     }
 
     // Issue new tile to core
-    const std::shared_ptr<Tile> tile = _scheduler->peek_tile(core_id);
+    const std::shared_ptr<Tile> tile = get_partition_scheduler(core_id)->peek_tile(core_id);
     if (tile->get_status() != Tile::Status::EMPTY && _cores[core_id]->can_issue(tile))  {
       if (tile->get_status() == Tile::Status::INITIALIZED) {
-        _cores[core_id]->issue(std::move(_scheduler->get_tile(core_id)));
+        _cores[core_id]->issue(std::move(get_partition_scheduler(core_id)->get_tile(core_id)));
       } else {
         spdlog::error("[Simulator] issued tile is not valid status...!");
         exit(EXIT_FAILURE);
@@ -133,9 +134,41 @@ void Simulator::icnt_cycle() {
   _icnt->cycle();
 }
 
+int Simulator::until(cycle_type until_cycle) {
+  std::vector<bool> partition_scheudler_status;
+  for (auto &scheduler : _partition_scheduler)
+    partition_scheudler_status.push_back(scheduler->empty());
+
+  while (until_cycle == -1 || _core_cycles < until_cycle) {
+    set_cycle_mask();
+    // Core Cycle
+    if (IS_CORE_CYCLE(_cycle_mask))
+      core_cycle();
+
+    // DRAM cycle
+    if (IS_DRAM_CYCLE(_cycle_mask))
+      dram_cycle();
+
+    // Interconnect cycle
+    if (IS_ICNT_CYCLE(_cycle_mask))
+      icnt_cycle();
+
+    // Check if core status has changed
+    if (_core_cycles % 10 == 0) {
+      for (int i=0; i<_partition_scheduler.size(); i++) {
+        /* Skip this */
+        if (partition_scheudler_status.at(i))
+          continue;
+
+        if (_partition_scheduler.at(i)->empty())
+          return i;
+      }
+    }
+  }
+  return -1;
+}
+
 void Simulator::cycle() {
-  uint32_t tile_count;
-  bool is_accum_tile;
   while (running()) {
     set_cycle_mask();
     // Core Cycle
@@ -161,12 +194,11 @@ void Simulator::cycle() {
 
 bool Simulator::running() {
   bool running = false;
-  running |= !_models.empty();
   for (auto &core : _cores) {
     running = running || core->running();
   }
   for (int core_id = 0; core_id < _n_cores; core_id++) {
-    running = running || !_scheduler->empty(core_id);
+    running = running || !get_partition_scheduler(core_id)->empty(core_id);
   }
   running = running || _icnt->running();
   running = running || _dram->running();

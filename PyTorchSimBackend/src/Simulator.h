@@ -22,8 +22,14 @@ namespace fs = std::filesystem;
 class Simulator {
  public:
   Simulator(SimulationConfig config);
-  void schedule_graph(std::unique_ptr<TileGraph> tile_graph) { _scheduler->schedule_graph(std::move(tile_graph)); }
+  void schedule_graph(int partion_id, std::unique_ptr<TileGraph> tile_graph) {
+    _partition_scheduler.at(partion_id)->schedule_graph(std::move(tile_graph));
+  }
   void run_simulator();
+  cycle_type get_core_cycle() { return _core_cycles; }
+  int until(cycle_type untile_cycle);
+  int get_partition_id(int core_id) { return _config.partiton_map[core_id]; }
+  std::unique_ptr<Scheduler>& get_partition_scheduler(int core_id) { return _partition_scheduler.at(get_partition_id(core_id)); }
  private:
   void cycle();
   void core_cycle();
@@ -41,7 +47,7 @@ class Simulator {
   std::vector<std::unique_ptr<Core>> _cores;
   std::unique_ptr<Interconnect> _icnt;
   std::unique_ptr<Dram> _dram;
-  std::unique_ptr<Scheduler> _scheduler;
+  std::vector<std::unique_ptr<Scheduler>> _partition_scheduler;
   
   // period information (ps)
   uint64_t _core_period;
@@ -64,7 +70,4 @@ class Simulator {
   uint64_t _nr_to_mem=0;
   cycle_type _icnt_cycle=0;
   uint64_t _icnt_interval=0;
-
-  // Model
-  std::vector<Model> _models;
 };
