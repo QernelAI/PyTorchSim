@@ -1,0 +1,471 @@
+from typing import List
+import os
+import sys
+import json
+import torch
+from pathlib import Path
+import importlib.util
+from extension_codecache import TORCHSIM_DIR, TORCHSIM_BACKEND_CONFIG, TORCHSIM_DUMP_PATH, hash_prefix
+from Simulator.simulator import BackendSimulator
+
+def import_module_from_path(module_name, path):
+    module_path = Path(path)  # Convert to Path object for safety
+    if not module_path.exists() or not module_path.is_file():
+        raise FileNotFoundError(f"No such file: '{module_path}'")
+
+    spec = importlib.util.spec_from_file_location(module_name, module_path)
+    if spec is None:
+        raise ImportError(f"Could not load module from path: '{module_path}'")
+
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    return module
+
+class Request:
+    """ Each request has model name, it's own id, and requested time. """
+    request_id = 0
+    QUEUED     = 1
+    RUNNING    = 2
+    INCREMENT  = 3
+    FINISHED   = 4
+    def __init__(self, model:str, batchable_input_tensor : List[torch.Tensor],
+                 shared_input_tensor: List[torch.tensor], request_queue_idx=0) -> None:
+        self.model = model
+        self.batchable_input_tensor = batchable_input_tensor
+        self.shared_input_tensor = shared_input_tensor
+        self.arrival_time = None
+        self.start_time = []
+        self.finish_time = []
+        self.state = self.QUEUED
+        self.id = self.allocate_id()
+        self.request_queue_idx = request_queue_idx
+
+    def allocate_id(self):
+        allocated_id = Request.request_id
+        Request.request_id += 1
+        return allocated_id
+
+    def is_arrived(self, current_time):
+        return current_time >= self.arrival_time
+
+    def set_start(self, start_time):
+        self.state = self.RUNNING
+        self.start_time.append(start_time)
+
+    def set_finished(self, finish_time):
+        self.state = self.FINISHED
+        self.finish_time.append(finish_time)
+
+    def get_latency(self):
+        # Todo. Provide Toke-By-Token
+        if self.state == self.FINISHED:
+            turnaround_time = self.finish_time[-1] - self.arrival_time
+        else:
+            turnaround_time = None
+
+        if self.start_time:
+            response_time = self.start_time[0] - self.arrival_time
+        else:
+            response_time = None
+
+        if self.start_time and self.finish_time:
+            tbt_time = [i-j for i,j in zip(self.finish_time, self.start_time)]
+        else:
+            tbt_time = []
+
+        return turnaround_time, response_time, tbt_time
+
+    def free_memory(self):
+        """ Free memory resources that are allocated for handle this request """
+        return
+
+    def __str__(self) -> str:
+        return f"Request{self.id} Model: '{self.model}', Arrival: {self.arrival_time}, Start: {self.start_time}, End: {self.finish_time}, State: {self.state}, Partion: {self.request_queue_idx}"
+
+class RequestReturn:
+    INCREMENT = 0
+    FINISHED = 1
+    def __init__(self, state) -> None:
+        self.state = state
+
+    def is_finished(self):
+        return self.state == self.FINISHED
+
+    def is_increment(self):
+        return self.state == self.INCREMENT
+
+class SchedulerDNNModel:
+    MODEL_MAP = {}
+    def __init__(self, batched_req : List[Request], partition_idx) -> None:
+        self.model_name = batched_req[0].model
+        self.batched_req = batched_req
+        self.args = None
+        self.model = self.find_model(self.model_name)
+        self.partition_idx = partition_idx
+
+    def find_model(self, model_name : str):
+        if model_name in SchedulerDNNModel.MODEL_MAP:
+            return SchedulerDNNModel.MODEL_MAP[model_name]
+        else:
+            print(f'[Scheduler] Requested model "{model_name}"is not registered...')
+            return None
+
+
+    def get_batchable_input(self):
+        batched_input_tensor = []
+        for i in range(len(self.batched_req[0].batchable_input_tensor)):
+            tensor_list = [req.batchable_input_tensor[i] for req in self.batched_req]
+            batched_input_tensor.append(torch.concat(tensor_list, dim=0))
+        return batched_input_tensor
+
+    def get_shared_input(self):
+        return self.batched_req[0].shared_input_tensor
+
+    def get_input(self):
+        return self.get_batchable_input() + self.get_shared_input()
+
+    def __str__(self):
+        return f"DNN Model: {self.model_name}, Partion idx: {self.partition_idx} Req: {self.batched_req[0]}"
+
+    @staticmethod
+    def register_model(model_name : str, compiled_model):
+        SchedulerDNNModel.MODEL_MAP[model_name] = compiled_model
+
+class ExecutionEngine:
+    PARTITION_BUSY = 0
+    PARTITION_IDLE = 1
+    SELECT_NOTHING = 2
+    def __init__(self, backend_simulator : BackendSimulator, num_partion=1) -> None:
+        self.module = self.setup_device()
+        self.num_partion = num_partion
+        self.launch_model_dicts = []
+        self.partition_state = []
+        for i in range(self.num_partion):
+            self.launch_model_dicts.append({})
+            self.partition_state.append(self.PARTITION_IDLE)
+
+        self.finish_req_dict = {}
+        self.backend_simulator = backend_simulator
+
+        # Dry run for compile and create generator
+        os.environ[BackendSimulator.BACKENDSIM_DRYRUN] = "1"
+        os.environ[BackendSimulator.BACKENDSIM_EAGER_MODE] = "1"
+
+    def setup_device(self):
+        source_file_path = os.path.dirname(os.path.abspath(__file__))
+        source_file = os.path.join(
+            source_file_path, f"{TORCHSIM_DIR}/PyTorchSimFrontend/extension_device.cpp"
+        )
+
+        import torch.utils.cpp_extension
+        module = torch.utils.cpp_extension.load(
+            name="extension_device",
+            sources=[
+                str(source_file),
+            ],
+            extra_cflags=["-g"],
+            verbose=True,
+        )
+
+        torch.utils.rename_privateuse1_backend("extension_device")
+        from torch._inductor.codegen.common import (
+            get_scheduling_for_device,
+            get_wrapper_codegen_for_device,
+            register_backend_for_device,
+        )
+        from PyTorchSimFrontend.mlir.mlir_codegen_backend import (
+            MLIRScheduling,
+            ExtensionWrapperCodegen,
+        )
+        register_backend_for_device(
+            "extension_device", MLIRScheduling, ExtensionWrapperCodegen
+        )
+        assert(
+            get_scheduling_for_device("extension_device") == MLIRScheduling
+        )
+        assert(
+        get_wrapper_codegen_for_device("extension_device")
+            == ExtensionWrapperCodegen
+        )
+        return module
+
+    def submit(self, batched_req, partition_idx) -> List[RequestReturn]:
+        # FIXME. Construct SchedulerDNNModel
+        batched_req_model = self.get_compiled_model(batched_req, partition_idx)
+        self.prepare_model(batched_req_model)
+
+    def get_compiled_model(self, batched_req: List[Request], request_queue_idx):
+        compiled_model = SchedulerDNNModel(batched_req, request_queue_idx)
+        return compiled_model
+
+    def is_partition_idle(self, partition_idx):
+        return len(self.launch_model_dicts[partition_idx]) == 0
+
+    def is_idle(self):
+        return all([self.is_partition_idle(i) for i in range(self.num_partion)])
+
+    def prepare_model(self, req_model: SchedulerDNNModel):
+        result_path = os.path.join(TORCHSIM_DUMP_PATH, "backend_result", req_model.model_name)
+        os.makedirs(result_path, exist_ok=True)
+        index = str(len(os.listdir(result_path)))
+
+        # Prepare input tensor
+        input_tensor_list = req_model.get_input()
+        input_tensor_list = [input_tensor.to(device=self.module.custom_device()) for input_tensor in input_tensor_list]
+
+        # This model-call will return generator
+        ret = req_model.model(*input_tensor_list)
+        self.launch_model_dicts[req_model.partition_idx][req_model] = ret
+
+    def finish_model(self, model : SchedulerDNNModel, output : torch.Tensor):
+        for req in model.batched_req:
+            # TODO. finish time
+            self.finish_req_dict[req] = RequestReturn(RequestReturn.FINISHED)
+
+    def prepare_launch_kernel(self, kernel, inputs):
+        key = kernel.future.result()
+        result_path = os.path.join(TORCHSIM_DUMP_PATH, "tmp", hash_prefix(key))
+        onnx_path = os.path.join(result_path, "tile_graph.onnx")
+
+        address_info = {}
+        attribute_path = os.path.join(TORCHSIM_DUMP_PATH, "tmp", hash_prefix(key), "attribute")
+        os.makedirs(attribute_path, exist_ok=True)
+        index = str(len(os.listdir(attribute_path)))
+        attribute_path = os.path.join(attribute_path, index)
+
+        for idx, tensor in enumerate(inputs):
+            address_info[f"arg{idx}"] = tensor.data_ptr()
+
+        with open(attribute_path, "w") as f:
+            json.dump({"address_info" : address_info}, f, indent=4)
+        return onnx_path, attribute_path
+
+    def launch_kernel(self, current_cycle, partion_idx=0):
+        # Check partition is busy
+        if self.partition_state[partion_idx] != self.PARTITION_IDLE:
+            return None
+        result = self.select_kernel(partion_idx)
+        if result == self.SELECT_NOTHING:
+            return None
+
+        kernel, inputs = result
+        onnx_path, attribute_path = self.prepare_launch_kernel(kernel, inputs)
+        self.partition_state[partion_idx] = self.PARTITION_BUSY
+        return self.backend_simulator.launch(onnx_path, attribute_path, current_cycle, partion_idx)
+
+class FIFOExecutionEngine(ExecutionEngine):
+    def __init__(self, backend_simulator: BackendSimulator, num_partion=1) -> None:
+        super().__init__(backend_simulator, num_partion)
+
+    def select_kernel(self, partition_idx):
+        while self.launch_model_dicts[partition_idx]:
+            # Select FIFO manner
+            req, target_model = next(iter(self.launch_model_dicts[partition_idx].items()))
+            try:
+                kernel, inputs = next(target_model)
+                return kernel, inputs
+            except StopIteration as e:
+                # Retry
+                self.finish_model(req, e.value)
+                del self.launch_model_dicts[partition_idx][req]
+        # No proper kernel now
+        return self.SELECT_NOTHING
+
+class RRExecutionEngine(ExecutionEngine):
+    def __init__(self, backend_simulator: BackendSimulator, num_partion=1) -> None:
+        super().__init__(backend_simulator, num_partion)
+        self.next_pointer = None
+
+    def select_kernel(self, partition_idx):
+        while self.launch_model_dicts[partition_idx]:
+            req_list = list(self.launch_model_dicts[partition_idx].keys())
+            # Select RR manner
+            if self.next_pointer is None or self.next_pointer not in req_list:
+                req = req_list[0]
+                pos = 0
+            else:
+                req = self.next_pointer
+                pos = req_list.index(req)
+
+            # Set Next pointer
+            if pos + 1 < len(req_list):
+                self.next_pointer = req_list[pos+1]
+            else:
+                self.next_pointer = req_list[0]
+
+            target_model = self.launch_model_dicts[partition_idx][req]
+            try:
+                kernel, inputs = next(target_model)
+                return kernel, inputs
+            except StopIteration as e:
+                # Retry
+                self.finish_model(req, e.value)
+                del self.launch_model_dicts[partition_idx][req]
+        # No proper kernel now
+        return self.SELECT_NOTHING
+
+class Scheduler:
+    FIFO_ENGINE = 0
+    RR_ENGINE = 1
+    def __init__(self, num_request_queue=1, engine_select=FIFO_ENGINE) -> None:
+        self.current_time = 0
+        self.max_batch = 1
+        self.num_request_queue = num_request_queue
+        self.request_queue : List[List[Request]] = []
+        for i in range(self.num_request_queue):
+            self.request_queue.append([])
+        self.finish_queue : List[Request] = []
+
+        backend_path = os.path.join(TORCHSIM_DIR, "PyTorchSimBackend")
+        self.backend_simulator = BackendSimulator(backend_path, TORCHSIM_BACKEND_CONFIG)
+        self.backend_simulator.interactive_simulation()
+        if engine_select == Scheduler.FIFO_ENGINE:
+            self.execution_engine = FIFOExecutionEngine(self.backend_simulator, self.num_request_queue)
+        elif engine_select == Scheduler.RR_ENGINE:
+            self.execution_engine = RRExecutionEngine(self.backend_simulator, self.num_request_queue)
+        else:
+            print(f"Not supporetd engine type {engine_select}")
+            exit(1)
+
+    def add_request(self, request: Request, request_time=-1):
+        """register model at timestamp time"""
+        request_time = self.current_time if request_time == -1 else request_time
+        request.arrival_time = request_time
+        self.request_queue[request.request_queue_idx].append(request)
+
+    def select(self, request_queue_idx=0) -> List[Request]:
+        """
+        Select 1 request from request_queue in FCFS manner.
+        If there is no proper request, return None
+        """
+        candidate_req = []
+        if not self.request_queue[request_queue_idx]:
+            return candidate_req
+        for req in self.request_queue[request_queue_idx]:
+            if req.is_arrived(self.current_time) and req.state == Request.QUEUED:
+                candidate_req.append(req)
+
+                # Stop batching
+                if self.max_batch <= len(candidate_req):
+                    break
+        return candidate_req
+
+    def next_request_time(self, request_queue_idx=0):
+        for req in self.request_queue[request_queue_idx]:
+            if req.state == Request.QUEUED:
+                return req, req.arrival_time
+        return None, -1
+
+    def nearest_next_reqeust_time(self):
+        nearest_req = None
+        nearest_arrival_time = -1
+        for i in range(self.num_request_queue):
+            req, arrival_time = self.next_request_time(i)
+            if nearest_arrival_time == -1 and arrival_time != -1:
+                nearest_req = req
+                nearest_arrival_time = arrival_time
+            elif arrival_time != -1 and nearest_arrival_time > arrival_time:
+                nearest_req = req
+                nearest_arrival_time = arrival_time
+        return nearest_req, nearest_arrival_time
+
+    def finish_request(self, req : Request):
+        req.set_finished(self.current_time)
+
+        # Free resources
+        req.free_memory()
+
+        # Move to finish queue
+        self.finish_queue.append(req)
+        self.request_queue[req.request_queue_idx].remove(req)
+        turnaround_time, response_time, tbt_time = req.get_latency()
+        print(f"[Request-{req.id} finished] partition: {req.request_queue_idx} arrival_time: "
+              f"{req.arrival_time} start_time: {req.start_time[0]} turnaround latency: {turnaround_time}, "
+              f"response time: {response_time} tbt_time: {tbt_time}")
+
+    def per_schedule(self, request_queue_idx):
+        request_list = self.select(request_queue_idx)
+        if not request_list:
+            return False
+
+        for req in request_list:
+            req.set_start(self.current_time)
+
+        # Submit batched request
+        self.execution_engine.submit(request_list, request_queue_idx)
+        print(f"[Request-{req.id} issue] partition: {req.request_queue_idx} "
+              f"arrival_time: {req.arrival_time} start_time: {req.start_time[0]}")
+        return True
+
+    def check_finish_request(self):
+        # Check finished request
+        while self.execution_engine.finish_req_dict:
+            req, req_ret = next(iter(self.execution_engine.finish_req_dict.items()))
+            self.finish_request(req)
+            del self.execution_engine.finish_req_dict[req]
+
+    def schedule(self):
+        # Try schedule all request queue
+        result = []
+        for i in range(self.num_request_queue):
+            result.append(self.per_schedule(i))
+
+        # Try move to next nearest request time
+        next_req, next_time = self.nearest_next_reqeust_time()
+        if next_req is None and self.execution_engine.is_idle():
+            # No request remained...
+            return
+
+        # Need to forward the time until next_arrival_time
+        if self.execution_engine.is_idle():
+            reason = self.backend_simulator.until(next_time)
+            self.current_time = self.backend_simulator.cycle()
+        else:
+            self.run(next_time)
+        return
+
+    def run(self, until_time):
+        def execute_cycle():
+            for i in range(self.execution_engine.num_partion):
+                if self.execution_engine.partition_state[i] == ExecutionEngine.PARTITION_IDLE:
+                    ret = self.execution_engine.launch_kernel(self.current_time, i)
+
+            self.check_finish_request()
+            # Check if the stop condition is met
+            if self.execution_engine.is_idle():
+                return -1
+
+            # Schedule jobs and update the current time
+            result = self.backend_simulator.until(until_time)
+            self.current_time = self.backend_simulator.cycle()
+
+            if result != -1:
+                # Kernel is finished. So set idle state
+                self.execution_engine.partition_state[result] = ExecutionEngine.PARTITION_IDLE
+
+            return result
+
+        if until_time == -1:
+            while not self.execution_engine.is_idle():
+                result = execute_cycle()
+                # if result is not -1, schedule new request
+                if result == -1:
+                    break
+
+        else:
+            while self.current_time <= until_time and not self.execution_engine.is_idle():
+                result = execute_cycle()
+                # if result is not -1, schedule new request
+                if result == -1:
+                    break
+        return
+
+    def is_request_queue_empty(self):
+        result = True
+        for i in range(self.num_request_queue):
+            result = result and (not len(self.request_queue[i]))
+        return result
+
+    def is_finished(self):
+        return self.is_request_queue_empty() and self.execution_engine.is_idle()
