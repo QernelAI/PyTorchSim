@@ -13,7 +13,7 @@ from AsmParser.tog_generator import tog_generator
 from AsmParser.riscv_parser import riscv_parser
 from PyTorchSimFrontend.llvm.llvm_caller_codegen import LLVMKernelCallerCodeGen
 from PyTorchSimFrontend.mlir.mlir_caller_codegen import MLIRKernelCallerCodeGen
-from Simulator.simulator import FunctionalSimulator, CycleSimulator
+from Simulator.simulator import FunctionalSimulator, CycleSimulator, BackendSimulator
 
 LOCK_TIMEOUT = 600
 TORCHSIM_DUMP_PATH = os.environ.get('TORCHSIM_DUMP_PATH',
@@ -30,6 +30,7 @@ GEM5_PATH = os.environ.get('GEM5_PATH',
                            default = f"/workspace/gem5/build/RISCV/gem5.opt")
 GEM5_SCRIPT_PATH = os.environ.get('GEM5_SCRIPT_PATH',
                                   default = f"{TORCHSIM_DIR}/gem5_script/script.py")
+BACKENDSIM_DRYRUN = "BACKENDSIM_DRYRUN"
 
 def hash_prefix(hash_value):
     return hash_value[1:5]
@@ -256,13 +257,6 @@ class LLVMCodeCache:
             tile_graph_generator.cycle_analysis(cycle_list=cycle_list, name=os.path.join(write_path, "tile_graph"))
         return key
 
-def get_backend_command(model_path):
-    base_dir = os.path.join(TORCHSIM_DIR, "PyTorchSimBackend")
-    bin = os.path.join(base_dir, "build/bin/Simulator")
-    config = os.path.join(base_dir, TORCHSIM_BACKEND_CONFIG)
-    cmd = f"{bin} --config {config} --models_list {model_path}"
-    return cmd.strip()
-
 class CustomAsyncCompile(AsyncCompile):
     def __init__(self):
         self.validation_wrapper_name = "validation_wrapper"
@@ -279,7 +273,6 @@ class CustomAsyncCompile(AsyncCompile):
                                           spad_info=spad_info, **kwargs)
             return key
         future = self.submit(task)
-
         def dummy_simulator(*args, **kwargs):
             # Wait for compilation
             key = future.result()
@@ -296,15 +289,18 @@ class CustomAsyncCompile(AsyncCompile):
                                   vectorlane_size=vectorlane_size, spad_info=spad_info)
 
             onnx_path = os.path.join(result_path, "tile_graph.onnx")
-            cmd = get_backend_command(onnx_path)
+            backend_path = os.path.join(TORCHSIM_DIR, "PyTorchSimBackend")
+            backsim = BackendSimulator(backend_path, TORCHSIM_BACKEND_CONFIG)
+            backsim.simulation(onnx_path)
 
-            try:
-                subprocess.check_call(shlex.split(cmd))
-            except subprocess.CalledProcessError as e:
-                print("Command failed with exit code", e.returncode)
-                print("Error output:", e.output)
-                assert(0)
-        return dummy_simulator
+        def dryrun_simulator(*args, **kwargs):
+            key = future.result()
+
+        is_dryrun = int(os.getenv(BackendSimulator.BACKENDSIM_DRYRUN, 0))
+        target_simulator = dryrun_simulator if is_dryrun else dummy_simulator
+        target_simulator.arg_attributes = arg_attributes
+        target_simulator.future = future
+        return target_simulator
 
     def llvm(self, source_code, arg_attributes={}, **kwargs):
         def task():
@@ -341,13 +337,9 @@ class CustomAsyncCompile(AsyncCompile):
                 print(f'{assembly_path} not found.')
             except Exception as e:
                 print(f"Error while reading.")
-            onnx_path = os.path.join(result_path, "tile_graph.onnx")
-            cmd = get_backend_command(onnx_path)
 
-            try:
-                subprocess.check_call(shlex.split(cmd))
-            except subprocess.CalledProcessError as e:
-                print("Command failed with exit code", e.returncode)
-                print("Error output:", e.output)
-                assert(0)
+            onnx_path = os.path.join(result_path, "tile_graph.onnx")
+            backend_path = os.path.join(TORCHSIM_DIR, "PyTorchSimBackend")
+            backsim = BackendSimulator(backend_path, TORCHSIM_BACKEND_CONFIG)
+            backsim.simulation(onnx_path)
         return dummy_simulator
