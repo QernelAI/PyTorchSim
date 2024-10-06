@@ -132,12 +132,8 @@ class ExtensionOverrides(common.OpOverrides):
 
     @staticmethod
     def constant(value, dtype, tile_size=16):
-<<<<<<< HEAD
-        return f'arith.constant {format(value, ".6f")} : f32'
-=======
         dtype = mlir_common.DTYPE_TO_MLIR[dtype]
-        return f'arith.constant {value} : {dtype}'
->>>>>>> e469ebc (math operations)
+        return f'arith.constant {format(value, ".6f")} : {dtype}'
 
     @staticmethod
     def exp(operand, tile_size=16):
@@ -254,7 +250,6 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         self.tile_size_per_lane = self.tile_size // self.vector_lane
         self.dma_cache = {}
         self.dma_counter = 1
-        self.step = [self.tile_row, self.tile_col]
         self.reduction_idx = {}
         self.affine_yield = {}
         self.welford_reduce_out = None
@@ -277,17 +272,17 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         chunk_size = tile_size_per_lane if self.tiling_idx >= self.reduction_depth else self.tile_col_per_lane
         stride = self.tile_col if len(self.itervars) == 1 else reduce(mul, cv, 1)
         is_col_major = 1 if self.tiling_idx >= self.reduction_depth and len(self.itervars) > 1 else 0
-        chunk_size = self.tile_size_per_lane if len(self.itervars) == 1 or dtype == torch.bool else chunk_size
 
         pattern = r"(\d+)x(\d+)"
         matches = re.search(pattern, self.tile_shape)
         t_row = matches.group(1)
         t_col = matches.group(2)
+        tile_shape = self.tile_shape
+        chunk_size = self.tile_size_per_lane if len(self.itervars) == 1 else chunk_size
         if len(self.itervars) == 1 and index in self.reduction_idx:
             chunk_size = self.tile_size
             is_col_major = 0
             stride = self.tile_size
-            # tile_shape = f"1x{self.tile_size}"
             t_row = 1
             t_col = self.tile_size
             tile_size_per_lane = min(self.tile_size, self.buffer_types[name][1])
@@ -297,31 +292,33 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
                 is_col_major = 0
                 stride = 0
             if cv[1] == 0:
-                # tile_shape = f"{self.vector_lane}x{tile_size_per_lane}"
                 t_row = self.vector_lane
                 t_col = tile_size_per_lane
                 if self.reduction_depth > 1:
-                    chunk_size = tile_size_per_lane
+                    chunk_size = tile_size_per_lane # TODO: remove this?
                     is_col_major = 1
-                    # tile_shape = f"{tile_size_per_lane}x{self.vector_lane}"
                     t_row = tile_size_per_lane
                     t_col = self.vector_lane
+        elif len(self.itervars) == 0:
+            chunk_size = self.tile_size
+            is_col_major = 0
+            stride = self.tile_size
+            tile_size_per_lane = min(self.tile_size, self.buffer_types[name][1])
         tile_shape = f"{t_row}x{t_col}"
         if self.is_transpose and is_store:
             is_col_major = 1 if is_col_major == 0 else 0
             tile_shape = f"{t_col}x{t_row}"
-
-            if chunk_size < stride:
-                chunk_size = tile_size_per_lane
-            else:
-                chunk_size = self.tile_col_per_lane
-
+            chunk_size = tile_size_per_lane if chunk_size < stride else self.tile_col_per_lane
+        assert(not (dtype==torch.bool and chunk_size < 8))
         chunk = chunk_size << 1 | is_col_major
         return stride, chunk, tile_shape, tile_size_per_lane
 
     def parse_indices(self, expr):
         if len(expr.args) == 0:
-            return expr
+            return expr, expr
+        for itervars in self.itervars:
+            new_coeff = ((expr.coeff(itervars) + self.tile_col - 1) // self.tile_col) * self.tile_col
+            expr = expr.subs(expr.coeff(itervars), new_coeff)
         expr_str = str(expr)
         pattern = r'index\d+'
         indices = set(re.findall(pattern, expr_str))
@@ -339,7 +336,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         map_var = self.map_cse.generate(self.global_vars, f"affine_map<({args}) -> ({expr_str})>")
         args = ", ".join([f"%{i}" for i in indices])
         index = self.cse.generate(self.loads, f"affine.apply #{map_var}({args})")
-        return index
+        return index, expr
 
     def codegen_nodes(self, nodes, kernel_name):
         _, (group, reduction_group) = max(
@@ -389,10 +386,11 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
 
         self.set_ranges(group, reduction_group)
         self.tiling_indices = select_tiling_indices()
-        _, _, _, self.buffer_types = self.args.mlir_argdefs()
         with self as kernel:
             for node in nodes:
                 vars, reduction_vars = kernel.set_ranges(group, reduction_group)
+                self.args = mlir_common.MLIRKernelArgs(self.tile_row, self.tile_col)
+                _, _, _, self.buffer_types = self.args.mlir_argdefs()
                 self.reduction_idx = {var: i for i, var in enumerate(reduction_vars)}
                 node.run(vars, reduction_vars)
 
@@ -409,7 +407,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
 
     def load(self, name: str, index: sympy.Expr):
         index = self.rename_indexing(index)
-        indices = self.parse_indices(index)
+        indices, index = self.parse_indices(index)
         prefix = "" if index.is_number else "%"
         var = self.args.input(name)
         dtype = V.graph.get_dtype(name)
@@ -439,7 +437,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
             self.dma_cache[dma_key] = dmaType, stride, chunk
         self.tags.add(f"{name}_tag")
         code = f"affine.dma_start %{var}[{prefix}{indices}], %{buffer}[0, 0], %{name}_tag[0], %c{dmaType}, %c{stride}, %c{chunk} : memref<{self.buffer_types[name][1]}x{type_name}>, memref<{tile_shape}x{type_name}, 1>, memref<1xi32>"
-        self.cse.generate(self.loads, code, assignment = False)
+        self.cse.generate(self.loads, code, assignment = False) # FIXME: assignment = False does not support caching
 
         operation = "affine.vector_load" if tile_size_per_lane > 1 else "affine.load"
         shape = f", vector<{tile_size_per_lane}x{type_name}>" if tile_size_per_lane > 1 else ""
@@ -450,7 +448,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
 
     def store(self, name: str, index: sympy.Expr, value, *args, **kwargs):
         index = self.rename_indexing(index)
-        indices = self.parse_indices(index)
+        indices, index = self.parse_indices(index)
         prefix = "" if index.is_number else "%"
         var = self.args.output(name)
         dtype = V.graph.get_dtype(name)
@@ -517,8 +515,9 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
             self.reduction_prefix.writeline(f"%{init} = arith.constant {reduction_init(reduction_type, dtype)} : {type_name}")
             if len(self.itervars) > 1:
                 self.reduction_prefix.writeline(f"%{init_vec} = vector.broadcast %{init} : {type_name} to vector<{self.tile_col_per_lane}x{type_name}>")
-                value = self.cse.generate(self.compute, f"vector.shape_cast %{value} : vector<{self.tile_size_per_lane}x{type_name}> to vector<{self.tile_row}x{self.tile_col_per_lane}x{type_name}>")
-                shape = f"vector<{self.tile_row}x{self.tile_col_per_lane}x{type_name}>"
+                vec_len = self.tile_col if self.tiling_idx >= self.reduction_depth else self.tile_row
+                value = self.cse.generate(self.compute, f"vector.shape_cast %{value} : vector<{self.tile_size_per_lane}x{type_name}> to vector<{vec_len}x{self.tile_col_per_lane}x{type_name}>")
+                shape = f"vector<{vec_len}x{self.tile_col_per_lane}x{type_name}>"
                 acc_var = init_vec
                 reduced_shape = f"vector<{self.tile_col_per_lane}x{type_name}>"
             self.reduction_vars[acc] = (reduction_type, iterator, acc_var, reduced_shape)
@@ -535,7 +534,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         dtype = V.graph.get_dtype(name)
         type_name = mlir_common.DTYPE_TO_MLIR[dtype]
         index = self.rename_indexing(index)
-        indices = self.parse_indices(index)
+        indices, index = self.parse_indices(index)
         prefix = "" if index.is_number else "%"
         tile_row = self.vector_lane if len(self.itervars) > 1 else 1
         tile_col = self.tile_col_per_lane if len(self.itervars) > 1 else 1
@@ -591,10 +590,11 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
     def codegen_loops(self):
         code = mlir_common.ParallelLoopBuffer()
         # Loop body part
-        if self.reduction_vars:
-            self.tile_row, self.tile_col = self.tile_col, self.tile_row
-        self.tile_row = self.tile_size if len(self.itervars) == 1 else self.tile_row
-        loops = [LoopLevel(var, size, idx, tile_row=self.tile_row, tile_col=self.tile_col, is_transpose=self.is_transpose) for idx, (var, size) in enumerate(zip(self.itervars, self.ranges))]
+        tile_row, tile_col = self.tile_row, self.tile_col
+        if (self.tiling_idx < self.reduction_depth and len(self.reduction_idx) > 0):
+            tile_row, tile_col = self.tile_col, self.tile_row
+        tile_row = self.tile_size if len(self.itervars) == 1 else tile_row
+        loops = [LoopLevel(var, size, idx, tile_row=tile_row, tile_col=tile_col, is_transpose=self.is_transpose) for idx, (var, size) in enumerate(zip(self.itervars, self.ranges))]
         loops, reductions = [LoopNest(loops[: self.reduction_depth]),
                              LoopNest(loops[self.reduction_depth :])]
         reductions.mark_reduction(self.reduction_vars)
@@ -691,8 +691,21 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         else:
             self.tiling_idx = self.tiling_indices[0]
             self.outer_idx = None
-        if self.tiling_idx >= self.reduction_depth and self.reduction_depth > 0:
-            self.tile_shape = f"{self.tile_col}x{self.tile_row}"
+            self.tile_row = 1
+            self.tile_col = self.tile_size
+            self.tile_shape = f"{self.tile_row}x{self.tile_col}"
+        if self.tiling_idx >= self.reduction_depth and len(reduction_lengths) > 0: #self.reduction_depth > 0:
+            self.tile_row, self.tile_col = self.tile_col, self.tile_row
+            self.tile_shape = f"{self.tile_row}x{self.tile_col}"
+        if len(self.itervars):
+            if self.tiling_idx < self.reduction_depth and len(reduction_lengths) > 0:#self.reduction_depth > 0:
+                self.ranges[-1] = (self.ranges[-1] + self.tile_row - 1) // self.tile_row * self.tile_row
+                if len(self.itervars) > 1:
+                    self.ranges[-2] = (self.ranges[-2] + self.tile_col - 1) // self.tile_col * self.tile_col
+            else:
+                self.ranges[-1] = (self.ranges[-1] + self.tile_col - 1) // self.tile_col * self.tile_col
+                if len(self.itervars) > 1:
+                    self.ranges[-2] = (self.ranges[-2] + self.tile_row - 1) // self.tile_row * self.tile_row
         return (
             self.itervars[: self.reduction_depth],
             self.itervars[self.reduction_depth :],
@@ -768,7 +781,7 @@ class MLIRScheduling(BaseScheduling):
         kernel_name = f"extension_kernel_{self.count}"
         self.count += 1
         src_code = ex_kernel.codegen_nodes(nodes, kernel_name)
-        self.define_kernel(src_code, kernel_name, ex_kernel.vector_lane, ex_kernel.spad_info)
+        self.define_kernel(src_code, kernel_name, ex_kernel.vector_lane, (ex_kernel.tile_row, ex_kernel.tile_col), ex_kernel.spad_info)
         ex_kernel.call_kernel(kernel_name)
         _, args, _, _ = ex_kernel.args.mlir_argdefs()
         args = ", ".join(args)
@@ -788,7 +801,7 @@ class MLIRScheduling(BaseScheduling):
             wrapper = V.graph.wrapper_code
             wrapper.header.writeline(code)
 
-    def define_kernel(self, src_code, kernel_name, vector_lane, spad_info):
+    def define_kernel(self, src_code, kernel_name, vector_lane, tile_size, spad_info):
         wrapper = V.graph.wrapper_code
         if src_code in wrapper.src_to_kernel:
             kernel_name = wrapper.src_to_kernel[src_code]
@@ -801,6 +814,7 @@ class MLIRScheduling(BaseScheduling):
             codecache_def.writeline("load_tile_info=load_tile_info,")
             codecache_def.writeline("store_tile_info=store_tile_info,")
             codecache_def.writeline(f"vectorlane_size={vector_lane},")
+            codecache_def.writeline(f"tile_size={tile_size},")
             codecache_def.writeline(f"spad_info={spad_info},")
             codecache_def.writeline("arg_attributes=arg_attributes)")
             wrapper.define_kernel(kernel_name, codecache_def.getvalue(), cuda=False)
@@ -819,7 +833,7 @@ class MLIRScheduling(BaseScheduling):
         with V.set_kernel_handler(kernel):
             node_schedule = [template_node, *epilogue_nodes]
             kernel.meta_kernel()
-            kernel_name = self.define_kernel(src_code, kernel.kernel_name, kernel.vector_lane, kernel.spad_info)
+            kernel_name = self.define_kernel(src_code, kernel.kernel_name, kernel.vector_lane, (kernel.vector_lane, kernel.vector_lane), kernel.spad_info)
             self.define_function(kernel)
         kernel.call_kernel(kernel_name)
         _, args, _, _ = kernel.args.mlir_argdefs()

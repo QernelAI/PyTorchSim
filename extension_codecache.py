@@ -264,7 +264,7 @@ class CustomAsyncCompile(AsyncCompile):
         self.cycle_wrapper_name = "cycle_wrapper"
         self.cycle_binary_name = "cycle_binary"
 
-    def mlir(self, source_code, arg_attributes={}, vectorlane_size=16, spad_info=None, **kwargs):
+    def mlir(self, source_code, arg_attributes={}, vectorlane_size=16, tile_size=(4, 16), spad_info=None, **kwargs):
         def task():
             key = MLIRCodeCache.load(source_code,
                                           valdiation_wrapper_name=self.validation_binary_name,
@@ -286,7 +286,7 @@ class CustomAsyncCompile(AsyncCompile):
                 funcsim.run_spike(args, arg_attributes,
                                   result_path, self.validation_binary_name,
                                   kwargs['intermediate_op'] if 'intermediate_op' in kwargs else None,
-                                  vectorlane_size=vectorlane_size, spad_info=spad_info)
+                                  vectorlane_size=vectorlane_size, tile_size=tile_size, spad_info=spad_info)
 
             onnx_path = os.path.join(result_path, "tile_graph.onnx")
             backend_path = os.path.join(TORCHSIM_DIR, "PyTorchSimBackend")

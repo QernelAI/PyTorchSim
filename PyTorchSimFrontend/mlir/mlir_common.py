@@ -16,6 +16,7 @@ from torch._inductor.utils import (
     get_sympy_Expr_dtype,
     IndentedBuffer,
     sympy_subs,
+    sympy_symbol,
     unique,
 )
 
@@ -78,6 +79,11 @@ class MLIRKernelArgs(common.KernelArgs):
     MLIR_ARGS_INOUT = 0x04
     MLIR_ARGS_VAR = 0x08
 
+    def __init__(self, tile_row=None, tile_col=None):
+        super().__init__()
+        self.tile_row = tile_row
+        self.tile_col = tile_col
+
     @staticmethod
     def is_mlir_arg_in(value):
         return (MLIRKernelArgs.MLIR_ARGS_IN & value) | (MLIRKernelArgs.MLIR_ARGS_INOUT & value)
@@ -86,9 +92,33 @@ class MLIRKernelArgs(common.KernelArgs):
     def is_mlir_arg_out(value):
         return (MLIRKernelArgs.MLIR_ARGS_OUT & value) | (MLIRKernelArgs.MLIR_ARGS_INOUT & value)
 
+    def pad_args(self, arg):
+        if self.tile_row is not None and self.tile_col is not None and len(arg.layout.size) > 1:
+            if arg.layout.size[0] > 1:
+                arg.layout.size[0] = ((arg.get_size()[0] + self.tile_row - 1) // self.tile_row) * self.tile_row
+            # reducction has no layout
+            if hasattr(arg, "data") and hasattr(arg.data, "layout") and arg.data.layout.size[0] > 1:
+                arg.data.layout.size[0] = ((arg.data.get_size()[0] + self.tile_row - 1) // self.tile_row) * self.tile_row
+            if len(arg.get_size()) > 1 and arg.layout.size[1] > 1:
+                arg.layout.size[1] = ((arg.get_size()[1] + self.tile_col - 1) // self.tile_col) * self.tile_col
+                if hasattr(arg, "data") and hasattr(arg.data, "layout") and arg.data.layout.size[1] > 1:
+                    arg.data.layout.size[1] = ((arg.data.get_size()[1] + self.tile_col - 1) // self.tile_col) * self.tile_col
+
     def mlir_argdefs(self, only_args=False, extra_node=dict()):
-        buffer_types = {x.get_name(): [x.get_dtype(), x.get_numel()] for x in V.graph.buffers}
+        buffer_types = {}
+        for x in V.graph.buffers:
+            origin_x_size = x.get_size()
+            if hasattr(x, "data"):
+                origin_x_data_size = x.data.get_size()
+            if self.tile_row is not None and self.tile_row > 1:
+                self.pad_args(x)
+            buffer_types[x.get_name()] = [x.get_dtype(), x.get_numel()]
+            x.layout.size = origin_x_size
+            if hasattr(x, "data") and hasattr(x.data, "layout"):
+                x.data.layout.size = origin_x_data_size
         for name, val in V.graph.graph_inputs.items():
+            if self.tile_row is not None and self.tile_row > 1:
+                self.pad_args(val)
             if isinstance(val, sympy.Expr):
                 buffer_types[name] = [get_sympy_Expr_dtype(val), 1]
             else:
@@ -218,7 +248,7 @@ class BaseMLIRKernel(common.Kernel, BaseMLIRHardwareInfo):
             @staticmethod
             def indirect_indexing(index_var, size, check=True):
                 # Skip CSE since this doesn't return an expression
-                return self.indirect_indexing(index_var, size, check)  # type: ignore[attr-defined]
+                return sympy_symbol(str(index_var))  # type: ignore[attr-defined]
 
             @staticmethod
             def load(name: str, index: sympy.Expr):

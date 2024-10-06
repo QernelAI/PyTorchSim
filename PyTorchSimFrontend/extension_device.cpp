@@ -209,7 +209,7 @@ at::Tensor custom__copy_from(const at::Tensor& self, const at::Tensor& dst, bool
   if (self.is_contiguous() && dst.is_contiguous()) {
     std::memcpy(dst.storage().data_ptr().get(),
                 self.storage().data_ptr().get(),
-                self.storage().nbytes());
+                dst.storage().nbytes());
   } else {
     // Using cpu tensor to accomplishment stride copy.
     at::Tensor cpu_self = unsafe_create_cpu_tensor_from_dummy_tensor(self);
