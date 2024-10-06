@@ -13,9 +13,12 @@ from torch._inductor import dependencies
 from torch._inductor.codegen import cpp, wrapper, common
 from torch._inductor.scheduler import BaseScheduling
 from torch._inductor.virtualized import V, _ops as ops
-from torch._inductor.utils import IndentedBuffer
 from torch._inductor.codecache import write_atomic, write
 from Simulator.simulator import BackendSimulator
+from torch._inductor.utils import (
+    IndentedBuffer,
+    is_welford_reduction,
+)
 import extension_codecache
 
 
@@ -35,6 +38,8 @@ def reduction_init(reduction_type, dtype):
         return "0.0"
     if reduction_type in {"min", "argmin"}:
         return "0.0"
+    if reduction_type in {"welford_reduce"}:
+        return f"0.0"
     raise AssertionError(reduction_type)
 
 def reduction_combine(reduction_type, start_value, vector_value, tile_size=64):
@@ -63,6 +68,8 @@ def reduction_combine_vec(reduction_type, vector_value, init_value, axis, shape,
         return f"vector.multi_reduction <maximumf>, %{vector_value}, %{init_value} [{axis}] : {shape} to {reduced_shape}"
     if reduction_type == "min":
         return f"vector.multi_reduction <minimumf>, %{vector_value}, %{init_value} [{axis}] : {shape} to {reduced_shape}"
+    if reduction_type == "any":
+        return f"vector.multi_reduction <and>, %{vector_value}, %{init_value} [{axis}] : {shape} to {reduced_shape}"
     raise AssertionError(reduction_type)
 
 class ExtensionWrapperCodegen(wrapper.WrapperCodeGen):
@@ -125,7 +132,7 @@ class ExtensionOverrides(common.OpOverrides):
 
     @staticmethod
     def constant(value, dtype, tile_size=16):
-        return f'arith.constant {value} : f32'
+        return f'arith.constant {format(value, ".6f")} : f32'
 
     @staticmethod
     def exp(operand, tile_size=16):
@@ -161,6 +168,29 @@ class ExtensionOverrides(common.OpOverrides):
         shape = f"vector<{tile_size}xf32>" if tile_size > 1 else "f32"
         cond_shape = f"vector<{tile_size}xi1>," if tile_size > 1 else ""
         return f"arith.select %{condition}, %{x}, %{y} : {cond_shape} {shape}"
+
+    @staticmethod
+    def sqrt(operand, tile_size=16):
+        shape = f"vector<{tile_size}xf32>" if tile_size > 1 else "f32"
+        return f"math.sqrt %{operand} : {shape}"
+
+    @staticmethod
+    def rsqrt(operand, tile_size=16):
+        shape = f"vector<{tile_size}xf32>" if tile_size > 1 else "f32"
+        return f"math.rsqrt %{operand} : {shape}"
+
+    @staticmethod
+    def powf(operand, power, tile_size=16):
+        shape = f"vector<{tile_size}xf32>" if tile_size > 1 else "f32"
+        return f"math.powf %{operand}, %{power} : {shape}"
+
+    @staticmethod
+    def logical_not(operand, tile_size=16):
+        tile_size=16
+        shape = f"vector<{tile_size}xf32>" if tile_size > 1 else "f32"
+        result_shape = f"vector<{tile_size}xi1>" if tile_size > 1 else "i1"
+        assert(0)
+        return f"arith.cmpf oeq, %{operand}, %zero_vec{tile_size} : {shape} -> {result_shape}"
 
 RTYPE_TO_MLIR = {
     "sum": "add",
@@ -209,23 +239,40 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         self.dma_counter = 1
         self.step = [self.tile_row, self.tile_col]
         self.reduction_idx = {}
+        self.affine_yield = {}
+        self.welford_reduce_out = None
+        self.reduce_iterator = {}
+        self.is_transpose = False
+
+        # is_transposed
+        if len(V.graph.graph_inputs) == 1 and len(V.graph.buffers):
+            input_shape = list(V.graph.graph_inputs.values())[0].layout.size
+            output_shape = V.graph.buffers[0].layout.size
+            if input_shape[-1] == output_shape[-2] and input_shape[-2] == output_shape[-1]:
+                self.is_transpose = True
 
     def get_constant_vector(self, expr):
         constant_vector = [int(expr.coeff(var)) for var in self.itervars]
         return constant_vector
 
-    def get_dma_info(self, cv, name, index, dtype):
+    def get_dma_info(self, cv, name, index, dtype, is_store):
         tile_size_per_lane = min(self.tile_size_per_lane, self.buffer_types[name][1])
         chunk_size = tile_size_per_lane if self.tiling_idx >= self.reduction_depth else self.tile_col_per_lane
         stride = self.tile_col if len(self.itervars) == 1 else reduce(mul, cv, 1)
         is_col_major = 1 if self.tiling_idx >= self.reduction_depth and len(self.itervars) > 1 else 0
-        tile_shape = self.tile_shape
         chunk_size = self.tile_size_per_lane if len(self.itervars) == 1 or dtype == torch.bool else chunk_size
+
+        pattern = r"(\d+)x(\d+)"
+        matches = re.search(pattern, self.tile_shape)
+        t_row = matches.group(1)
+        t_col = matches.group(2)
         if len(self.itervars) == 1 and index in self.reduction_idx:
             chunk_size = self.tile_size
             is_col_major = 0
             stride = self.tile_size
-            tile_shape = f"1x{self.tile_size}"
+            # tile_shape = f"1x{self.tile_size}"
+            t_row = 1
+            t_col = self.tile_size
             tile_size_per_lane = min(self.tile_size, self.buffer_types[name][1])
         if len(self.itervars) > 1:
             if cv[1] == 0 or cv[0] == 0:
@@ -233,23 +280,48 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
                 is_col_major = 0
                 stride = 0
             if cv[1] == 0:
-                tile_shape = f"{self.vector_lane}x{tile_size_per_lane}"
+                # tile_shape = f"{self.vector_lane}x{tile_size_per_lane}"
+                t_row = self.vector_lane
+                t_col = tile_size_per_lane
                 if self.reduction_depth > 1:
                     chunk_size = tile_size_per_lane
                     is_col_major = 1
-                    tile_shape = f"{tile_size_per_lane}x{self.vector_lane}"
+                    # tile_shape = f"{tile_size_per_lane}x{self.vector_lane}"
+                    t_row = tile_size_per_lane
+                    t_col = self.vector_lane
+        tile_shape = f"{t_row}x{t_col}"
+        if self.is_transpose and is_store:
+            is_col_major = 1 if is_col_major == 0 else 0
+            tile_shape = f"{t_col}x{t_row}"
+
+            if chunk_size < stride:
+                chunk_size = tile_size_per_lane
+            else:
+                chunk_size = self.tile_col_per_lane
+
         chunk = chunk_size << 1 | is_col_major
         return stride, chunk, tile_shape, tile_size_per_lane
 
     def parse_indices(self, expr):
         if len(expr.args) == 0:
             return expr
+        expr_str = str(expr)
         pattern = r'index\d+'
-        indices = re.findall(pattern, str(expr))
+        indices = set(re.findall(pattern, expr_str))
         args = ", ".join(map(str, indices))
-        mapping = self.map_cse.generate(self.global_vars, f"affine_map<({args}) -> ({expr})>")
+        if "//" in expr_str:
+            expr_str = expr_str.replace("//", " floordiv ")
+        pattern = r"ModularIndexing\((.*?)\)"
+        matches = re.search(pattern, expr_str)
+        if matches:
+            mod_args = matches.group(1)
+            args_list = mod_args.split(", ")
+            replace_str = f"({args_list[0]} floordiv {args_list[1]}) mod {args_list[2]}"
+            expr_str = re.sub(r"ModularIndexing\([^)]*\)", replace_str, expr_str)
+
+        map_var = self.map_cse.generate(self.global_vars, f"affine_map<({args}) -> ({expr_str})>")
         args = ", ".join([f"%{i}" for i in indices])
-        index = self.cse.generate(self.loads, f"affine.apply #{mapping}({args})")
+        index = self.cse.generate(self.loads, f"affine.apply #{map_var}({args})")
         return index
 
     def codegen_nodes(self, nodes, kernel_name):
@@ -326,7 +398,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         dtype = V.graph.get_dtype(name)
         type_name = mlir_common.DTYPE_TO_MLIR[dtype]
         cv = self.get_constant_vector(index)
-        stride, chunk, tile_shape, tile_size_per_lane = self.get_dma_info(cv, name, index, dtype)
+        stride, chunk, tile_shape, tile_size_per_lane = self.get_dma_info(cv, name, index, dtype, 0)
         self.header.writeline(f"{mlir_common.DTYPE_TO_C[dtype]} {name}_spad[{self.tile_row}][{self.tile_col}] __attribute__ ((section(\".spad\")));")
         if dtype == torch.bool:
             mapping = self.map_cse.generate(self.global_vars, f"affine_map<({indices}) -> ({indices} floordiv 8)>")
@@ -367,7 +439,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         dtype = V.graph.get_dtype(name)
         type_name = mlir_common.DTYPE_TO_MLIR[dtype]
         cv = self.get_constant_vector(index)
-        stride, chunk, tile_shape, tile_size_per_lane = self.get_dma_info(cv, name, index, dtype)
+        stride, chunk, tile_shape, tile_size_per_lane = self.get_dma_info(cv, name, index, dtype, 1)
         self.header.writeline(f"{mlir_common.DTYPE_TO_C[dtype]} {name}_spad[{self.tile_row}][{self.tile_col}] __attribute__ ((section(\".spad\")));")
         if dtype == torch.bool:
             mapping = self.map_cse.generate(self.global_vars, f"affine_map<({indices}) -> ({indices} floordiv 8)>")
@@ -395,6 +467,17 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         argmax_or_argmin = reduction_type in {"argmax", "argmin"}
         if argmax_or_argmin:
             raise NotImplementedError() #TODO: argmin, argmax
+        elif is_welford_reduction(reduction_type):
+            if reduction_type == "welford_combine":
+                pass
+            else:
+                assert reduction_type == "welford_reduce"
+                type_name = mlir_common.DTYPE_TO_MLIR[dtype]
+                reduction_key = src_dtype, reduction_type, value
+                sum = self.reduction(dtype, src_dtype, "sum", value)
+                sqr_sum = self.reduction(dtype, src_dtype, "sum", ops.mul(value, value))
+                self.welford_reduce_out = (sum, sqr_sum, None)
+                return sum, sqr_sum, None
         else:
             reduction_key = src_dtype, reduction_type, value
             acc = self.reduction_cse.generate(
@@ -423,7 +506,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
                 reduced_shape = f"vector<{self.tile_col_per_lane}x{type_name}>"
             self.reduction_vars[acc] = (reduction_type, iterator, acc_var, reduced_shape)
             out = self.cse.generate(self.compute, reduction_combine_vec(reduction_type, value, iterator, axis=0, shape=shape, reduced_shape=reduced_shape))
-            self.cse.generate(self.stores, f"affine.yield %{out} : {reduced_shape}", assignment = False)
+            self.affine_yield[out] = reduced_shape
 
             self.reduction_cse.reduction_cache[reduction_key] = acc
             self.iterator_cse.reduction_cache[reduction_key] = iterator
@@ -444,12 +527,30 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
             self.global_vars_set.add(name)
             self.global_vars.writeline(f"memref.global @{name}_spad : memref<{tile_row}x{tile_col}x{type_name}, 1>")
         buffer = self.cse.generate(self.reductions_suffix, f"memref.get_global @{name}_spad : memref<{tile_row}x{tile_col}x{type_name}, 1>")
+        if self.welford_reduce_out is not None:
+            sum, sqr_sum, _ = self.welford_reduce_out
+
+            # mean
+            self.cse.generate(self.reductions_suffix, f"%f{self.buffer_types[name][1]} = arith.constant {float(self.buffer_types[name][1])} : f32", assignment=False)
+            divider_vec = self.cse.generate(self.reductions_suffix, f"vector.broadcast %f{self.buffer_types[name][1]} : f32 to vector<{self.tile_col_per_lane}x{type_name}>")
+            mean = self.cse.generate(self.reductions_suffix, f"arith.divf %{sum}, %{divider_vec} : vector<{self.tile_col_per_lane}x{type_name}>")
+
+            # m2 = (E(X^2) - E(X)^2) * N
+            sqr_mean = self.cse.generate(self.reductions_suffix, f"arith.divf %{sqr_sum}, %{divider_vec} : vector<{self.tile_col_per_lane}x{type_name}>")
+            mean_sqr = self.cse.generate(self.reductions_suffix, f"arith.mulf %{mean}, %{mean} : vector<{self.tile_col_per_lane}x{type_name}>")
+            variance = self.cse.generate(self.reductions_suffix, f"arith.subf %{sqr_mean}, %{mean_sqr} : vector<{self.tile_col_per_lane}x{type_name}>")
+            m2 = self.cse.generate(self.reductions_suffix, f"arith.mulf %{variance}, %{divider_vec} : vector<{self.tile_col_per_lane}x{type_name}>")
+            if name == "buf0":
+                value = mean
+            else:
+                value = m2
+
         operation = "affine.vector_store" if self.buffer_types[name][1] > 1 else "affine.store"
         shape = f", vector<{tile_col}x{type_name}>" if self.buffer_types[name][1] > 1 else ""
         line = f"{operation} %{value}, %{buffer}[0, 0] : memref<{tile_row}x{tile_col}x{type_name}, 1>{shape}"
         self.cse.generate(self.reductions_suffix, line, assignment = False)
 
-         # MVOUT Encoding
+        # MVOUT Encoding
         dmaType = 3 # MVIN 2, MVIN2 1, MVIN3 14, MVOUT 3
         stride = tile_col
         is_col_major = 0
@@ -476,11 +577,14 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         if self.reduction_vars:
             self.tile_row, self.tile_col = self.tile_col, self.tile_row
         self.tile_row = self.tile_size if len(self.itervars) == 1 else self.tile_row
-        loops = [LoopLevel(var, size, idx, tile_row=self.tile_row, tile_col=self.tile_col) for idx, (var, size) in enumerate(zip(self.itervars, self.ranges))]
+        loops = [LoopLevel(var, size, idx, tile_row=self.tile_row, tile_col=self.tile_col, is_transpose=self.is_transpose) for idx, (var, size) in enumerate(zip(self.itervars, self.ranges))]
         loops, reductions = [LoopNest(loops[: self.reduction_depth]),
                              LoopNest(loops[self.reduction_depth :])]
         reductions.mark_reduction(self.reduction_vars)
-
+        if len(self.affine_yield) > 0:
+            vars = ', '.join([f"%{name}" for name, _ in self.affine_yield.items()])
+            reduced_shapes = ', '.join([f"{shape}" for _, shape in self.affine_yield.items()])
+            self.stores.writeline(f"affine.yield {vars} : {reduced_shapes}")
         with contextlib.ExitStack() as stack:
             for loop in loops.loops:
                 loop_lines = loop.lines()
@@ -545,7 +649,6 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
             code.splice(self.codegen_loops())
         return code
 
-
     def set_ranges(self, lengths, reduction_lengths):
         if self.call_ranges:
             assert self.call_ranges == tuple(lengths) + tuple(
@@ -587,18 +690,19 @@ class LoopLevel:
     tile_row: int = 4
     tile_col: int = 4
     reduction_vars: Dict[str, str] = None
+    is_transpose: bool = False
 
     def lines(self):
         step = 1
         if self.idx == 0:
-            step = self.tile_row
+            step = self.tile_col if self.is_transpose else self.tile_row
         elif self.idx == 1:
-            step = self.tile_col
+            step = self.tile_row if self.is_transpose else self.tile_col
         if self.reduction_vars:
-            acc = ', '.join([acc.name for acc in self.reduction_vars.keys()])
+            acc = ', '.join([f"%{acc.name}" for acc in self.reduction_vars.keys()])
             args = ', '.join([f"%{iter.name} = %{init.name}" for (_, iter, init, _) in self.reduction_vars.values()])
             dtype = ', '.join([f"{dtype}" for (_, _, _, dtype) in self.reduction_vars.values()])
-            line = f"%{acc} = affine.for %{self.var} = {self.start} to {self.size} step {step} iter_args({args}) -> ({dtype})"
+            line = f"{acc} = affine.for %{self.var} = {self.start} to {self.size} step {step} iter_args({args}) -> ({dtype})"
         else:
             line = f"affine.for %{self.var} = {self.start} to {self.size} step {step}"
 

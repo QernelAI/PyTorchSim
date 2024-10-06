@@ -288,10 +288,10 @@ class CustomAsyncCompile(AsyncCompile):
                                   kwargs['intermediate_op'] if 'intermediate_op' in kwargs else None,
                                   vectorlane_size=vectorlane_size, spad_info=spad_info)
 
-            # onnx_path = os.path.join(result_path, "tile_graph.onnx")
-            # backend_path = os.path.join(TORCHSIM_DIR, "PyTorchSimBackend")
-            # backsim = BackendSimulator(backend_path, TORCHSIM_BACKEND_CONFIG)
-            # backsim.simulation(onnx_path)
+            onnx_path = os.path.join(result_path, "tile_graph.onnx")
+            backend_path = os.path.join(TORCHSIM_DIR, "PyTorchSimBackend")
+            backsim = BackendSimulator(backend_path, TORCHSIM_BACKEND_CONFIG)
+            backsim.simulation(onnx_path)
 
         def dryrun_simulator(*args, **kwargs):
             key = future.result()

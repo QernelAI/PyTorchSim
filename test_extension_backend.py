@@ -144,8 +144,10 @@ class ExtensionBackendTests(TestCase):
         device = self.module.custom_device()
         metrics.reset()
 
+        # torch.set_printoptions(threshold=float('inf'), linewidth=600)
+
         # element-wise operation TEST
-        test_vectoradd(device)
+        # test_vectoradd(device)
         # test_reduce_sum(device)
 
         # conv TEST
@@ -168,6 +170,19 @@ class ExtensionBackendTests(TestCase):
 
         # CNN TEST
         # test_CNN(device)
+
+        # LayerNorm TEST
+        # test_LayerNorm(device)
+
+        # Multihead Attention Test
+        # test_Attention(device)
+        # test_MultiAttention(device)
+
+        # BMM Test
+        # test_BMM(device)
+
+        # Transpose Test
+        test_Transpose(device)
 
 class MLP(nn.Module):
     def __init__(self):
@@ -194,6 +209,108 @@ class CNN(nn.Module):
         x = self.conv2(x)
         x = torch.nn.functional.relu(x)
         return x
+
+class LayerNorm(nn.Module):
+    def __init__(self, n):
+        super(LayerNorm, self).__init__()
+        self.ln = nn.LayerNorm(n)
+    
+    def forward(self, x):
+        return self.ln(x)
+
+class MultiheadAttention(nn.Module):
+    def __init__(self, embed_dim, num_heads):
+        super(MultiheadAttention, self).__init__()
+        multihead_attn = nn.MultiheadAttention(embed_dim, num_heads)
+    
+    def forward(self, x):
+        return multihead_attn(x, x, x)
+
+import math
+def clones(module, N):
+    "Produce N identical layers."
+    return nn.ModuleList([copy.deepcopy(module) for _ in range(N)])
+class my_MultiheadAttention(nn.Module):
+    def __init__(self, h, d_model, dropout=0.1):
+        super(my_MultiheadAttention, self).__init__()
+        assert d_model % h == 0
+        # We assume d_v always equals d_k
+        self.d_k = d_model // h
+        self.h = h
+        self.linears = clones(nn.Linear(d_model, d_model), 4)
+        self.attn = None
+    
+    def attention(self, query, key, value):
+        d_k = query.size(-1)
+        print("Attention in CPU >")
+        print("Score CPU > ")
+        print(torch.matmul(query, key.transpose(-2, -1)))
+
+        scores = torch.matmul(query, key.transpose(-2, -1)) / math.sqrt(d_k)
+        p_attn = scores.softmax(dim=-1)
+        print("Softmax CPU > ")
+        print(p_attn)
+        return torch.matmul(p_attn, value), p_attn
+
+    def forward(self, query, key, value):
+        # 1) Do all the linear projections in batch from d_model => h x d_k
+        query, key, value = [
+            lin(x).view(-1, self.h, self.d_k).transpose(0, 1).contiguous()
+            for lin, x in zip(self.linears, (query, key, value))
+        ]
+
+        if query.device == torch.device("cpu"):
+            print("QKV After Linear Projection in CPU >")
+            print("CPU Query > ", query)
+            print("CPU Query Weight > ", self.linears[0].weight)
+            print("CPU Query Bias > ", self.linears[0].bias)
+            print("CPU Key > ", key)
+            print("CPU Key Weight > ", self.linears[1].weight)
+            print("CPU Key Bias > ", self.linears[1].bias)
+            print("CPU Value > ", value)
+            print("CPU Value Weight > ", self.linears[2].weight)
+            print("CPU Value Bias > ", self.linears[2].bias)
+
+        # 2) Apply attention on all the projected vectors in batch.
+        # x, self.attn = self.attention(query, key, value)
+        # d_k = query.size(-1)
+
+        if query.device == torch.device("cpu"):
+            print("Attention in CPU >")
+            print("Score CPU > ")
+            print(torch.matmul(query, key.transpose(-2, -1)))
+
+        scores = torch.matmul(query, key.transpose(-2, -1)) / math.sqrt(self.d_k)
+        p_attn = scores.softmax(dim=-1)
+        if query.device == torch.device("cpu"):
+            print("Softmax CPU > ")
+            print(p_attn)
+        x = torch.matmul(p_attn, value)
+
+        if query.device == torch.device("cpu"):
+            print("Attention Result in CPU >")
+            print("CPU X > ", x)
+
+        # 3) "Concat" using a view and apply a final linear.
+        x = (
+            x.transpose(0, 1)
+            .contiguous()
+            .view(-1, self.h * self.d_k)
+        )
+
+        if query.device == torch.device("cpu"):
+            print("X After Concat in CPU >")
+            print("CPU X > ", x)
+
+        del query
+        del key
+        del value
+        return self.linears[-1](x)
+class my_Decoder(nn.Module):
+    def __init__(self):
+        # custom transformer decoder
+        super(my_Decoder, self).__init__()
+        
 
 def test_vectoradd(device):
     def vectoradd(a, b):
@@ -472,6 +589,113 @@ def test_ReLU(device):
     else:
         print("custom out: ", y.cpu())
         print("cpu out: ", cpu_y)
+
+def test_LayerNorm(device):
+    torch.manual_seed(0)
+    input = torch.randn(64, 64)
+    x1 = input.to(device=device)
+    x2 = input.to("cpu")
+    model = LayerNorm(64)
+    model.to(device=device)
+    opt_fn = torch.compile()(model)
+    y = opt_fn(x1)
+    cpu_model = model.to("cpu")
+    cpu_y = cpu_model(x2)
+    if torch.allclose(y.cpu(), cpu_y, rtol=1e-4, atol=1e-4):
+        print("-----------------------------")
+        print("|LayerNorm Forward Test Passed|")
+        print("-----------------------------")
+    else:
+        print("custom out: ", y.cpu())
+        print("cpu out: ", cpu_y)
+
+def test_Attention(device):
+    def attention(query, key, value):
+        import math
+        d_k = query.size(-1)
+        scores = torch.matmul(query, key.transpose(-2, -1)) / math.sqrt(d_k)
+        p_attn = scores.softmax(dim=-1)
+        return torch.matmul(p_attn, value), p_attn
+    
+    torch.manual_seed(0)
+    query = torch.randn(16, 128).to(device=device)
+    key = torch.randn(16, 128).to(device=device)
+    value = torch.randn(16, 128).to(device=device)
+
+    opt_fn = torch.compile()(attention)
+    res, p_attn = opt_fn(query, key, value)
+
+    cpu_res, cpu_p_attn = attention(query.cpu(), key.cpu(), value.cpu())
+
+    if torch.allclose(res.cpu(), cpu_res, rtol=1e-4, atol=1e-4):
+        print("----------------------------")
+        print("|Attention Forward Test Passed|")
+        print("----------------------------")
+    else:
+        print("custom out: ", res.cpu())
+        print("cpu out: ", cpu_res)
+
+def test_MultiAttention(device):
+    torch.manual_seed(0)
+    query = torch.randn(16, 128).to(device=device)
+    key = torch.randn(16, 128).to(device=device)
+    value = torch.randn(16, 128).to(device=device)
+
+    print("Model Input Print >>>>>> ")
+    print("Query > ", query.cpu())
+    print("Key > ", key.cpu())
+    print("Value > ", value.cpu())
+
+    multihead_attn = my_MultiheadAttention(8, 128)
+    multihead_attn.to(device=device)
+    opt_fn = torch.compile()(multihead_attn)
+    res = opt_fn(query, key, value)
+
+    cpu_multihead_attn = multihead_attn.to("cpu")
+    cpu_res = cpu_multihead_attn(query.cpu(), key.cpu(), value.cpu())
+
+    if torch.allclose(res.cpu(), cpu_res, rtol=1e-4, atol=1e-4):
+        print("----------------------------")
+        print("|Multihead Attention Forward Test Passed|")
+        print("----------------------------")
+    else:
+        print("custom out: ", res.cpu())
+        print("cpu out: ", cpu_res)
+
+def test_BMM(device):
+    def bmm(a, b):
+        return torch.bmm(a, b.transpose(1, 2))
+    torch.manual_seed(0)
+    a = torch.randn(1, 32, 64).to(device=device)
+    b = torch.randn(1, 16, 64).to(device=device)
+    opt_fn = torch.compile()(bmm)
+    res = opt_fn(a, b)
+    out = bmm(a.cpu(), b.cpu())
+    if torch.allclose(res.cpu(), out, rtol=1e-4, atol=1e-4):
+        print("----------------------------")
+        print("|BMM Forward Test Passed|")
+        print("----------------------------")
+    else:
+        print("custom out: ", res.cpu())
+        print("cpu out: ", out)
+
+def test_Transpose(device):
+    def transpose(a):
+        return a.transpose(0, 1).contiguous()
+    torch.manual_seed(0)
+    # x = torch.randn(16, 32).to(device=device)
+    x = torch.arange(16*32).reshape(16, 32).float().to(device=device)
+    opt_fn = torch.compile()(transpose)
+    res = opt_fn(x)
+    out = transpose(x.cpu())
+    if torch.allclose(res.cpu(), out, rtol=1e-4, atol=1e-4):
+        print("----------------------------")
+        print("|Transpose Forward Test Passed|")
+        print("----------------------------")
+    else:
+        print("custom out: ", res.cpu())
+        print("cpu out: ", out)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
