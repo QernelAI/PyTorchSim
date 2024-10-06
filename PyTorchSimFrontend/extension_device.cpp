@@ -136,12 +136,29 @@ REGISTER_ALLOCATOR(c10::DeviceType::PrivateUse1, &global_custom_alloc);
 at::Tensor & custom_fill__scalar(at::Tensor & self, const at::Scalar & value) {
   TORCH_CHECK(self.device().type() == c10::DeviceType::PrivateUse1, "Dummy test only allows dummy device.");
   TORCH_CHECK(self.is_contiguous());
-  TORCH_CHECK(self.scalar_type() == c10::ScalarType::Float);
+  // TORCH_CHECK(self.scalar_type() == c10::ScalarType::Float);
 
   op_counter += 1;
-  auto _data = static_cast<float*>(self.mutable_data_ptr());
-  for (size_t idx = 0; idx < self.numel(); idx++) {
-    _data[idx] = value.toFloat();
+  if (self.scalar_type() == c10::ScalarType::Float) {
+    auto _data = static_cast<float*>(self.mutable_data_ptr());
+    for (size_t idx = 0; idx < self.numel(); idx++) {
+      _data[idx] = value.toFloat();
+    }
+    return self;
+  } else if (self.scalar_type() == c10::ScalarType::Int) {
+    auto _data = static_cast<int*>(self.mutable_data_ptr());
+    for (size_t idx = 0; idx < self.numel(); idx++) {
+      _data[idx] = value.toInt();
+    }
+    return self;
+  } else if (self.scalar_type() == c10::ScalarType::Long) {
+    auto _data = static_cast<int64_t*>(self.mutable_data_ptr());
+    for (size_t idx = 0; idx < self.numel(); idx++) {
+      _data[idx] = value.toLong();
+    }
+    return self;
+  } else {
+    TORCH_CHECK(false, "Unsupported scalar type.");
   }
 
   return self;
@@ -244,6 +261,7 @@ TORCH_LIBRARY_IMPL(aten, PrivateUse1, m) {
   m.impl("empty_strided", &custom_empty_strided);
   m.impl("empty.memory_format", &custom_empty);
   m.impl("as_strided", at::native::as_strided_tensorimpl);
+  m.impl("view", at::native::view);
 }
 
 TORCH_LIBRARY_FRAGMENT(aten, m) {

@@ -43,7 +43,7 @@ DTYPE_TO_C = {
     torch.int16: "int16_t",
     torch.int8: "int8_t",
     torch.uint8: "uint8_t",
-    torch.bool: "bool",
+    torch.bool: "uint8_t",
     torch.bfloat16: "bfloat16",
 }
 

@@ -10,7 +10,6 @@ class MLIRKernelCallerCodeGen(LLVMKernelCallerCodeGen):
 
     def write_header(self):
         super().write_header()
-        self.writeline("#include <stdbool.h>")
         self.writeline(f"#include \"global_var.h\"")
 
     def generate_kernel_declare(self):
