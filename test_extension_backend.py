@@ -467,9 +467,9 @@ def test_mlp(device):
     cpu_model = copy.deepcopy(model).to("cpu")
     cpu_model.requires_grad = True
     cpu_y = cpu_model(x2)
-    loss_fn = torch.nn.MSELoss()
+    loss_fn = torch.nn.CrossEntropyLoss()
     opt_loss = torch.compile()(loss_fn)
-    loss = opt_loss(y, y1)
+    loss = loss_fn(y, y1)
     cpu_loss = loss_fn(cpu_y, y2)
     loss.backward()
     cpu_loss.backward()
