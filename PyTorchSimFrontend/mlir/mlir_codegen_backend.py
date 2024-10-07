@@ -240,9 +240,6 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         self.map_cse = common.CSE("#", self.suffix, name_prefix="map")
         self.consts = set()
         self.tags = set()
-        self.loop_info = {}
-        self.load_desc = {}
-        self.store_desc = {}
         self.tiling_indices = [0, 1]
         self.tile_shape = f"{self.tile_row}x{self.tile_col}"
         self.tile_size = self.tile_row * self.tile_col
@@ -638,9 +635,6 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         wrapper.add_import_once(f'\nfrom extension_codecache import CustomAsyncCompile')
         wrapper.add_import_once(f'\ncustom_async_compile = CustomAsyncCompile()')
         # Dump loop and load/store information
-        wrapper.add_import_once(f"loop_info = {self.loop_info}")
-        wrapper.add_import_once(f"load_tile_info = {self.load_desc}")
-        wrapper.add_import_once(f"store_tile_info = {self.store_desc}")
         wrapper.add_import_once(f"arg_attributes = {arg_attributes}")
 
 
@@ -810,9 +804,6 @@ class MLIRScheduling(BaseScheduling):
 
             codecache_def = IndentedBuffer()
             codecache_def.writeline(f"custom_async_compile.mlir('''{src_code}''', ")
-            codecache_def.writeline("loop_info=loop_info,")
-            codecache_def.writeline("load_tile_info=load_tile_info,")
-            codecache_def.writeline("store_tile_info=store_tile_info,")
             codecache_def.writeline(f"vectorlane_size={vector_lane},")
             codecache_def.writeline(f"tile_size={tile_size},")
             codecache_def.writeline(f"spad_info={spad_info},")
