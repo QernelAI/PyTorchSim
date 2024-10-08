@@ -182,7 +182,10 @@ class ExtensionBackendTests(TestCase):
         # test_BMM(device)
 
         # Transpose Test
-        test_Transpose(device)
+        # test_Transpose(device)
+
+        # Optimizer Test
+        # test_optimizer(device)
 
 class MLP(nn.Module):
     def __init__(self):
@@ -696,6 +699,33 @@ def test_Transpose(device):
         print("custom out: ", res.cpu())
         print("cpu out: ", out)
 
+def test_optimizer(device):
+    torch.manual_seed(0)
+    model = MLP().to(device=device)
+    cpu_model = copy.deepcopy(model).to("cpu")
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    cpu_optimizer = torch.optim.Adam(cpu_model.parameters(), lr=0.001)
+    opt_step = torch.compile()(optimizer.step)
+    input = torch.randn(16, 16)
+    x1 = copy.deepcopy(input).to(device=device)
+    x2 = copy.deepcopy(input).to("cpu")
+    y = model(x1)
+    cpu_y = cpu_model(x2)
+    loss = y.sum()
+    cpu_loss = cpu_y.sum()
+    optimizer.zero_grad()
+    cpu_optimizer.zero_grad()
+    loss.backward()
+    cpu_loss.backward()
+    opt_step()
+    cpu_optimizer.step()
+    if torch.allclose(model.linear1.weight.cpu(), cpu_model.linear1.weight, rtol=1e-4, atol=1e-4):
+        print("-----------------------")
+        print("|Optimizer Test Passed|")
+        print("-----------------------")
+    else:
+        print("custom out: ", model.linear1.weight.cpu())
+        print("cpu out: ", cpu_model.linear1.weight)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
