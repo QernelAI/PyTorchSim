@@ -236,7 +236,7 @@ class BaseMLIRKernel(common.Kernel, BaseMLIRHardwareInfo):
                     args, tile_size, dtype = self.expand(args, buf_bounds)
                     csevar = self.cse.generate(
                         self.compute,
-                        getattr(parent_handler, name)(*args, tile_size=tile_size, **kwargs),  # type: ignore[has-type]
+                        getattr(parent_handler, name)(*args, tile_size=tile_size, dtype=DTYPE_TO_MLIR[dtype], **kwargs),  # type: ignore[has-type]
                         bounds=buf_bounds,
                     )
                     self.tile_info[csevar] = tile_size, dtype

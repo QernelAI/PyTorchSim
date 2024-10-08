@@ -106,103 +106,128 @@ class ExtensionWrapperCodegen(wrapper.WrapperCodeGen):
 
 class ExtensionOverrides(common.OpOverrides):
     @staticmethod
-    def add(operand1, operand2, tile_size=16):
-        shape = f"vector<{tile_size}xf32>" if tile_size > 1 else "f32"
-        return f'arith.addf %{operand1}, %{operand2} : {shape}'
+    def add(operand1, operand2, tile_size=16, dtype="f32"):
+        shape = f"vector<{tile_size}x{dtype}>" if tile_size > 1 else dtype
+        return f'arith.add{dtype[0]} %{operand1}, %{operand2} : {shape}'
 
     @staticmethod
-    def sub(operand1, operand2, tile_size=16):
-        shape = f"vector<{tile_size}xf32>" if tile_size > 1 else "f32"
-        return f'arith.subf %{operand1}, %{operand2} : {shape}'
+    def sub(operand1, operand2, tile_size=16, dtype="f32"):
+        shape = f"vector<{tile_size}x{dtype}>" if tile_size > 1 else dtype
+        return f'arith.sub{dtype[0]} %{operand1}, %{operand2} : {shape}'
 
     @staticmethod
-    def mul(operand1, operand2, tile_size=16):
-        shape = f"vector<{tile_size}xf32>" if tile_size > 1 else "f32"
-        return f'arith.mulf %{operand1}, %{operand2} : {shape}'
+    def mul(operand1, operand2, tile_size=16, dtype="f32"):
+        shape = f"vector<{tile_size}x{dtype}>" if tile_size > 1 else dtype
+        return f'arith.mul{dtype[0]} %{operand1}, %{operand2} : {shape}'
 
     @staticmethod
-    def div(operand1, operand2, tile_size=16):
-        shape = f"vector<{tile_size}xf32>" if tile_size > 1 else "f32"
-        return f'arith.divf %{operand1}, %{operand2} : {shape}'
+    def div(operand1, operand2, tile_size=16, dtype="f32"):
+        shape = f"vector<{tile_size}x{dtype}>" if tile_size > 1 else dtype
+        return f'arith.div{dtype[0]} %{operand1}, %{operand2} : {shape}'
 
     @staticmethod
-    def truediv(operand1, operand2, tile_size=16):
-        shape = f"vector<{tile_size}xf32>" if tile_size > 1 else "f32"
-        return f'arith.divf %{operand1}, %{operand2} : {shape}'
+    def truediv(operand1, operand2, tile_size=16, dtype="f32"):
+        shape = f"vector<{tile_size}x{dtype}>" if tile_size > 1 else dtype
+        return f'arith.div{dtype[0]} %{operand1}, %{operand2} : {shape}'
 
     @staticmethod
-    def constant(value, dtype, tile_size=16):
-        dtype = mlir_common.DTYPE_TO_MLIR[dtype]
-        return f'arith.constant {format(value, ".6f")} : {dtype}'
+    def to_dtype(x, dtype, src_dtype=None, tile_size=16):
+        mlir_dtype = mlir_common.DTYPE_TO_MLIR[dtype]
+        src_mlir_dtype = mlir_common.DTYPE_TO_MLIR[src_dtype]
+
+        dst_bits = 1 if dtype == torch.bool else torch.finfo(dtype).bits if dtype.is_floating_point else torch.iinfo(dtype).bits
+        src_bits = 1 if src_dtype == torch.bool else torch.finfo(src_dtype).bits if src_dtype.is_floating_point else torch.iinfo(src_dtype).bits
+        shape = f"vector<{tile_size}x{mlir_dtype}>" if tile_size > 1 else mlir_dtype
+        src_shape = f"vector<{tile_size}x{src_mlir_dtype}>" if tile_size > 1 else src_mlir_dtype
+        if dtype.is_floating_point and not src_dtype.is_floating_point:
+            return f"arith.sitofp %{x} : {src_shape} to {shape}"
+        elif not dtype.is_floating_point and src_dtype.is_floating_point:
+            return f"arith.fptosi %{x} : {src_shape} to {shape}"
+        else:
+            operation = "arith.trunc" if dst_bits < src_bits else "arith.ext"
+            operation_suffix = "f" if dtype.is_floating_point else "i"
+            return f"{operation}{operation_suffix} %{x} : {src_shape} to {shape}"
 
     @staticmethod
-    def exp(operand, tile_size=16):
-        shape = f"vector<{tile_size}xf32>" if tile_size > 1 else "f32"
+    def constant(value, src_type, tile_size=16, dtype="f32"):
+        src_type = mlir_common.DTYPE_TO_MLIR[src_type]
+        # if value represented by e notation, convert to float (ex 1e-3 -> 1.0e-3)
+        if "e" in str(value):
+            value = float(value)
+        if src_type[0] == "f":
+            value = format(value, ".20f")
+        return f'arith.constant {value} : {src_type}'
+
+    @staticmethod
+    def exp(operand, tile_size=16, dtype="f32"):
+        shape = f"vector<{tile_size}x{dtype}>" if tile_size > 1 else dtype
         return f'math.exp %{operand} : {shape}'
 
     @staticmethod
-    def maximum(operand1, operand2, tile_size=16):
-        shape = f"vector<{tile_size}xf32>" if tile_size > 1 else "f32"
-        return f'arith.maximumf %{operand1}, %{operand2} : {shape}'
+    def maximum(operand1, operand2, tile_size=16, dtype="f32"):
+        shape = f"vector<{tile_size}x{dtype}>" if tile_size > 1 else dtype
+        return f'arith.maximum{dtype[0]} %{operand1}, %{operand2} : {shape}'
 
     @staticmethod
-    def sqrt(x, tile_size=16):
-        shape = f"vector<{tile_size}xf32>" if tile_size > 1 else "f32"
+    def sqrt(x, tile_size=16, dtype="f32"):
+        shape = f"vector<{tile_size}x{dtype}>" if tile_size > 1 else dtype
         return f'math.sqrt %{x} : {shape}'
 
     @staticmethod
-    def ne(operand1, operand2, tile_size=16):
+    def ne(operand1, operand2, tile_size=16, dtype="f32"):
         shape = f"vector<{tile_size}xi1>" if tile_size > 1 else "i1"
         return f'arith.cmpi one, %{operand1}, %{operand2} : {shape}'
 
     @staticmethod
-    def le(operand1, operand2, tile_size=16):
-        shape = f"vector<{tile_size}xf32>" if tile_size > 1 else "f32"
-        return f'arith.cmpf ole, %{operand1}, %{operand2} : {shape}'
+    def le(operand1, operand2, tile_size=16, dtype="f32"):
+        shape = f"vector<{tile_size}x{dtype}>" if tile_size > 1 else dtype
+        return f'arith.cmp{dtype[0]} ole, %{operand1}, %{operand2} : {shape}'
 
     @staticmethod
-    def relu(x, tile_size=16):
+    def relu(x, tile_size=16, dtype=None):
         return ops.maximum(x, ops.constant(0.0, torch.float32))
 
     @staticmethod
-    def sigmoid(x, tile_size=16):
+    def sigmoid(x, tile_size=16, dtype=None):
         one = ops.constant(1, torch.float32)
         return ops.truediv(one, ops.add(one, ops.exp(ops.neg(x))))
 
     @staticmethod
-    def neg(x, tile_size=16):
-        shape = f"vector<{tile_size}xf32>" if tile_size > 1 else "f32"
-        return f'arith.negf %{x} : {shape}'
+    def neg(x, tile_size=16, dtype="f32"):
+        shape = f"vector<{tile_size}x{dtype}>" if tile_size > 1 else dtype
+        return f'arith.neg{dtype[0]} %{x} : {shape}'
 
     @staticmethod
-    def where(condition, x, y, tile_size=16):
-        shape = f"vector<{tile_size}xf32>" if tile_size > 1 else "f32"
+    def where(condition, x, y, tile_size=16, dtype="f32"):
+        shape = f"vector<{tile_size}x{dtype}>" if tile_size > 1 else dtype
         cond_shape = f"vector<{tile_size}xi1>," if tile_size > 1 else ""
         return f"arith.select %{condition}, %{x}, %{y} : {cond_shape} {shape}"
 
     @staticmethod
-    def logical_not(operand, tile_size=16):
+    def logical_not(operand, tile_size=16, dtype="f32"):
         tile_size=16
-        shape = f"vector<{tile_size}xf32>" if tile_size > 1 else "f32"
+        shape = f"vector<{tile_size}x{dtype}>" if tile_size > 1 else dtype
         result_shape = f"vector<{tile_size}xi1>" if tile_size > 1 else "i1"
-        assert(0)
-        return f"arith.cmpf oeq, %{operand}, %zero_vec{tile_size} : {shape} -> {result_shape}"
-    def rsqrt(x, tile_size=16):
-        shape = f"vector<{tile_size}xf32>" if tile_size > 1 else "f32"
+        assert(0) # FIXME: implement
+        return f"arith.cmp{dtype[0]} oeq, %{operand}, %zero_vec{tile_size} : {shape} -> {result_shape}"
+
+    @staticmethod
+    def rsqrt(x, tile_size=16, dtype="f32"):
+        shape = f"vector<{tile_size}x{dtype}>" if tile_size > 1 else dtype
         return f'math.rsqrt %{x} : {shape}'
 
     @staticmethod
-    def pow(a, b, tile_size=16):
-        shape = f"vector<{tile_size}xf32>" if tile_size > 1 else "f32"
-        return f"math.powf %{a}, %{b} : {shape}"
+    def pow(a, b, tile_size=16, dtype="f32"):
+        shape = f"vector<{tile_size}x{dtype}>" if tile_size > 1 else dtype
+        return f"math.pow{dtype[0]} %{a}, %{b} : {shape}"
 
     @staticmethod
-    def log(x, tile_size=16):
-        shape = f"vector<{tile_size}xf32>" if tile_size > 1 else "f32"
+    def log(x, tile_size=16, dtype="f32"):
+        shape = f"vector<{tile_size}x{dtype}>" if tile_size > 1 else dtype
         return f'math.log %{x} : {shape}'
 
     @staticmethod
-    def reciprocal(a, tile_size=16):
+    def reciprocal(a, tile_size=16, dtype="f32"):
         return ops.div(ops.constant(1.0, torch.float32), a)
 
 RTYPE_TO_MLIR = {
