@@ -11,6 +11,8 @@ import matplotlib.pyplot as plt
 
 import torch
 import torch.nn as nn
+from torchvision import datasets, transforms
+from torch.utils.data import DataLoader, Subset
 import torch._dynamo
 import torch.utils.cpp_extension
 from torch._inductor import config
@@ -184,21 +186,27 @@ class ExtensionBackendTests(TestCase):
         # Transpose Test
         # test_Transpose(device)
 
+        # Training Experiments
+        # MLP_MNIST(device)
+
         # Optimizer Test
         # test_optimizer(device)
 
 class MLP(nn.Module):
     def __init__(self):
         super(MLP, self).__init__()
-        self.linear1 = nn.Linear(64, 64)
-        self.linear2 = nn.Linear(64, 64)
+        self.linear1 = nn.Linear(28*28, 64)
+        self.linear2 = nn.Linear(64, 8)
         self.relu = nn.ReLU()
         self.softmax = nn.Softmax(dim=1)
+        # self.sigmoid = nn.Sigmoid()
 
     def forward(self, x):
-        x = self.linear1(self.relu(x))
-        x = self.linear2(self.relu(x))
-        x = self.softmax(x)
+        x = self.linear1(x)
+        x = self.relu(x)
+        x = self.linear2(x)
+        # x = self.relu(x)
+        # x = self.softmax(x)
         return x
 
 class CNN(nn.Module):
@@ -206,18 +214,23 @@ class CNN(nn.Module):
         super(CNN, self).__init__()
         self.conv1 = nn.Conv2d(8, 16, 3, padding=1)
         self.conv2 = nn.Conv2d(16, 16, 3, padding=1)
+        self.norm = nn.BatchNorm2d(16)
+        self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
 
     def forward(self, x):
         x = self.conv1(x)
-        x = self.conv2(x)
-        x = torch.nn.functional.relu(x)
+        # x = self.norm(x)
+        # x = self.conv2(x)
+        # x = self.maxpool(x)
+        # x = torch.nn.functional.relu(x)
         return x
 
 class LayerNorm(nn.Module):
     def __init__(self, n):
         super(LayerNorm, self).__init__()
         self.ln = nn.LayerNorm(n)
-    
+
     def forward(self, x):
         return self.ln(x)
 
@@ -225,7 +238,7 @@ class MultiheadAttention(nn.Module):
     def __init__(self, embed_dim, num_heads):
         super(MultiheadAttention, self).__init__()
         multihead_attn = nn.MultiheadAttention(embed_dim, num_heads)
-    
+
     def forward(self, x):
         return multihead_attn(x, x, x)
 
@@ -242,7 +255,7 @@ class my_MultiheadAttention(nn.Module):
         self.h = h
         self.linears = clones(nn.Linear(d_model, d_model), 4)
         self.attn = None
-    
+
     def attention(self, query, key, value):
         d_k = query.size(-1)
         print("Attention in CPU >")
@@ -459,7 +472,7 @@ def test_mlp(device):
     input = torch.randn(64, 64)
     x1 = copy.deepcopy(input).to(device=device)
     x2 = copy.deepcopy(input).to("cpu")
-    target = torch.randn(64, 64)
+    target = torch.randn(64, 8)
     y1 = copy.deepcopy(target).to(device=device)
     y2 = copy.deepcopy(target).to("cpu")
     model = MLP()
@@ -619,7 +632,7 @@ def test_Attention(device):
         scores = torch.matmul(query, key.transpose(-2, -1)) / math.sqrt(d_k)
         p_attn = scores.softmax(dim=-1)
         return torch.matmul(p_attn, value), p_attn
-    
+
     torch.manual_seed(0)
     query = torch.randn(16, 128).to(device=device)
     key = torch.randn(16, 128).to(device=device)
@@ -698,6 +711,47 @@ def test_Transpose(device):
     else:
         print("custom out: ", res.cpu())
         print("cpu out: ", out)
+
+def MLP_MNIST(device):
+    transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))])
+    if not os.path.exists('./dataset'):
+        os.makedirs('./dataset')
+    train_dataset = datasets.MNIST(root='./dataset', train=True, download=True, transform=transform)
+    test_dataset = datasets.MNIST(root='./dataset', train=False, download=True, transform=transform)
+    indices = [i for i, label in enumerate(train_dataset.targets) if label < 8]
+    subset_train_mnist = Subset(train_dataset, indices)
+    train_loader = DataLoader(dataset=subset_train_mnist, batch_size=964, shuffle=True)
+    test_loader = DataLoader(dataset=test_dataset, batch_size=64, shuffle=False)
+
+    model = MLP().to(device=device)
+    criterion = nn.CrossEntropyLoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    opt_model = torch.compile()(model)
+    opt_step = torch.compile()(optimizer.step)
+    opt_zero_grad = torch.compile()(optimizer.zero_grad)
+
+    def train(model, device, train_loader, optimizer, epochs):
+        model.train()
+        loss_list = []
+        for epoch in range(epochs):
+            for batch_idx, (data, target) in enumerate(train_loader):
+                data, target = data.view(data.size(0), -1).to(device), target.to(device)
+                output = model(data)
+                loss = criterion(output, target)
+                opt_zero_grad()
+                loss.backward()
+                opt_step()
+                print(f'Train Epoch: {epoch} [{batch_idx * len(data)}/{len(train_loader.dataset)} '
+                    f'({100. * batch_idx / len(train_loader):.0f}%)]\tLoss: {loss.cpu():.6f}')
+                loss_list.append(loss.cpu().detach())
+        return loss_list
+
+    loss_list = train(opt_model, device, train_loader, optimizer, 2)
+    import csv
+    with open('mlp_loss.csv', 'w') as f:
+        writer = csv.writer(f)
+        for loss in loss_list:
+            writer.writerow([loss.item()])
 
 def test_optimizer(device):
     torch.manual_seed(0)
