@@ -247,6 +247,7 @@ class MLIRTile():
         self.n_row = n_row
         self.n_col = n_col
         self.vector_lane = vector_lane
+        self.axis_strides= {}
 
     def get_tile_size(self):
         return self.n_row * self.n_col
@@ -280,6 +281,17 @@ class MLIRTile():
 
     def is_vector(self):
         return self.n_row == 1
+
+    def update_axis_stride(self, cv):
+        if any([i==0 for i in cv]):
+            return
+
+        for axis, stride in enumerate(cv.values()):
+            self.axis_strides[axis] = stride
+
+    def get_axis_and_tile_info(self):
+        axis = list(self.axis_strides.keys())
+        return {axis[-2]: self.n_row, axis[-1]: self.n_col}
 
 class MLIRKernel(mlir_common.BaseMLIRKernel):
     overrides = ExtensionOverrides
@@ -337,6 +349,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
     def get_dma_info(self, name, index, dtype, is_store):
         cv = self.get_constant_vector(index)
         tile_size_per_lane = min(self.tile_desc.get_tile_size_per_lane(), self.buffer_types[name][1])
+        self.tile_desc.update_axis_stride(cv)
 
         # Case 0. Tile is 0-D scalar
         if len(cv) == 0:
@@ -857,7 +870,7 @@ class MLIRScheduling(BaseScheduling):
         kernel_name = f"extension_kernel_{self.count}"
         self.count += 1
         src_code = ex_kernel.codegen_nodes(nodes, kernel_name)
-        self.define_kernel(src_code, kernel_name, ex_kernel.vector_lane, (ex_kernel.tile_desc.n_row, ex_kernel.tile_desc.n_col), ex_kernel.spad_info)
+        self.define_kernel(src_code, kernel_name, ex_kernel.vector_lane, ex_kernel.tile_desc.get_axis_and_tile_info(), ex_kernel.spad_info)
         ex_kernel.call_kernel(kernel_name)
         _, args, _, _ = ex_kernel.args.mlir_argdefs()
         args = ", ".join(args)
