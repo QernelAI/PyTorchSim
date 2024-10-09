@@ -663,18 +663,37 @@ def test_BMM(device):
         print("custom out: ", res.cpu())
         print("cpu out: ", out)
 
-def test_Transpose(device):
+def test_Transpose2D(device, size=(16, 32)):
     def transpose(a):
         return a.transpose(0, 1).contiguous()
     torch.manual_seed(0)
     # x = torch.randn(16, 32).to(device=device)
-    x = torch.arange(16*32).reshape(16, 32).float().to(device=device)
+    x = torch.randn(size[0], size[1]).float().to(device=device)
     opt_fn = torch.compile()(transpose)
     res = opt_fn(x)
     out = transpose(x.cpu())
     if torch.allclose(res.cpu(), out, rtol=1e-4, atol=1e-4):
         print("----------------------------")
         print("|Transpose Forward Test Passed|")
+        print("----------------------------")
+    else:
+        print("custom out: ", res.cpu())
+        print("cpu out: ", out)
+
+def test_Transpose2D_2(device, size=(16, 32)):
+    def transpose(a, b):
+        return a.transpose(0, 1) + b
+    torch.manual_seed(0)
+    # x = torch.randn(16, 32).to(device=device)
+    x = torch.randn(size[0], size[1]).float().to(device=device)
+    y = torch.randn(size[1], size[0]).float().to(device=device)
+
+    opt_fn = torch.compile()(transpose)
+    res = opt_fn(x, y)
+    out = transpose(x.cpu(), y.cpu())
+    if torch.allclose(res.cpu(), out, rtol=1e-4, atol=1e-4):
+        print("----------------------------")
+        print("|Transpose2 Forward Test Passed|")
         print("----------------------------")
     else:
         print("custom out: ", res.cpu())
@@ -760,3 +779,5 @@ if __name__ == "__main__":
     test_vectoradd(device, (47, 10))
     test_reduce_sum(device, (16, 64), 1, keepdim=True)
     test_reduce_sum(device, (16, 64), 0, keepdim=True)
+    test_Transpose2D(device, [64, 64])
+    test_Transpose2D_2(device, [16, 64])

@@ -311,7 +311,6 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         self.affine_yield = {}
         self.welford_reduce_out = None
         self.reduce_iterator = {}
-        self.is_transpose = False
 
 <<<<<<< HEAD
         # is_transposed
@@ -375,14 +374,20 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
                     t_row = self.tile_desc.n_row
                     t_col = self.tile_desc.n_col
                     mm_stride = self.ranges[1]
+
                 if is_reduction and is_transposed:
                     is_col_major = False
                     chunk_size = t_col // self.vector_lane
                 elif is_reduction and not is_transposed:
                     is_col_major = True
                     chunk_size = self.tile_desc.get_tile_size() // self.vector_lane
+                elif not is_reduction and is_transposed:
+                    # Transposed case
+                    is_col_major = True
+                    chunk_size = self.tile_desc.get_tile_size() // self.vector_lane
                 else:
-                    raise NotImplementedError()
+                    is_col_major = False
+                    chunk_size = self.tile_desc.get_cols_per_lane()
             else:
                 # Broadcast pattern
                 chunk_size = self.tile_desc.get_cols_per_lane()
@@ -665,7 +670,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         #if (self.tiling_idx < self.reduction_depth and len(self.reduction_idx) > 0):
         #    tile_row, tile_col = self.tile_desc.n_col, self.tile_desc.n_row
         tile_row = self.tile_desc.get_tile_size() if len(self.itervars) == 1 else tile_row
-        loops = [LoopLevel(var, size, idx, tile_row=tile_row, tile_col=tile_col, is_transpose=self.is_transpose) for idx, (var, size) in enumerate(zip(self.itervars, self.ranges))]
+        loops = [LoopLevel(var, size, idx, tile_row=tile_row, tile_col=tile_col) for idx, (var, size) in enumerate(zip(self.itervars, self.ranges))]
         loops, reductions = [LoopNest(loops[: self.reduction_depth]),
                              LoopNest(loops[self.reduction_depth :])]
         reductions.mark_reduction(self.reduction_vars)
@@ -792,14 +797,13 @@ class LoopLevel:
     tile_row: int = 4
     tile_col: int = 4
     reduction_vars: Dict[str, str] = None
-    is_transpose: bool = False
 
     def lines(self):
         step = 1
         if self.idx == 0:
-            step = self.tile_col if self.is_transpose else self.tile_row
+            step = self.tile_row
         elif self.idx == 1:
-            step = self.tile_row if self.is_transpose else self.tile_col
+            step = self.tile_col
         if self.reduction_vars:
             acc = ', '.join([f"%{acc.name}" for acc in self.reduction_vars.keys()])
             args = ', '.join([f"%{iter.name} = %{init.name}" for (_, iter, init, _) in self.reduction_vars.values()])
