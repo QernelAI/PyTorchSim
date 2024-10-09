@@ -143,60 +143,11 @@ class ExtensionBackendTests(TestCase):
             == ExtensionWrapperCodegen
         )
 
-        device = self.module.custom_device()
-        metrics.reset()
-
-        # torch.set_printoptions(threshold=float('inf'), linewidth=600)
-
-        # element-wise operation TEST
-        # test_vectoradd(device)
-        # test_reduce_sum(device)
-
-        # conv TEST
-        # test_conv2d(device)
-
-        # Backward Uni-Test (Single Perceptron)
-        # test_single_perceptron(device)
-
-        # Matmul TEST
-        # test_matmul(device)
-
-        # MLP TEST
-        # test_mlp(device)
-
-        # Softmax TEST
-        # test_softmax(device)
-
-        # ReLU TEST
-        # test_ReLU(device)
-
-        # CNN TEST
-        # test_CNN(device)
-
-        # LayerNorm TEST
-        # test_LayerNorm(device)
-
-        # Multihead Attention Test
-        # test_Attention(device)
-        # test_MultiAttention(device)
-
-        # BMM Test
-        # test_BMM(device)
-
-        # Transpose Test
-        # test_Transpose(device)
-
-        # Training Experiments
-        # MLP_MNIST(device)
-
-        # Optimizer Test
-        # test_optimizer(device)
-
 class MLP(nn.Module):
-    def __init__(self):
+    def __init__(self, input_size=28*28, hidden_size=64, output_size=8):
         super(MLP, self).__init__()
-        self.linear1 = nn.Linear(28*28, 64)
-        self.linear2 = nn.Linear(64, 8)
+        self.linear1 = nn.Linear(input_size, hidden_size)
+        self.linear2 = nn.Linear(hidden_size, output_size)
         self.relu = nn.ReLU()
         self.softmax = nn.Softmax(dim=1)
         # self.sigmoid = nn.Sigmoid()
@@ -326,13 +277,12 @@ class my_Decoder(nn.Module):
     def __init__(self):
         # custom transformer decoder
         super(my_Decoder, self).__init__()
-        
 
-def test_vectoradd(device):
+def test_vectoradd(device, size=(128, 128)):
     def vectoradd(a, b):
         return a + b
-    x = torch.randn(128, 128).to(device=device)
-    y = torch.randn(128, 128).to(device=device)
+    x = torch.randn(size).to(device=device)
+    y = torch.randn(size).to(device=device)
     opt_fn = torch.compile()(vectoradd)
     res = opt_fn(x, y)
     out = vectoradd(x.cpu(), y.cpu())
@@ -344,14 +294,14 @@ def test_vectoradd(device):
         print("custom out: ", res.cpu())
         print("cpu out: ", out)
 
-def test_reduce_sum(device):
-    def reduce_sum(a, b):
-        return torch.sum(a + b, axis=0)
-    x = torch.randn(128, 128).to(device=device)
-    y = torch.randn(128, 128).to(device=device)
+def test_reduce_sum(device, size, dim, keepdim=False):
+    def reduce_sum(a, b, dim, keepdim):
+        return torch.sum(a + b, axis=dim, keepdim=keepdim)
+    x = torch.randn(size).to(device=device)
+    y = torch.randn(size).to(device=device)
     opt_fn = torch.compile()(reduce_sum)
-    res = opt_fn(x, y)
-    out = reduce_sum(x.cpu(), y.cpu())
+    res = opt_fn(x, y, dim, keepdim)
+    out = reduce_sum(x.cpu(), y.cpu(), dim, keepdim)
     if torch.allclose(res.cpu(), out, rtol=1e-4, atol=1e-4):
         print("-----------------------")
         print("|ReduceSum Test Passed|")
@@ -443,9 +393,8 @@ def test_single_perceptron(device):
     # plt.savefig('result.png')
 
 def test_matmul(device):
-    def custom_matmul(a, b):
-        # return torch.addmm(bias, a, b)
-        return torch.matmul(a, b)
+    def custom_matmul(bias, a, b):
+        return torch.addmm(bias, a, b)
     torch.manual_seed(0)
     input = torch.randn(128, 64)
     weight = torch.randn(64, 32)
@@ -457,8 +406,8 @@ def test_matmul(device):
     w2 = weight.to("cpu")
     b2 = bias.to("cpu")
     opt_fn = torch.compile()(custom_matmul)
-    res = opt_fn(x1, w1)
-    y = custom_matmul(x2, w2)
+    res = opt_fn(b1, x1, w1)
+    y = custom_matmul(b2, x2, w2)
     if torch.allclose(res.cpu(), y, rtol=1e-4, atol=1e-4):
         print("----------------------------")
         print("|Matmul Forward Test Passed|")
@@ -467,15 +416,15 @@ def test_matmul(device):
         print("custom out: ", res.cpu())
         print("cpu out: ", y)
 
-def test_mlp(device):
+def test_mlp(device, batch_size=64, input_size=64, hidden_size=32, output_size=8):
     torch.manual_seed(0)
-    input = torch.randn(64, 64)
+    input = torch.randn(batch_size, input_size)
     x1 = copy.deepcopy(input).to(device=device)
     x2 = copy.deepcopy(input).to("cpu")
-    target = torch.randn(64, 8)
+    target = torch.randn(batch_size, output_size)
     y1 = copy.deepcopy(target).to(device=device)
     y2 = copy.deepcopy(target).to("cpu")
-    model = MLP()
+    model = MLP(input_size, hidden_size, output_size)
     model.requires_grad = True
     model.to(device=device)
     opt_fn = torch.compile()(model)
@@ -574,9 +523,9 @@ def test_conv2d(device):
         print("cpu out: ", out)
     print("Max diff > ", torch.max(torch.abs(res.cpu() - out)))
 
-def test_softmax(device):
+def test_softmax(device, size=(128, 128)):
     torch.manual_seed(0)
-    input = torch.randn(128, 128)
+    input = torch.randn(size)
     x1 = input.to(device=device)
     x2 = input.to("cpu")
     opt_fn = torch.compile()(torch.nn.functional.softmax)
@@ -590,9 +539,9 @@ def test_softmax(device):
         print("custom out: ", y.cpu())
         print("cpu out: ", cpu_y)
 
-def test_ReLU(device):
+def test_ReLU(device, size=(128, 128)):
     torch.manual_seed(0)
-    input = torch.randn(128, 128)
+    input = torch.randn(size)
     x1 = input.to(device=device)
     x2 = input.to("cpu")
     opt_fn = torch.compile()(torch.nn.functional.relu)
@@ -606,21 +555,40 @@ def test_ReLU(device):
         print("custom out: ", y.cpu())
         print("cpu out: ", cpu_y)
 
-def test_LayerNorm(device):
+def test_LayerNorm(device, size=(64, 64)):
     torch.manual_seed(0)
-    input = torch.randn(32, 64)
+    input = torch.randn(size)
     x1 = input.to(device=device)
     x2 = input.to("cpu")
-    model = LayerNorm(64)
+    model = LayerNorm(size[-1])
     model.to(device=device)
     opt_fn = torch.compile()(model)
     y = opt_fn(x1)
     cpu_model = model.to("cpu")
     cpu_y = cpu_model(x2)
     if torch.allclose(y.cpu(), cpu_y, rtol=1e-4, atol=1e-4):
-        print("-----------------------------")
+        print("-------------------------------")
         print("|LayerNorm Forward Test Passed|")
-        print("-----------------------------")
+        print("-------------------------------")
+    else:
+        print("custom out: ", y.cpu())
+        print("cpu out: ", cpu_y)
+
+def test_BatchNorm(device, size=(1, 16, 64, 64)):
+    torch.manual_seed(0)
+    model = nn.BatchNorm2d(size[1])
+    model.to(device=device)
+    input = torch.randn(size)
+    x1 = input.to(device=device)
+    x2 = input.to("cpu")
+    opt_fn = torch.compile()(model)
+    y = opt_fn(x1)
+    cpu_model = model.to("cpu")
+    cpu_y = cpu_model(x2)
+    if torch.allclose(y.cpu(), cpu_y, rtol=1e-4, atol=1e-4):
+        print("-------------------------------")
+        print("|BatchNorm Forward Test Passed|")
+        print("-------------------------------")
     else:
         print("custom out: ", y.cpu())
         print("cpu out: ", cpu_y)
@@ -721,9 +689,8 @@ def MLP_MNIST(device):
     indices = [i for i, label in enumerate(train_dataset.targets) if label < 8]
     subset_train_mnist = Subset(train_dataset, indices)
     train_loader = DataLoader(dataset=subset_train_mnist, batch_size=964, shuffle=True)
-    test_loader = DataLoader(dataset=test_dataset, batch_size=64, shuffle=False)
 
-    model = MLP().to(device=device)
+    model = MLP(input_size=28*28, hidden_size=64, output_size=8).to(device=device)
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
     opt_model = torch.compile()(model)
@@ -782,8 +749,14 @@ def test_optimizer(device):
         print("cpu out: ", cpu_model.linear1.weight)
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
-    from torch.testing._internal.inductor_utils import HAS_CPU
+    #from torch._dynamo.test_case import run_tests
+    #from torch.testing._internal.inductor_utils import HAS_CPU
+    #if HAS_CPU and not IS_MACOS:
+    #    run_tests(needs="filelock")
 
-    if HAS_CPU and not IS_MACOS:
-        run_tests(needs="filelock")
+    from Scheduler.scheduler import ExecutionEngine
+    module = ExecutionEngine.setup_device()
+    device = module.custom_device()
+    test_vectoradd(device, (47, 10))
+    test_reduce_sum(device, (16, 64), 1, keepdim=True)
+    test_reduce_sum(device, (16, 64), 0, keepdim=True)
