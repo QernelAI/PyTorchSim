@@ -256,12 +256,12 @@ class MLIRTile():
         return self.n_row * self.n_col
 
     def get_rows_per_lane(self):
-        if self.n_row % self.vector_lane != 0:
+        if self.n_row % self.vector_lane != 0 and self.n_row > 1:
             print("[Warning] n_row % vector_lane != 0")
         return self.n_row // self.vector_lane
 
     def get_cols_per_lane(self):
-        if self.n_col % self.vector_lane != 0:
+        if self.n_col % self.vector_lane != 0 and self.n_col > 1:
             print("[Warning] n_col % vector_lane != 0")
         return self.n_col // self.vector_lane
 
@@ -354,11 +354,8 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
 
         # Case 0. Tile is 0-D scalar
         if len(cv) == 0:
-            raise NotImplementedError()
-            chunk_size = self.tile_desc.get_tile_size()
             is_col_major = False
-            stride = self.tile_desc.get_tile_size()
-            tile_size_per_lane = min(self.tile_desc.get_tile_size(), self.buffer_types[name][1])
+            chunk_size, mm_stride, t_row, t_col, tile_size_per_lane = 1, 1, 1, 1, 1
         # Case 1. Tile is 1-D vector type
         elif len(cv) == 1 and len(cv) <= self.reduction_depth:
             is_vector_lane_row_major = False
@@ -774,6 +771,9 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
     def adjust_tile_size(self):
         if len(self.itervars) == 1:
             self.tile_desc.n_col = self.tile_desc.get_tile_size()
+            self.tile_desc.n_row = 1
+        elif len(self.itervars) == 0:
+            self.tile_desc.n_col = 1
             self.tile_desc.n_row = 1
 
     def pad_ranges(self):
