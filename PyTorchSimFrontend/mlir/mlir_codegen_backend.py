@@ -461,15 +461,10 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         dtype = V.graph.get_dtype(name)
         type_name = mlir_common.DTYPE_TO_MLIR[dtype]
         stride, chunk, tile_shape, tile_size_per_lane = self.get_dma_info(name, index, dtype, 0)
-        tile_shape = f"{tile_shape[0]}x{tile_shape[1]}"
-        self.define_scratchpad_buffer(dtype, name, self.tile_desc.n_row, self.tile_desc.n_col)
-        if dtype == torch.bool:
-            mapping = self.map_cse.generate(self.global_vars, f"affine_map<({indices}) -> ({indices} floordiv 8)>")
-            indices = self.cse.generate(self.loads, f"affine.apply #{mapping}(%{indices})")
-        if name not in self.global_vars_set:
-            self.global_vars_set.add(name)
-            self.global_vars.writeline(f"memref.global @{name}_spad : memref<{tile_shape}x{type_name}, 1>")
-        buffer = self.cse.generate(self.loads, f"memref.get_global @{name}_spad : memref<{tile_shape}x{type_name}, 1>")
+        dram_tile_shape = f"{tile_shape[0]}x{tile_shape[1]}"
+
+        # Define scratch pad buffer
+        buffer = self.get_scratchpad_buffer(dtype, name, self.tile_desc.n_row, self.tile_desc.n_col, dram_tile_shape, self.loads)
 
         # MVIN Encoding
         dma_key = (stride, chunk, dtype)
@@ -484,12 +479,12 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
             self.consts.add(chunk)
             self.dma_cache[dma_key] = dmaType, stride, chunk
         self.tags.add(f"{name}_tag")
-        code = f"affine.dma_start %{var}[{prefix}{indices}], %{buffer}[0, 0], %{name}_tag[0], %c{dmaType}, %c{stride}, %c{chunk} : memref<{self.buffer_types[name][1]}x{type_name}>, memref<{tile_shape}x{type_name}, 1>, memref<1xi32>"
+        code = f"affine.dma_start %{var}[{prefix}{indices}], %{buffer}[0, 0], %{name}_tag[0], %c{dmaType}, %c{stride}, %c{chunk} : memref<{self.buffer_types[name][1]}x{type_name}>, memref<{dram_tile_shape}x{type_name}, 1>, memref<1xi32>"
         self.cse.generate(self.loads, code, assignment = False) # FIXME: assignment = False does not support caching
 
         operation = "affine.vector_load" if tile_size_per_lane > 1 else "affine.load"
         shape = f", vector<{tile_size_per_lane}x{type_name}>" if tile_size_per_lane > 1 else ""
-        line = f"{operation} %{buffer}[0, 0] : memref<{tile_shape}x{type_name}, 1>{shape}"
+        line = f"{operation} %{buffer}[0, 0] : memref<{dram_tile_shape}x{type_name}, 1>{shape}"
         out = self.cse.generate(self.loads, line)
         self.tile_info[out] = tile_size_per_lane, dtype
         return out
@@ -502,15 +497,10 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         dtype = V.graph.get_dtype(name)
         type_name = mlir_common.DTYPE_TO_MLIR[dtype]
         stride, chunk, tile_shape, tile_size_per_lane = self.get_dma_info(name, index, dtype, 1)
-        tile_shape = f"{tile_shape[0]}x{tile_shape[1]}"
-        self.define_scratchpad_buffer(dtype, name, self.tile_desc.n_row, self.tile_desc.n_col)
-        if dtype == torch.bool:
-            mapping = self.map_cse.generate(self.global_vars, f"affine_map<({indices}) -> ({indices} floordiv 8)>")
-            indices = self.cse.generate(self.loads, f"affine.apply #{mapping}(%{indices})")
-        if name not in self.global_vars_set:
-            self.global_vars_set.add(name)
-            self.global_vars.writeline(f"memref.global @{name}_spad : memref<{tile_shape}x{type_name}, 1>")
-        buffer = self.cse.generate(self.stores, f"memref.get_global @{name}_spad : memref<{tile_shape}x{type_name}, 1>")
+        dram_tile_shape = f"{tile_shape[0]}x{tile_shape[1]}"
+
+        # Define scratch pad buffer
+        buffer = self.get_scratchpad_buffer(dtype, name, self.tile_desc.n_row, self.tile_desc.n_col, dram_tile_shape, self.stores)
 
         # MVOUT Encoding
         dmaType = 3 # MVIN 2, MVIN2 1, MVIN3 14, MVOUT 3
@@ -520,10 +510,10 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
 
         operation = "affine.vector_store" if tile_size_per_lane > 1 else "affine.store"
         shape = f", vector<{tile_size_per_lane}x{type_name}>" if tile_size_per_lane > 1 else ""
-        line = f"{operation} %{value}, %{buffer}[0, 0] : memref<{tile_shape}x{type_name}, 1>{shape}"
+        line = f"{operation} %{value}, %{buffer}[0, 0] : memref<{dram_tile_shape}x{type_name}, 1>{shape}"
         self.cse.generate(self.stores, line, assignment = False)
         self.tags.add(f"{name}_tag")
-        code = f"affine.dma_start %{buffer}[0, 0], %{var}[{prefix}{indices}], %{name}_tag[0], %c{dmaType}, %c{stride}, %c{chunk} : memref<{tile_shape}x{type_name}, 1>, memref<{self.buffer_types[name][1]}x{type_name}>, memref<1xi32>"
+        code = f"affine.dma_start %{buffer}[0, 0], %{var}[{prefix}{indices}], %{name}_tag[0], %c{dmaType}, %c{stride}, %c{chunk} : memref<{dram_tile_shape}x{type_name}, 1>, memref<{self.buffer_types[name][1]}x{type_name}>, memref<1xi32>"
         self.cse.generate(self.stores, code, assignment = False)
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
@@ -601,13 +591,11 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         indices, index = self.parse_indices(index)
         prefix = "" if index.is_number else "%"
 
-        tile_col = self.tile_desc.n_col
+        # Tile is always reuduced in inner loop
+        tile_col = self.tile_desc.n_row
         tile_row = 1
-        self.define_scratchpad_buffer(dtype, name, tile_row, tile_col)
-        if name not in self.global_vars_set:
-            self.global_vars_set.add(name)
-            self.global_vars.writeline(f"memref.global @{name}_spad : memref<{tile_row}x{tile_col}x{type_name}, 1>")
-        buffer = self.cse.generate(self.reductions_suffix, f"memref.get_global @{name}_spad : memref<{tile_row}x{tile_col}x{type_name}, 1>")
+        dram_tile_shape = f"{tile_row}x{tile_col}"
+        buffer = self.get_scratchpad_buffer(dtype, name, tile_row, tile_col, dram_tile_shape, self.reductions_suffix)
         if self.welford_reduce_out is not None:
             raise NotImplementedError()
             sum, sqr_sum, _ = self.welford_reduce_out
@@ -779,8 +767,19 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
             self.itervars[self.reduction_depth :],
         )
 
-    def define_scratchpad_buffer(self, dtype, name, tile_row, tile_col):
-        self.header.writeline(f"{mlir_common.DTYPE_TO_C[dtype]} {name}_spad[{tile_row}][{tile_col}] __attribute__ ((section(\".spad\")));")
+    def get_scratchpad_buffer(self, dtype, name, tile_row, tile_col, dram_tile_shape, code_buffer):
+        c_type = mlir_common.DTYPE_TO_C[dtype]
+        mlir_type = mlir_common.DTYPE_TO_MLIR[dtype]
+        if dtype == torch.bool:
+            mapping = self.map_cse.generate(self.global_vars, f"affine_map<({indices}) -> ({indices} floordiv 8)>")
+            indices = self.cse.generate(self.loads, f"affine.apply #{mapping}(%{indices})") # FIXME. Only loads?
+        if name not in self.global_vars_set:
+            # Add definition to header
+            self.header.writeline(f"{c_type} {name}_spad[{tile_row}][{tile_col}] __attribute__ ((section(\".spad\")));")
+            self.global_vars_set.add(name)
+            self.global_vars.writeline(f"memref.global @{name}_spad : memref<{dram_tile_shape}x{mlir_type}, 1>")
+        buffer = self.cse.generate(code_buffer, f"memref.get_global @{name}_spad : memref<{dram_tile_shape}x{mlir_type}, 1>")
+        return buffer
 
 @dataclasses.dataclass
 class LoopLevel:
