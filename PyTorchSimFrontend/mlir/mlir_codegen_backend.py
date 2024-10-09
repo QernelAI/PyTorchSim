@@ -288,10 +288,10 @@ class MLIRTile():
     def update_axis_stride(self, cv):
         if any([i==0 for i in cv]):
             return
-
+        self.axis_strides.clear()
         for axis, stride in enumerate(cv):
             self.axis_strides.append([axis, stride])
-        self.axis_strides = sorted(self.axis_strides, key=lambda x: x[1])
+        self.axis_strides = sorted(self.axis_strides, key=lambda x: x[1], reverse=True)
         self.axis_dict = {}
         self.reverse_axis_dict = {}
         for dram_axis, (iter_axis, _) in enumerate(self.axis_strides):
@@ -299,8 +299,11 @@ class MLIRTile():
             self.reverse_axis_dict[iter_axis] = dram_axis
 
     def get_axis_and_tile_info(self):
-        axis = list(self.axis_strides.keys())
-        return {self.reverse_axis_dict[len(axis)-2]: self.n_row, self.axis_dict[len(axis)-1]: self.n_col}
+        axis = self.axis_strides
+        if len(axis) > 1:
+            return {self.reverse_axis_dict[len(axis)-2]: self.n_row, self.axis_dict[len(axis)-1]: self.n_col}
+        else:
+            return {0: self.n_row, 1: self.n_col}
 
 class MLIRKernel(mlir_common.BaseMLIRKernel):
     overrides = ExtensionOverrides
@@ -333,16 +336,6 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         self.welford_reduce_out = None
         self.reduce_iterator = {}
 
-<<<<<<< HEAD
-        # is_transposed
-        if len(V.graph.graph_inputs) == 1 and len(V.graph.buffers):
-            input_shape = list(V.graph.graph_inputs.values())[0].layout.size
-            output_shape = V.graph.buffers[0].layout.size
-            if len(input_shape) > 1 and len(output_shape) > 1 and input_shape[-1] == output_shape[-2] and input_shape[-2] == output_shape[-1]:
-                self.is_transpose = True
-
-=======
->>>>>>> eccd7c1 ([Frontend] Reduction mechanism reworking)
     def get_constant_vector(self, expr):
         constant_vector = [int(expr.coeff(var)) for var in self.itervars]
         return constant_vector
@@ -435,6 +428,17 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         # update cv
         cv = self.get_constant_vector(expr)
         self.tile_desc.update_axis_stride(cv)
+        tile_size = self.tile_desc.get_axis_and_tile_info()
+
+        for iter_axis, itervars in enumerate(self.itervars[-2:]):
+            dram_axis = self.tile_desc.reverse_axis_dict[iter_axis]
+            if (dram_axis == len(self.itervars) - 1):
+                continue
+            if (dram_axis == len(self.itervars) - 2):
+                new_coeff = ((expr.coeff(itervars) + tile_size[dram_axis + 1] - 1) // tile_size[dram_axis + 1]) * tile_size[dram_axis + 1]
+                expr = expr.subs(expr.coeff(itervars), new_coeff)
+            else:
+                raise NotImplementedError()
 
         # Extract index var
         expr_str = str(expr)
@@ -443,17 +447,6 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         for index in re.findall(pattern, expr_str):
             indices[index] = None
         indices = list(indices.keys())
-
-        for iter_axis, itervars in enumerate(self.itervars[-2:]):
-            dram_axis = self.tile_desc.reverse_axis_dict[iter_axis]
-            if (dram_axis == len(self.itervars) - 1):
-                new_coeff = ((expr.coeff(itervars) + self.tile_desc.n_col - 1) // self.tile_desc.n_col) * self.tile_desc.n_col
-                expr = expr.subs(expr.coeff(itervars), new_coeff)
-            elif (dram_axis == len(self.itervars) - 2):
-                new_coeff = ((expr.coeff(itervars) + self.tile_desc.n_row - 1) // self.tile_desc.n_row) * self.tile_desc.n_row
-                expr = expr.subs(expr.coeff(itervars), new_coeff)
-            else:
-                raise NotImplementedError()
 
         args = ", ".join(map(str, indices))
         if "//" in expr_str:
@@ -783,6 +776,13 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
             self.tile_desc.n_col = self.tile_desc.get_tile_size()
             self.tile_desc.n_row = 1
 
+    def pad_ranges(self):
+        if len(self.itervars) == 1:
+            self.ranges[0] = (self.ranges[0] + self.tile_desc.get_tile_size() - 1) // self.tile_desc.get_tile_size() * self.tile_desc.get_tile_size()
+        elif len(self.itervars) > 1:
+            self.ranges[-1] = (self.ranges[-1] + self.tile_desc.n_col - 1) // self.tile_desc.n_col * self.tile_desc.n_col
+            self.ranges[-2] = (self.ranges[-2] + self.tile_desc.n_row - 1) // self.tile_desc.n_row * self.tile_desc.n_row
+
     def set_ranges(self, lengths, reduction_lengths):
         if self.call_ranges:
             assert self.call_ranges == tuple(lengths) + tuple(
@@ -797,17 +797,8 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
 
         # Adjust time size when it is vector
         self.adjust_tile_size()
+        self.pad_ranges()
 
-        # TODO.
-        #if len(self.itervars):
-        #    if self.tiling_idx < self.reduction_depth and len(reduction_lengths) > 0:#self.reduction_depth > 0:
-        #        self.ranges[-1] = (self.ranges[-1] + self.tile_desc.n_row - 1) // self.tile_desc.n_row * self.tile_desc.n_row
-        #        if len(self.itervars) > 1:
-        #            self.ranges[-2] = (self.ranges[-2] + self.tile_desc.n_col - 1) // self.tile_desc.n_col * self.tile_desc.n_col
-        #    else:
-        #        self.ranges[-1] = (self.ranges[-1] + self.tile_desc.n_col - 1) // self.tile_desc.n_col * self.tile_desc.n_col
-        #        if len(self.itervars) > 1:
-        #            self.ranges[-2] = (self.ranges[-2] + self.tile_desc.n_row - 1) // self.tile_desc.n_row * self.tile_desc.n_row
         return (
             self.itervars[: self.reduction_depth],
             self.itervars[self.reduction_depth :],

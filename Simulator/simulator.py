@@ -74,23 +74,23 @@ class FunctionalSimulator():
 
         return array_size, file_path
 
-    def run_spike(self, args, arg_attributes, path, binary, intermediate_op=None, vectorlane_size=4, tile_size=(4, 16), spad_info=None):
+    def run_spike(self, args, arg_attributes, path, binary, intermediate_op=None, vectorlane_size=4, tile_size={0: 16, 1: 4}, spad_info=None):
         load_path = self.path
         dump_path = self.path
         original_args = args
         if tile_size[0] > 1:
             for idx, arg in enumerate(args):
                 dims_to_pad = [0] if len(arg.shape) == 1 else [-2, -1]
-                for i in dims_to_pad:
-                    if arg.shape[i] > 1 and arg.shape[i] % tile_size[i] != 0:
+                for t, i in enumerate(dims_to_pad):
+                    if arg.shape[i] > 1 and arg.shape[i] % tile_size[t] != 0:
                         pad_shape = list(arg.shape)
-                        pad_shape[i] = tile_size[i] - arg.shape[i] % tile_size[i] # diff
+                        pad_shape[i] = tile_size[t] - arg.shape[i] % tile_size[t] # diff
                         zeros = torch.zeros(pad_shape, dtype=arg.dtype, device=arg.device)
-                        pad_arg = torch.cat([arg, zeros], dim=i).to(device=arg.device)
+                        arg = torch.cat([arg, zeros], dim=i).to(device=arg.device)
                         args = list(args)
-                        args[idx] = pad_arg
+                        args[idx] = arg
                         args = tuple(args)
-                        arg_attributes[idx][1][2] = pad_arg.numel()
+                        arg_attributes[idx][1][2] = arg.numel()
 
         target_binary = os.path.join(path, binary)
         objdump = f"riscv64-unknown-elf-objdump -d {target_binary} > {os.path.join(path, 'binary.dump')}"
