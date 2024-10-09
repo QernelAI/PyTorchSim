@@ -1,3 +1,4 @@
+import os
 import torch
 from torch._inductor.codegen import common
 from torch._inductor.virtualized import V
@@ -189,8 +190,8 @@ class BaseMLIRKernel(common.Kernel, BaseMLIRHardwareInfo):
         self.vector_compute = IndentedBuffer()
         self.reductions_suffix = IndentedBuffer()
         self.cse = common.CSE(self.newvar_prefix, self.suffix)
-        self.tile_row = self.vector_lane
-        self.tile_col = 4 * self.vlen # FIXME: tile_col is not always vector_lane * vlen
+        self.tile_row = int(os.getenv("TORCHSIM_TILE_ROW", self.vlen * self.vector_lane))
+        self.tile_col = int(os.getenv("TORCHSIM_TILE_COL", 4)) # FIXME: tile_col is not always vector_lane * vlen
         self.tile_info = {}
 
     def load(self, name: str, index: sympy.Expr):
@@ -242,7 +243,6 @@ class BaseMLIRKernel(common.Kernel, BaseMLIRHardwareInfo):
                         buf_bounds = self.node_to_bounds.get(
                             fx_node, ValueRanges.unknown()
                         )
-
                     args, tile_size, dtype = self.expand(args, buf_bounds)
                     csevar = self.cse.generate(
                         self.compute,
