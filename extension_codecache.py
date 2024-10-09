@@ -31,6 +31,7 @@ GEM5_PATH = os.environ.get('GEM5_PATH',
 GEM5_SCRIPT_PATH = os.environ.get('GEM5_SCRIPT_PATH',
                                   default = f"{TORCHSIM_DIR}/gem5_script/script.py")
 BACKENDSIM_DRYRUN = "BACKENDSIM_DRYRUN"
+BACKENDSIM_SPIKE_ONLY = bool(os.environ.get("BACKENDSIM_SPIKE_ONLY", False))
 
 def hash_prefix(hash_value):
     return hash_value[1:5]
@@ -170,6 +171,9 @@ class MLIRCodeCache:
                 print("Error output:", e.output)
                 assert(0)
 
+        if BACKENDSIM_SPIKE_ONLY:
+            return key
+
         # Generate MLIR kernel calller and binary for cycle calculation
         cycle_llvm_caller = MLIRKernelCallerCodeGen(False, arg_attributes)
         cycle_llvm_caller.generate_wrapper_file(write_path, cycle_wrapper_name)
@@ -287,6 +291,8 @@ class CustomAsyncCompile(AsyncCompile):
                                   result_path, self.validation_binary_name,
                                   kwargs['intermediate_op'] if 'intermediate_op' in kwargs else None,
                                   vectorlane_size=vectorlane_size, tile_size=tile_size, spad_info=spad_info)
+            if BACKENDSIM_SPIKE_ONLY:
+                return
 
             onnx_path = os.path.join(result_path, "tile_graph.onnx")
             backend_path = os.path.join(TORCHSIM_DIR, "PyTorchSimBackend")
