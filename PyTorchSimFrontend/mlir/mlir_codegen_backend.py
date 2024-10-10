@@ -353,7 +353,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
             return V.graph.graph_inputs[name]
         else:
             for output_node in V.graph.graph_outputs:
-                if output_node.anme == name:
+                if output_node.data.name == name:
                     return output_node
 
     def get_dma_info(self, name, index, dtype, is_store):
@@ -533,7 +533,6 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
 
         # Define scratch pad buffer
         buffer = self.get_scratchpad_buffer(dtype, name, self.tile_desc.n_row, self.tile_desc.n_col, dram_tile_shape, self.loads)
-
         # MVIN Encoding
         dma_key = (stride, chunk, dtype)
         if dma_key in self.dma_cache:
@@ -667,7 +666,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         if self.welford_reduce_out is not None:
             # raise NotImplementedError()
             sum, sqr_sum, _ = self.welford_reduce_out
-            shape = f"vector<{4}x{type_name}>" if self.buffer_types[name][1] > 1 else type_name
+            shape = f"vector<{self.tile_desc.get_rows_per_lane()}x{type_name}>" if self.buffer_types[name][1] > 1 else type_name
             # mean
             divider = self.cse.generate(self.reductions_suffix, f"arith.constant {float(self.ranges[self.reduction_depth])} : f32")
             if self.buffer_types[name][1] > 1:
@@ -681,7 +680,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
             mean_sqr = self.cse.generate(self.reductions_suffix, f"arith.mulf %{mean}, %{mean} : {shape}")
             variance = self.cse.generate(self.reductions_suffix, f"arith.subf %{sqr_mean}, %{mean_sqr} : {shape}")
             m2 = self.cse.generate(self.reductions_suffix, f"arith.mulf %{variance}, %{divider_vec} : {shape}")
-            if name == "buf0": # FIXME: check which is mean or m2
+            if self.current_node.node.origin_node: # FIXME: This is a temporary solution
                 value = mean
             else:
                 value = m2
