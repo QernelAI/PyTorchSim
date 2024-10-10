@@ -99,15 +99,21 @@ class MLIRKernelArgs(common.KernelArgs):
 
     def pad_args(self, arg):
         if self.tile_row is not None and self.tile_col is not None and len(arg.layout.size) > 1:
-            if arg.layout.size[0] > 1:
-                arg.layout.size[0] = ((arg.get_size()[0] + self.tile_row - 1) // self.tile_row) * self.tile_row
-            # reducction has no layout
-            if hasattr(arg, "data") and hasattr(arg.data, "layout") and arg.data.layout.size[0] > 1:
-                arg.data.layout.size[0] = ((arg.data.get_size()[0] + self.tile_row - 1) // self.tile_row) * self.tile_row
-            if len(arg.get_size()) > 1 and arg.layout.size[1] > 1:
-                arg.layout.size[1] = ((arg.get_size()[1] + self.tile_col - 1) // self.tile_col) * self.tile_col
-                if hasattr(arg, "data") and hasattr(arg.data, "layout") and arg.data.layout.size[1] > 1:
-                    arg.data.layout.size[1] = ((arg.data.get_size()[1] + self.tile_col - 1) // self.tile_col) * self.tile_col
+            if arg.layout.size[0].is_number:
+                if arg.layout.size[0] > 1:
+                    arg.layout.size[0] = ((arg.get_size()[0] + self.tile_row - 1) // self.tile_row) * self.tile_row
+                # reducction has no layout
+                if hasattr(arg, "data") and hasattr(arg.data, "layout") and arg.data.layout.size[0] > 1:
+                    arg.data.layout.size[0] = ((arg.data.get_size()[0] + self.tile_row - 1) // self.tile_row) * self.tile_row
+            else:
+                raise ValueError("The size of the buffer is not a constant, so it is not padded.")
+            if arg.layout.size[1].is_number:
+                if len(arg.get_size()) > 1 and arg.layout.size[1] > 1:
+                    arg.layout.size[1] = ((arg.get_size()[1] + self.tile_col - 1) // self.tile_col) * self.tile_col
+                    if hasattr(arg, "data") and hasattr(arg.data, "layout") and arg.data.layout.size[1] > 1:
+                        arg.data.layout.size[1] = ((arg.data.get_size()[1] + self.tile_col - 1) // self.tile_col) * self.tile_col
+            else:
+                raise ValueError("The size of the buffer is not a constant, so it is not padded.")
 
     def mlir_argdefs(self, extra_node=dict()):
         buffer_types = {}
@@ -206,14 +212,21 @@ class BaseMLIRKernel(common.Kernel, BaseMLIRHardwareInfo):
     def reduction(self, dtype, src_dtype, reduction_type, value):
         raise NotImplementedError()
 
+    def check_dtype_in_args(self, args):
+        dtype = torch.float32 # default dtype
+        for arg in args:
+            if arg in list(DTYPE_TO_MLIR.keys()):
+                dtype = arg
+        return dtype
+
     def expand(self, args, buf_bounds):
         if len(args) == 1:
             if not args[0] in self.tile_info:
-                return args, 1, torch.float32
+                return args, 1, self.check_dtype_in_args(args)
             info = self.tile_info[args[0]]
             return args, info[0], info[1]
         if not args[-2] in self.tile_info or not args[-1] in self.tile_info:
-            return args, 1, torch.float32 # FIXME: dtype is not always float32
+            return args, 1, self.check_dtype_in_args(args)
         lhs_tile_size, lhs_dtype = self.tile_info[args[-2]]
         rhs_tile_size, rhs_dtype = self.tile_info[args[-1]]
         lhs_shape = f"vector<{lhs_tile_size}x{DTYPE_TO_MLIR[lhs_dtype]}>" if lhs_tile_size > 1 else DTYPE_TO_MLIR[lhs_dtype]
