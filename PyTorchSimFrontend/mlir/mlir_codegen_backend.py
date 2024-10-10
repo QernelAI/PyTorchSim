@@ -295,14 +295,20 @@ class MLIRTile():
         self.axis_strides = sorted(self.axis_strides, key=lambda x: x[1], reverse=True)
         self.axis_dict = {}
         self.reverse_axis_dict = {}
-        for dram_axis, (iter_axis, _) in enumerate(self.axis_strides):
+        self.axis_size = {}
+        self.iter_info = list(enumerate(self.axis_strides))
+        for dram_axis, (iter_axis, _) in self.iter_info:
             self.axis_dict[dram_axis] = iter_axis
             self.reverse_axis_dict[iter_axis] = dram_axis
+            if dram_axis == 0:
+                self.axis_size[dram_axis] = -1
+            else:
+                self.axis_size[dram_axis] = self.axis_strides[dram_axis-1][1] // self.axis_strides[dram_axis][1]
 
     def get_axis_and_tile_info(self):
         axis = self.axis_strides
         if len(axis) > 1:
-            return {self.reverse_axis_dict[len(axis)-2]: self.n_row, self.axis_dict[len(axis)-1]: self.n_col}
+            return {len(axis)-2: self.n_row, len(axis)-1: self.n_col}
         else:
             return {0: self.n_row, 1: self.n_col}
 
@@ -443,20 +449,26 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         cv = self.get_constant_vector(expr)
         self.tile_desc.update_axis_stride(cv)
         tile_size = self.tile_desc.get_axis_and_tile_info()
+        axis_size = self.tile_desc.axis_size
 
-        dim_offset = -2 if self.tile_desc.n_row == 1 else -1
-        for iter_axis, itervars in enumerate(self.itervars[-dim_offset:]):
-            if len(self.itervars[:-dim_offset]) + iter_axis not in self.tile_desc.reverse_axis_dict:
-                print("[Warning] cant padding axis")
-                continue
-            dram_axis = self.tile_desc.reverse_axis_dict[len(self.itervars[:-dim_offset]) + iter_axis]
-            if (dram_axis == len(self.itervars) - 1):
-                continue
-            if (dram_axis == len(self.itervars) - 2):
-                new_coeff = ((expr.coeff(itervars) + tile_size[dram_axis + 1] - 1) // tile_size[dram_axis + 1]) * tile_size[dram_axis + 1]
-                expr = expr.subs(expr.coeff(itervars), new_coeff)
-            #else:
-            #    raise NotImplementedError()
+        # Padding axis and size dict
+        for dram_axis, tile_axis_size in tile_size.items():
+            size = axis_size[dram_axis]
+            new_size = ((size + tile_axis_size - 1) // tile_axis_size) * tile_axis_size
+            axis_size[dram_axis] = new_size
+
+        # Reconstruct padded stride dict
+        padded_stride = {}
+        for dram_axis in list(range(len(self.itervars)))[::-1]:
+            if dram_axis == len(self.itervars) - 1:
+                padded_stride[dram_axis] = 1
+            else:
+                padded_stride[dram_axis] = padded_stride[dram_axis+1] * axis_size[dram_axis+1]
+
+        # Update expr
+        for iter_axis, iter_var in enumerate(self.itervars):
+            dram_axis = self.tile_desc.reverse_axis_dict[iter_axis]
+            expr = expr.subs(expr.coeff(iter_var), padded_stride[dram_axis])
 
         # Extract index var
         expr_str = str(expr)
@@ -491,7 +503,8 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         with self as kernel:
             for node in nodes:
                 vars, reduction_vars = kernel.set_ranges(group, reduction_group)
-                self.kernel_group.args = mlir_common.MLIRKernelArgs(self.tile_desc.n_row, self.tile_desc.n_col)
+                self.kernel_group.args.tile_row = self.tile_desc.n_row
+                self.kernel_group.args.tile_col = self.tile_desc.n_col
                 _, _, _, self.buffer_types = self.kernel_group.args.mlir_argdefs()
                 self.reduction_idx = {var: i for i, var in enumerate(reduction_vars)}
                 node.run(vars, reduction_vars)
@@ -651,7 +664,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         dram_tile_shape = f"{tile_row}x{tile_col}"
         buffer = self.get_scratchpad_buffer(dtype, name, tile_row, tile_col, dram_tile_shape, self.reductions_suffix)
         if self.welford_reduce_out is not None:
-            raise NotImplementedError()
+            # raise NotImplementedError()
             sum, sqr_sum, _ = self.welford_reduce_out
             shape = f"vector<{4}x{type_name}>" if self.buffer_types[name][1] > 1 else type_name
             # mean
@@ -942,6 +955,7 @@ class MLIRScheduling(BaseScheduling):
             V.graph.wrapper_code.writeline(
                 f"yield ({kernel_name}, ({args}))"
             )
+        self._set_flush_status(True)
 
     def ready_to_flush(self):
         return self._ready_to_flush
