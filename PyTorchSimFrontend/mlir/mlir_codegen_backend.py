@@ -251,6 +251,7 @@ class MLIRTile():
         self.vector_lane = vector_lane
         self.axis_strides = []
         self.axis_dict = {} # dram_axis : iter_axix
+        self.axis_size = {}
         self.reverse_axis_dict = {} # iter_axis : dram_axis
 
     def get_tile_size(self):
@@ -813,7 +814,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
 
         # Case 2. 3-D tensor kernel without reduction. Access vector granule!
         if len(self.itervars) == 3 and self.reduction_depth == len(self.itervars):
-            self.tile_desc.n_col = self.tile_desc.get_tile_size()
+            self.tile_desc.n_col = min(self.tile_desc.get_tile_size(), self.ranges[-1])
             self.tile_desc.n_row = 1
 
         # Case 3. N-D tensor kernel with reduction. Not implemented. Need this?
