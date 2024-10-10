@@ -501,12 +501,13 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
 
         self.set_ranges(group, reduction_group)
         with self as kernel:
+            kernel.args = kernel.kernel_group.args
             for node in nodes:
                 vars, reduction_vars = kernel.set_ranges(group, reduction_group)
-                self.kernel_group.args.tile_row = self.tile_desc.n_row
-                self.kernel_group.args.tile_col = self.tile_desc.n_col
-                _, _, _, self.buffer_types = self.kernel_group.args.mlir_argdefs()
-                self.reduction_idx = {var: i for i, var in enumerate(reduction_vars)}
+                kernel.args.tile_row = kernel.tile_desc.n_row
+                kernel.args.tile_col = kernel.tile_desc.n_col
+                _, _, _, kernel.buffer_types = kernel.args.mlir_argdefs()
+                kernel.reduction_idx = {var: i for i, var in enumerate(reduction_vars)}
                 node.run(vars, reduction_vars)
 
         src_code = self.codegen_kernel(kernel_name=kernel_name)
@@ -524,7 +525,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         index = self.rename_indexing(index)
         indices, index = self.parse_indices(index)
         prefix = "" if index.is_number else "%"
-        var = self.kernel_group.args.input(name)
+        var = self.args.input(name)
         dtype = V.graph.get_dtype(name)
         type_name = mlir_common.DTYPE_TO_MLIR[dtype]
         stride, chunk, tile_shape, tile_size_per_lane = self.get_dma_info(name, index, dtype, 0)
@@ -560,7 +561,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         index = self.rename_indexing(index)
         indices, index = self.parse_indices(index)
         prefix = "" if index.is_number else "%"
-        var = self.kernel_group.args.output(name)
+        var = self.args.output(name)
         dtype = V.graph.get_dtype(name)
         type_name = mlir_common.DTYPE_TO_MLIR[dtype]
         stride, chunk, tile_shape, tile_size_per_lane = self.get_dma_info(name, index, dtype, 1)
@@ -651,7 +652,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         return acc
 
     def store_reduction(self, name, index, value):
-        var = self.kernel_group.args.output(name)
+        var = self.args.output(name)
         dtype = V.graph.get_dtype(name)
         type_name = mlir_common.DTYPE_TO_MLIR[dtype]
         index = self.rename_indexing(index)
