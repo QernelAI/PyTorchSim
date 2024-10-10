@@ -309,8 +309,9 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
     overrides = ExtensionOverrides
     newvar_prefix = "%"
 
-    def __init__(self, args=None):
+    def __init__(self, kernel_group):
         super().__init__(mlir_common.MLIRKernelArgs())
+        self.kernel_group = kernel_group
         self.call_ranges = None
         self.ranges = None
         self.itervars = None
@@ -484,8 +485,8 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         with self as kernel:
             for node in nodes:
                 vars, reduction_vars = kernel.set_ranges(group, reduction_group)
-                self.args = mlir_common.MLIRKernelArgs(self.tile_desc.n_row, self.tile_desc.n_col)
-                _, _, _, self.buffer_types = self.args.mlir_argdefs()
+                self.kernel_group.args = mlir_common.MLIRKernelArgs(self.tile_desc.n_row, self.tile_desc.n_col)
+                _, _, _, self.buffer_types = self.kernel_group.args.mlir_argdefs()
                 self.reduction_idx = {var: i for i, var in enumerate(reduction_vars)}
                 node.run(vars, reduction_vars)
 
@@ -504,7 +505,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         index = self.rename_indexing(index)
         indices, index = self.parse_indices(index)
         prefix = "" if index.is_number else "%"
-        var = self.args.input(name)
+        var = self.kernel_group.args.input(name)
         dtype = V.graph.get_dtype(name)
         type_name = mlir_common.DTYPE_TO_MLIR[dtype]
         stride, chunk, tile_shape, tile_size_per_lane = self.get_dma_info(name, index, dtype, 0)
@@ -540,7 +541,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         index = self.rename_indexing(index)
         indices, index = self.parse_indices(index)
         prefix = "" if index.is_number else "%"
-        var = self.args.output(name)
+        var = self.kernel_group.args.output(name)
         dtype = V.graph.get_dtype(name)
         type_name = mlir_common.DTYPE_TO_MLIR[dtype]
         stride, chunk, tile_shape, tile_size_per_lane = self.get_dma_info(name, index, dtype, 1)
@@ -597,7 +598,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
             acc_shape = type_name
             shape = f"vector<{self.tile_desc.get_tile_size()}x{type_name}>"
             reduced_shape = type_name
-            self.reduction_prefix.writeline(f"%{init} = arith.constant {reduction_init(reduction_type, dtype)} : {type_name}")
+            init = self.cse.generate(self.reduction_prefix, f"arith.constant {reduction_init(reduction_type, dtype)} : {type_name}")
             if len(self.ranges) == 2:
                 vec_len = self.tile_desc.n_row // self.tile_desc.get_rows_per_lane()
                 flattened_size = f"vector<{self.tile_desc.get_tile_size_per_lane()}x{type_name}>"
@@ -615,7 +616,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
                     acc_var = init
                 else:
                     reduced_shape = f"vector<{vec_len}x{type_name}>"
-                    self.reduction_prefix.writeline(f"%{init_vec} = vector.broadcast %{init} : {type_name} to {reduced_shape}")
+                    init_vec = self.cse.generate(self.reduction_prefix, f"vector.broadcast %{init} : {type_name} to {reduced_shape}")
                     axis = "0"
                     acc_var = init_vec
             else:
@@ -631,7 +632,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         return acc
 
     def store_reduction(self, name, index, value):
-        var = self.args.output(name)
+        var = self.kernel_group.args.output(name)
         dtype = V.graph.get_dtype(name)
         type_name = mlir_common.DTYPE_TO_MLIR[dtype]
         index = self.rename_indexing(index)
@@ -646,11 +647,11 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         if self.welford_reduce_out is not None:
             raise NotImplementedError()
             sum, sqr_sum, _ = self.welford_reduce_out
-            shape = f"vector<{self.tile_col_per_lane}x{type_name}>" if self.buffer_types[name][1] > 1 else type_name
+            shape = f"vector<{4}x{type_name}>" if self.buffer_types[name][1] > 1 else type_name
             # mean
-            self.cse.generate(self.reductions_suffix, f"%f{self.ranges[self.reduction_depth]} = arith.constant {float(self.ranges[self.reduction_depth])} : f32", assignment=False)
+            divider = self.cse.generate(self.reductions_suffix, f"arith.constant {float(self.ranges[self.reduction_depth])} : f32")
             if self.buffer_types[name][1] > 1:
-                divider_vec = self.cse.generate(self.reductions_suffix, f"vector.broadcast %f{self.ranges[self.reduction_depth]} : f32 to vector<{self.tile_col_per_lane}x{type_name}>")
+                divider_vec = self.cse.generate(self.reductions_suffix, f"vector.broadcast %{divider} : f32 to vector<{4}x{type_name}>")
             else:
                 divider_vec = f"f{self.buffer_types[name][1]}"
             mean = self.cse.generate(self.reductions_suffix, f"arith.divf %{sum}, %{divider_vec} : {shape}")
@@ -746,13 +747,13 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
 
     def codegen_kernel(self, kernel_name):
         wrapper = V.graph.wrapper_code
-        arg_defs, _, _, _ = self.args.mlir_argdefs()
+        arg_defs, _, _, _ = self.kernel_group.args.mlir_argdefs()
         code = self._codegen_kernel(arg_defs, kernel_name)
         return code.getvalue()
 
     def meta_kernel(self):
         wrapper = V.graph.wrapper_code
-        _, _, arg_attributes, _ = self.args.mlir_argdefs()
+        _, _, arg_attributes, _ = self.kernel_group.args.mlir_argdefs()
         wrapper.add_import_once('\nprint(f\'Wrapper Codegen Path = {__file__}\')')
         wrapper.add_import_once(f'\nfrom extension_codecache import CustomAsyncCompile')
         wrapper.add_import_once(f'\ncustom_async_compile = CustomAsyncCompile()')
@@ -762,7 +763,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
 
     def call_kernel(self, kernel_name):
         wrapper = V.graph.wrapper_code
-        _, call_args, _, _ = self.args.mlir_argdefs()
+        _, call_args, _, _ = self.kernel_group.args.mlir_argdefs()
        # generate the code to call this
         wrapper.generate_kernel_call(kernel_name, call_args, cuda=False)
 
@@ -775,7 +776,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         kernel_decl_name = kernel_name if V.graph.cpp_wrapper else "kernel"
         code.writeline(f'func.func @{kernel_decl_name}({arg_defs})')
         with code.indent():
-            for old, new in self.args.aliases():
+            for old, new in self.kernel_group.args.aliases():
                 code.writeline(f"auto {old} = {new};")
             # Loop body part
             code.splice(self.codegen_init())
@@ -886,17 +887,33 @@ class LoopNest:
             loops[i].collapsed = True
         loops[0].simd = loops[par_depth - 1].simd
 
+class MLIRWrapperKenrelGroup(cpp.KernelGroup):
+    def __init__(self):
+        super().__init__()
+        self.args = mlir_common.MLIRKernelArgs()
+
 class MLIRScheduling(BaseScheduling):
     count = 0
     target_kernel = MLIRKernel
     def __init__(self, scheduler):
         self.scheduler = scheduler
-        self._scheduling = cpp.CppScheduling(scheduler)
+        self.get_kernel_group()
+        self._ready_to_flush = False
+
+    def _set_flush_status(self, status: bool):
+        self._ready_to_flush = status
+
+    def get_kernel_group(self):
+        self.kernel_group = MLIRWrapperKenrelGroup()
 
     def can_fuse_vertical(self, node1, node2):
         return False
 
     def can_fuse_horizontal(self, node1, node2):
+        _, (vars1, reduce1) = node1.group
+        _, (vars2, reduce2) = node2.group
+        if vars1 == vars2 and reduce1 == reduce2:
+            return True
         return False
 
     def group_fn(self, sizes):
@@ -906,7 +923,7 @@ class MLIRScheduling(BaseScheduling):
         _, (group, reduction_group) = max(
             nodes, key=lambda x: int(x.is_reduction())
         ).group
-        ex_kernel = self.target_kernel()
+        ex_kernel = self.target_kernel(self.kernel_group)
 
         kernel_name = f"extension_kernel_{self.count}"
         self.count += 1
@@ -919,11 +936,17 @@ class MLIRScheduling(BaseScheduling):
             V.graph.wrapper_code.writeline(
                 f"yield ({kernel_name}, ({args}))"
             )
+
+    def ready_to_flush(self):
+        return self._ready_to_flush
+
     def codegen_sync(self):
         pass
 
     def flush(self):
-        self._scheduling.flush()
+        self.kernel_group.codegen_define_and_call(V.graph.wrapper_code)
+        self.get_kernel_group()
+        self._set_flush_status(False)
 
     def define_function(self, kernel):
         code = kernel.def_function()
