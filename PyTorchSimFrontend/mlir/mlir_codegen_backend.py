@@ -288,11 +288,9 @@ class MLIRTile():
         return self.n_row == 1
 
     def update_axis_stride(self, cv):
-        if any([i==0 for i in cv]):
-            return
         self.axis_strides.clear()
         for axis, stride in enumerate(cv):
-            self.axis_strides.append([axis, stride])
+            self.axis_strides.append([axis, stride[0]])
         self.axis_strides = sorted(self.axis_strides, key=lambda x: x[1], reverse=True)
         self.axis_dict = {}
         self.reverse_axis_dict = {}
@@ -346,7 +344,27 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         self.reduce_iterator = {}
 
     def get_constant_vector(self, expr):
-        constant_vector = [int(expr.coeff(var)) for var in self.itervars]
+        constant_vector = [[int(expr.coeff(var)),None] for var in self.itervars]
+        return constant_vector
+
+    def get_constant_vector2(self, expr):
+        # Case 0. symbol ex) index 0
+        # Case 1. inner product form ex) 16 * index0 + 1 * index1
+        # Case 2. Complicated form ex) 16 * index0 + 8 * (index//4) + (index % 4)
+        constant_vector = []
+        if expr.is_symbol:
+            constant_vector.append(tuple([1, expr]))
+            return constant_vector
+
+        for arg in expr.args:
+            if arg.is_symbol:
+                constant_vector.append(tuple([1,arg]))
+                continue
+            if arg.args[0].is_number:
+                constant_vector.append(arg.args)
+            else:
+                constant_vector.append([1, arg])
+
         return constant_vector
 
     def find_node_by_name(self, name):
@@ -359,7 +377,13 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
 
     def get_dma_info(self, name, index, dtype, is_store):
         cv = self.get_constant_vector(index)
+        cv2 = self.get_constant_vector2(index)
         tile_size_per_lane = min(self.tile_desc.get_tile_size_per_lane(), self.buffer_types[name][1])
+
+        if len(cv) != len(cv2) and len(cv2) == 3:
+            print("Mismatch! ", cv)
+            # FIXME. this is really shitty code :(
+            cv = cv2#[[1 if x[0] == 0 else x[0], x[1]] for x in cv]
 
         # Case 0. Tile is 0-D scalar
         if len(cv) == 0:
@@ -382,8 +406,8 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         # Case 3. Tile is 2-D tile
         elif len(cv) == 2:
             is_reduction = self.reduction_depth == 1
-            if cv[0] != 0 and cv[1] != 0:
-                is_transposed = cv[0] < cv[1]
+            if cv[0][0] != 0 and cv[1][0] != 0:
+                is_transposed = cv[0][0] < cv[1][0]
                 if is_transposed:
                     t_row = self.tile_desc.n_col
                     t_col = self.tile_desc.n_row
@@ -415,7 +439,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
                     t_col = tile_size_per_lane
                     chunk_size = self.tile_desc.get_rows_per_lane()
                 else:
-                    if cv[0] == 0:
+                    if cv[0][0] == 0:
                         t_row = tile_size_per_lane
                         t_col = self.vector_lane
                         chunk_size = t_col // self.vector_lane
@@ -425,7 +449,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
                         chunk_size = t_col
         elif len(cv) == 3:
             is_col_major = True # Actually it is not needed in vector case
-            mm_stride = cv[-1]
+            mm_stride = cv[-1][0]
             # When t_col stride is 1, we can access row vector
             if mm_stride == 1:
                 t_row = 1
@@ -446,8 +470,12 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         if len(expr.args) == 0:
             return expr, expr
 
-        # update cv
+       # update cv
         cv = self.get_constant_vector(expr)
+        cv2 = self.get_constant_vector2(expr)
+        if len(cv) != len(cv2) and len(cv2) == 3:
+            # FIXME. this is really shitty code :(
+            cv = [[1 if x[0] == 0 else x[0], x[1]] for x in cv]
         self.tile_desc.update_axis_stride(cv)
         tile_size = self.tile_desc.get_axis_and_tile_info()
         axis_size = self.tile_desc.axis_size
@@ -500,11 +528,11 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
             nodes, key=lambda x: int(x.is_reduction())
         ).group
 
-        self.set_ranges(group, reduction_group)
+        self.set_ranges(group, reduction_group, None)
         with self as kernel:
             kernel.args = kernel.kernel_group.args
             for node in nodes:
-                vars, reduction_vars = kernel.set_ranges(group, reduction_group)
+                vars, reduction_vars = kernel.set_ranges(group, reduction_group, node.read_writes)
                 kernel.args.tile_row = kernel.tile_desc.n_row
                 kernel.args.tile_col = kernel.tile_desc.n_col
                 _, _, _, kernel.buffer_types = kernel.args.mlir_argdefs()
@@ -804,6 +832,21 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         return code
 
     def adjust_tile_size(self):
+        if self.read_writes is not None:
+            read_writes = list(self.read_writes.reads) + list(self.read_writes.writes)
+            cv_list = []
+            for node in read_writes:
+                cv_list.append(self.get_constant_vector2(node[1]))
+            max_element = max(cv_list, key=len)
+            max_nr_dim = len(max_element)
+
+            sorted_max_element = sorted(max_element, key=lambda x:x[0])
+            # Force vector tile size when 3D node is originated from view
+            if max_nr_dim == 3 and max_nr_dim != len(self.itervars):
+                self.tile_desc.n_col = min(self.tile_desc.get_tile_size(), sorted_max_element[1][0])
+                self.tile_desc.n_row = 1
+                return
+
         # Case 1. vector kernel
         if len(self.itervars) == 1:
             self.tile_desc.n_col = self.tile_desc.get_tile_size()
@@ -828,7 +871,8 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
             self.ranges[-1] = (self.ranges[-1] + self.tile_desc.n_col - 1) // self.tile_desc.n_col * self.tile_desc.n_col
             self.ranges[-2] = (self.ranges[-2] + self.tile_desc.n_row - 1) // self.tile_desc.n_row * self.tile_desc.n_row
 
-    def set_ranges(self, lengths, reduction_lengths):
+    def set_ranges(self, lengths, reduction_lengths, read_writes):
+        self.read_writes = read_writes
         if self.call_ranges:
             assert self.call_ranges == tuple(lengths) + tuple(
                 reduction_lengths

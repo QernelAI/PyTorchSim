@@ -74,7 +74,7 @@ func.func @{{ KERNEL_NAME }}({{ KERNEL_DEF }}) {
             %Y_vec = affine.vector_load %Y_buffer[%r, 0] : memref<{{ TILE_M }}x{{ TILE_N }}xf32, 1>, vector<{{ TILE_N }}xf32>
             %acc_vec = arith.addf %Y_vec, %B_vec : vector<{{ TILE_N }}xf32>
             affine.vector_store %acc_vec, %Y_buffer[%r, 0] : memref<{{ TILE_M }}x{{ TILE_N }}xf32, 1>, vector<{{ TILE_N }}xf32>
-        } { accumulation_loop=true }
+        }
         affine.dma_start %Y_buffer[0, 0], %Y[%index2], %tag[0], %c_mvout, %N, %c_set : memref<{{ TILE_M }}x{{ TILE_N }}xf32, 1>, memref<{{ M * N }}xf32>, memref<1xi32>
     } { outer_loop=true }
   } { outer_loop=true }
