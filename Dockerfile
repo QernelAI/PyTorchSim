@@ -41,8 +41,8 @@ RUN git clone https://github.com/PSAL-POSTECH/gem5.git --branch TorchSim
 RUN cd gem5 && scons build/RISCV/gem5.opt -j $(nproc)
 
 # Build LLVM RISC-V
-RUN git clone https://github.com/llvm/llvm-project.git
-RUN cd llvm-project && git checkout release/17.x && mkdir build && cd build && \
+RUN git clone https://github.com/PSAL-POSTECH/llvm-project.git --branch torchsim
+RUN cd llvm-project && mkdir build && cd build && \
     cmake -DLLVM_ENABLE_PROJECTS=mlir -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/riscv-llvm -DLLVM_TARGETS_TO_BUILD=RISCV -G "Unix Makefiles" ../llvm && \
     make -j && make install
 
@@ -56,18 +56,19 @@ RUN apt install -y wget && \
     wget https://github.com/riscv-collab/riscv-gnu-toolchain/releases/download/2023.12.14/riscv64-glibc-ubuntu-22.04-llvm-nightly-2023.12.14-nightly.tar.gz && \
     wget https://github.com/riscv-collab/riscv-gnu-toolchain/releases/download/2023.12.14/riscv64-elf-ubuntu-20.04-llvm-nightly-2023.12.14-nightly.tar.gz && \
     tar -zxvf riscv64-elf-ubuntu-20.04-llvm-nightly-2023.12.14-nightly.tar.gz && tar -zxvf riscv64-elf-ubuntu-20.04-llvm-nightly-2023.12.14-nightly.tar.gz && \
-    rm *.tar.gz 
+    rm *.tar.gz
 
 ENV RISCV /workspace/riscv
 ENV PATH $RISCV/bin:$PATH
 
 # Install Spike simulator
 RUN apt -y install device-tree-compiler
-RUN git clone https://github.com/PSAL-POSTECH/riscv-isa-sim.git --branch TorchSim && cd riscv-isa-sim && mkdir build && cd build && \
+RUN git clone https://github.com/PSAL-POSTECH/riscv-isa-sim.git --branch custom_instruction && cd riscv-isa-sim && mkdir build && cd build && \
     ../configure --prefix=$RISCV && make -j && make install
 
 # Install Proxy kernel
-RUN git clone https://github.com/riscv-software-src/riscv-pk.git && cd riscv-pk && mkdir build && cd build && \
+RUN git clone https://github.com/riscv-software-src/riscv-pk.git && \
+     cd riscv-pk && git checkout 4f3debe4d04f56d31089c1c716a27e2d5245e9a1 && mkdir build && cd build && \
     ../configure --prefix=$RISCV --host=riscv64-unknown-elf && make -j && make install
 
 # Install torchsim dependency
