@@ -71,6 +71,24 @@ class MLIRGemmTemplate(MLIRTemplate):
                   raise NotImplementedError("If the stride is not equal to the original stride, it should have been transposed.")
         return False
 
+    def pad(self, X, W, Y, Bias, TILE_M=16, TILE_N=16, TILE_K=16):
+        X.layout.size[0] = ((X.get_size()[0] + TILE_M - 1) // TILE_M) * TILE_M
+        X.data.layout.size[0] = ((X.data.get_size()[0] + TILE_M - 1) // TILE_M) * TILE_M
+        X.layout.size[1] = ((X.get_size()[1] + TILE_K - 1) // TILE_K) * TILE_K
+        X.data.layout.size[1] = ((X.data.get_size()[1] + TILE_K - 1) // TILE_K) * TILE_K
+        W.layout.size[0] = ((W.get_size()[0] + TILE_N - 1) // TILE_N) * TILE_N
+        W.data.layout.size[0] = ((W.data.get_size()[0] + TILE_N - 1) // TILE_N) * TILE_N
+        W.layout.size[1] = ((W.get_size()[1] + TILE_K - 1) // TILE_K) * TILE_K
+        W.data.layout.size[1] = ((W.data.get_size()[1] + TILE_K - 1) // TILE_K) * TILE_K
+        Y.layout.size[0] = ((Y.get_size()[0] + TILE_M - 1) // TILE_M) * TILE_M
+        Y.layout.size[1] = ((Y.get_size()[1] + TILE_N - 1) // TILE_N) * TILE_N
+        if Bias is not None:
+          if len(Bias.data.get_size()) == 2:
+            Bias.layout.size[0] = ((Bias.get_size()[0] + TILE_M - 1) // TILE_M) * TILE_M
+            Bias.data.layout.size[0] = ((Bias.data.get_size()[0] + TILE_M - 1) // TILE_M) * TILE_M
+          Bias.layout.size[-1] = ((Bias.get_size()[-1] + TILE_N - 1) // TILE_N) * TILE_N
+          Bias.data.layout.size[-1] = ((Bias.data.get_size()[-1] + TILE_N - 1) // TILE_N) * TILE_N
+
     def render(self,
                kernel: MLIRTemplateKernel,
                template_buffer_node = None,
@@ -93,7 +111,7 @@ class MLIRGemmTemplate(MLIRTemplate):
         W_transposed = self.is_transposed(W)
         X_transposed = self.is_transposed(X)
 
-        # Padding
+        # save the original size
         origin_x_size = X.get_size()
         origin_x_data_size = X.data.get_size()
         origin_w_size = W.get_size()
@@ -102,22 +120,8 @@ class MLIRGemmTemplate(MLIRTemplate):
         if Bias is not None:
           origin_bias_size = Bias.get_size()
           origin_bias_data_size = Bias.data.get_size()
-        X.layout.size[0] = ((X.get_size()[0] + TILE_M - 1) // TILE_M) * TILE_M
-        X.data.layout.size[0] = ((X.data.get_size()[0] + TILE_M - 1) // TILE_M) * TILE_M
-        X.layout.size[1] = ((X.get_size()[1] + TILE_K - 1) // TILE_K) * TILE_K
-        X.data.layout.size[1] = ((X.data.get_size()[1] + TILE_K - 1) // TILE_K) * TILE_K
-        W.layout.size[0] = ((W.get_size()[0] + TILE_N - 1) // TILE_N) * TILE_N
-        W.data.layout.size[0] = ((W.data.get_size()[0] + TILE_N - 1) // TILE_N) * TILE_N
-        W.layout.size[1] = ((W.get_size()[1] + TILE_K - 1) // TILE_K) * TILE_K
-        W.data.layout.size[1] = ((W.data.get_size()[1] + TILE_K - 1) // TILE_K) * TILE_K
-        Y.layout.size[0] = ((Y.get_size()[0] + TILE_M - 1) // TILE_M) * TILE_M
-        Y.layout.size[1] = ((Y.get_size()[1] + TILE_N - 1) // TILE_N) * TILE_N
-        if Bias is not None:
-          if len(Bias.data.get_size()) == 2:
-            Bias.layout.size[0] = ((Bias.get_size()[0] + TILE_M - 1) // TILE_M) * TILE_M
-            Bias.data.layout.size[0] = ((Bias.data.get_size()[0] + TILE_M - 1) // TILE_M) * TILE_M
-          Bias.layout.size[-1] = ((Bias.get_size()[-1] + TILE_N - 1) // TILE_N) * TILE_N
-          Bias.data.layout.size[-1] = ((Bias.data.get_size()[-1] + TILE_N - 1) // TILE_N) * TILE_N
+
+        self.pad(X, W, Y, Bias, TILE_M, TILE_N, TILE_K)
 
         options = dict(
             KERNEL_NAME=self.name,
@@ -140,6 +144,8 @@ class MLIRGemmTemplate(MLIRTemplate):
             input_reorder = self.input_reorder
         )
         code = self._template_from_string(GEMM_TEMPLATE).render(**options)
+
+        # restore the original size
         X.layout.size = origin_x_size
         X.data.layout.size = origin_x_data_size
         W.layout.size = origin_w_size
@@ -148,6 +154,7 @@ class MLIRGemmTemplate(MLIRTemplate):
         if Bias is not None:
           Bias.layout.size = origin_bias_size
           Bias.data.layout.size = origin_bias_data_size
+
         write_path = extension_codecache.get_write_path(code)
         if not os.path.exists(write_path):
             os.makedirs(write_path)
