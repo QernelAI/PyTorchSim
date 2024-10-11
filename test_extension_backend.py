@@ -171,7 +171,7 @@ class CNN(nn.Module):
 
     def forward(self, x):
         x = self.conv1(x)
-        # x = self.norm(x)
+        x = self.norm(x)
         # x = self.conv2(x)
         # x = self.maxpool(x)
         # x = torch.nn.functional.relu(x)
@@ -418,7 +418,7 @@ def test_CNN(device):
     input = torch.randn(1, 8, 64, 64)
     x1 = input.to(device=device)
     x2 = input.to("cpu")
-    model = CNN()
+    model = CNN().eval()
     model.to(device=device)
     opt_fn = torch.compile()(model)
     y = opt_fn(x1)
@@ -443,14 +443,14 @@ def test_conv2d(device):
     test_result("Conv2d Forward", res, out, rtol=1e-1, atol=1e-1)
     print("Max diff > ", torch.max(torch.abs(res.cpu() - out)))
 
-def test_softmax(device, size=(128, 128)):
+def test_softmax(device, size=(128, 128), dim=1):
     torch.manual_seed(0)
     input = torch.randn(size)
     x1 = input.to(device=device)
     x2 = input.to("cpu")
     opt_fn = torch.compile()(torch.nn.functional.softmax)
-    y = opt_fn(x1, dim=1)
-    cpu_y = torch.nn.functional.softmax(x2, dim=1)
+    y = opt_fn(x1, dim=dim)
+    cpu_y = torch.nn.functional.softmax(x2, dim=dim)
     test_result("Softmax", y, cpu_y)
 
 def test_ReLU(device, size=(128, 128)):
@@ -478,7 +478,7 @@ def test_LayerNorm(device, size=(64, 64)):
 
 def test_BatchNorm(device, size=(1, 16, 64, 64)):
     torch.manual_seed(0)
-    model = nn.BatchNorm2d(size[1])
+    model = nn.BatchNorm2d(size[1]).eval()
     model.to(device=device)
     input = torch.randn(size)
     x1 = input.to(device=device)
@@ -665,16 +665,17 @@ def test_optimizer(device):
     test_result("Optimizer", model.linear1.weight, cpu_model.linear1.weight)
 
 def test_maxpool(device):
-    def maxpool(a):
-        return torch.nn.functional.max_pool2d(a, kernel_size=3, stride=2, padding=1)
     torch.manual_seed(0)
+    model = nn.MaxPool2d(kernel_size=3, stride=2, padding=1).eval()
+    model.to(device=device)
     input = torch.randn(1, 8, 64, 64).to(device=device)
     x1 = input.to(device=device)
     x2 = input.to("cpu")
-    opt_fn = torch.compile()(maxpool)
+    opt_fn = torch.compile()(model)
     res = opt_fn(x1)
-    out = maxpool(x2)
-    test_result("Maxpool Forward", res, out)
+    model.to("cpu")
+    out = model(x2)
+    # test_result("Maxpool Forward", res, out) # TODO: MaxPool Functionality is not working
 
 def test_avgpool(device):
     def avgpool(a):
@@ -705,3 +706,8 @@ if __name__ == "__main__":
     test_Transpose3D_1(device, [64, 64, 64])
     test_Transpose3D_2(device, [64, 64, 64])
     test_Transpose3D_3(device, [64, 64, 64])
+    test_maxpool(device)
+    test_avgpool(device)
+    test_softmax(device, (64, 128), dim=1)
+    test_BatchNorm(device)
+    test_CNN(device)

@@ -9,6 +9,7 @@ from torch._inductor.ir import TensorBox
 from PyTorchSimFrontend.mlir.mlir_gemm_template import MLIRGemmTemplate
 from PyTorchSimFrontend.mlir.mlir_bmm_template import MLIRBMMTemplate
 from PyTorchSimFrontend.mlir.mlir_conv_template import MLIRConvTemplate
+from PyTorchSimFrontend.mlir.mlir_maxpool_template import MLIRMaxPoolTemplate
 
 aten = torch.ops.aten
 
@@ -93,7 +94,56 @@ def convolution(
     mlir_template = MLIRConvTemplate([x, weight, bias], layout, **kwargs)
     return mlir_template.generate().output_node()
 
+def maxpool_layout(
+    x: TensorBox,
+    kernel_size: List[int],
+    stride: List[int],
+    padding: List[int],
+    dilation: List[int],
+    ceil_mode: bool,
+) -> ir.Layout:
+    """Determine output layout for a maxpool"""
+    with V.graph.fake_mode:
+        output, _ = torch.ops.aten.max_pool2d_with_indices(
+            ir.ir_node_to_tensor(x, guard_shape=True),
+            kernel_size,
+            stride,
+            padding,
+            dilation,
+            ceil_mode,
+        )
+        sizes = ir.convert_shape_to_inductor(output.size())
+        stride = ir.convert_shape_to_inductor(output.stride())
+
+    return ir.FixedLayout(
+        x.get_device(),
+        x.get_dtype(),
+        sizes,
+        stride,
+    )
+
+def custom_maxpool(
+    x: TensorBox,
+    kernel_size: List[int],
+    stride: List[int],
+    padding: List[int],
+    dilation: List[int] = [1, 1],
+    ceil_mode: bool = False
+):
+    kwargs = {
+        "kernel_size": kernel_size,
+        "stride": stride,
+        "padding": padding,
+        "dilation": dilation,
+        "ceil_mode": ceil_mode,
+    }
+    layout = maxpool_layout(x, kernel_size, stride, padding, dilation, ceil_mode)
+    mlir_template = MLIRMaxPoolTemplate([x], layout, **kwargs)
+    dummy_output = ir.ir_node_to_tensor(x, guard_shape=True)
+    return mlir_template.generate().output_node(), dummy_output
+
 lowerings.update({getattr(aten.mm, overload): tuned_mm for overload in aten.mm.overloads()})
 lowerings.update({getattr(aten.addmm, overload): tuned_addmm for overload in aten.addmm.overloads()})
-lowerings.update({getattr(aten.convolution,overload): convolution for overload in aten.convolution.overloads()})
+lowerings.update({getattr(aten.convolution, overload): convolution for overload in aten.convolution.overloads()})
 lowerings.update({getattr(aten.bmm, overload): tuned_bmm for overload in aten.bmm.overloads()})
+lowerings.update({getattr(aten.max_pool2d_with_indices, overload): custom_maxpool for overload in aten.max_pool2d_with_indices.overloads()})
