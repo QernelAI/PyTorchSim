@@ -2,6 +2,9 @@ import os
 import shlex
 import subprocess
 import re
+import sys
+import time
+import threading
 
 import torch
 import numpy as np
@@ -158,7 +161,7 @@ class CycleSimulator():
             raw_list = stat_file.readlines()
             cycle_per_tick = [int(line.split()[1]) for line in raw_list if "system.clk_domain.clock" in line][0]
             cycle_list = [int(line.split()[1]) / cycle_per_tick for line in raw_list if "system.cpu.numCycles" in line]
-        cycle_list = [cycle_list[i+1] - cycle_list[i] for i in range(len(cycle_list)-1)]
+        #cycle_list = [cycle_list[i+1] - cycle_list[i] for i in range(len(cycle_list)-1)]
         return cycle_list
 
 class BackendSimulator():
@@ -178,10 +181,27 @@ class BackendSimulator():
         return cmd
 
     def simulation(self, model_path):
+        def show_progress():
+            i = 0
+            while not finished:
+                i = (i + 1) % 3
+                tail = "." * i + " " * (3-i)
+                sys.stdout.write("\r[BackendSimulator] Simulation is still running." + tail)
+                time.sleep(1)
+
+        # Create progress thread
+        finished = False
+        progress_thread = threading.Thread(target=show_progress)
+        progress_thread.start()
+
         cmd = f"{self.get_backend_command()} --models_list {model_path}"
         try:
             result = subprocess.check_output(shlex.split(cmd))
+            finished = True
+            progress_thread.join()
         except subprocess.CalledProcessError as e:
+            finished = True
+            progress_thread.join()
             print("[BackendSimulator] Command failed with exit code", e.returncode)
             print("[BackendSimulator] Error output:", e.output)
             assert(0)
