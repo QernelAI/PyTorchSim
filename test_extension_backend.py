@@ -384,13 +384,13 @@ def test_single_perceptron(device):
     # plt.show()
     # plt.savefig('result.png')
 
-def test_matmul(device):
+def test_matmul(device, input_size=128, hidden_size=128, output_size=128):
     def custom_matmul(bias, a, b):
         return torch.addmm(bias, a, b)
     torch.manual_seed(0)
-    input = torch.randn(128, 64)
-    weight = torch.randn(64, 32)
-    bias = torch.randn(64)
+    input = torch.randn(input_size, hidden_size)
+    weight = torch.randn(hidden_size, output_size)
+    bias = torch.randn(output_size)
     x1 = input.to(device=device)
     w1 = weight.to(device=device)
     b1 = bias.to(device=device)
@@ -756,5 +756,6 @@ if __name__ == "__main__":
     test_avgpool(device)
     test_softmax(device, (64, 128), dim=1)
     test_BatchNorm(device)
+    test_matmul(device)
     test_CNN(device)
     test_DecoderBlock(device)
