@@ -295,9 +295,11 @@ class CustomAsyncCompile(AsyncCompile):
                 return
 
             onnx_path = os.path.join(result_path, "tile_graph.onnx")
+            attribute_path = os.path.join(TORCHSIM_DUMP_PATH, "tmp", hash_prefix(key), "attribute")
             backend_path = os.path.join(TORCHSIM_DIR, "PyTorchSimBackend")
             backsim = BackendSimulator(backend_path, TORCHSIM_BACKEND_CONFIG)
-            result_path = backsim.simulation(onnx_path)
+            attribute_path = backsim.create_attribute_file(attribute_path, args)
+            result_path = backsim.simulation(onnx_path, attribute_path)
             result = BackendSimulator.get_result_from_file(result_path)
             return result
 
@@ -347,9 +349,11 @@ class CustomAsyncCompile(AsyncCompile):
                 print(f"Error while reading.")
 
             onnx_path = os.path.join(result_path, "tile_graph.onnx")
+            attribute_path = os.path.join(TORCHSIM_DUMP_PATH, "tmp", hash_prefix(key), "attribute")
             backend_path = os.path.join(TORCHSIM_DIR, "PyTorchSimBackend")
             backsim = BackendSimulator(backend_path, TORCHSIM_BACKEND_CONFIG)
-            result_path = backsim.simulation(onnx_path)
+            attribute_path = backsim.create_attribute_file(attribute_path, args)
+            result_path = backsim.simulation(onnx_path, attribute_path)
             result = BackendSimulator.get_result_from_file(result_path)
             return result
         return dummy_simulator

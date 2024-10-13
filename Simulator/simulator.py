@@ -3,6 +3,7 @@ import shlex
 import subprocess
 import re
 import sys
+import json
 import time
 import threading
 
@@ -161,6 +162,7 @@ class CycleSimulator():
             cycle_per_tick = [int(line.split()[1]) for line in raw_list if "system.clk_domain.clock" in line][0]
             cycle_list = [int(line.split()[1]) / cycle_per_tick for line in raw_list if "system.cpu.numCycles" in line]
         #cycle_list = [cycle_list[i+1] - cycle_list[i] for i in range(len(cycle_list)-1)]
+        cycle_list = [128 for i in range(len(cycle_list))] # FIXME.
         return cycle_list
 
 class BackendSimulator():
@@ -179,7 +181,7 @@ class BackendSimulator():
         cmd = f"{bin} --config {config}"
         return cmd
 
-    def simulation(self, model_path):
+    def simulation(self, model_path, attribute_path=""):
         def show_progress():
             i = 0
             while not finished:
@@ -188,13 +190,15 @@ class BackendSimulator():
                 sys.stdout.write("\r[BackendSimulator] Simulation is still running." + tail)
                 time.sleep(1)
             print("\n")
+        cmd = f"{self.get_backend_command()} --models_list {model_path}"
+        if attribute_path:
+            cmd = f"{cmd} --attributes_list {attribute_path}"
+        print("Backendsim cmd > ", cmd)
 
         # Create progress thread
         finished = False
         progress_thread = threading.Thread(target=show_progress)
         progress_thread.start()
-
-        cmd = f"{self.get_backend_command()} --models_list {model_path}"
         try:
             result = subprocess.check_output(shlex.split(cmd))
             finished = True
@@ -265,6 +269,19 @@ class BackendSimulator():
         command = f"until {until_cycle}"
         ret = self.send_command(command)
         return int(ret.split(" ")[-1])
+
+    def create_attribute_file(self, attribute_path, inputs):
+        address_info = {}
+        os.makedirs(attribute_path, exist_ok=True)
+        index = str(len(os.listdir(attribute_path)))
+        attribute_path = os.path.join(attribute_path, index)
+
+        for idx, tensor in enumerate(inputs):
+            address_info[f"arg{idx}"] = tensor.data_ptr()
+
+        with open(attribute_path, "w") as f:
+            json.dump({"address_info" : address_info}, f, indent=4)
+        return attribute_path
 
     @staticmethod
     def get_result_from_file(result_path):

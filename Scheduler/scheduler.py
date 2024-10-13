@@ -229,17 +229,8 @@ class ExecutionEngine:
         result_path = os.path.join(TORCHSIM_DUMP_PATH, "tmp", hash_prefix(key))
         onnx_path = os.path.join(result_path, "tile_graph.onnx")
 
-        address_info = {}
         attribute_path = os.path.join(TORCHSIM_DUMP_PATH, "tmp", hash_prefix(key), "attribute")
-        os.makedirs(attribute_path, exist_ok=True)
-        index = str(len(os.listdir(attribute_path)))
-        attribute_path = os.path.join(attribute_path, index)
-
-        for idx, tensor in enumerate(inputs):
-            address_info[f"arg{idx}"] = tensor.data_ptr()
-
-        with open(attribute_path, "w") as f:
-            json.dump({"address_info" : address_info}, f, indent=4)
+        self.backend_simulator.create_attribute_file(attribute_path, inputs)
         return onnx_path, attribute_path
 
     def launch_kernel(self, current_cycle, partion_idx=0):
