@@ -17,7 +17,8 @@ bool Core::can_issue(const std::shared_ptr<Tile>& op) {
 }
 
 void Core::issue(std::shared_ptr<Tile> op) {
-  spdlog::trace("[Core {}] New Tile is issued, remain sram: {} Required size: {}, Free size: {}", _id, _sram_size-_used_sram_size, op->get_required_sram_size(), op->get_instructions().back()->get_free_sram_size());
+  spdlog::trace("[Core {}][{}] New Tile is issued, remain sram: {} Required size: {}, Free size: {}",
+    _id, _core_cycle, _sram_size-_used_sram_size, op->get_required_sram_size(), op->get_instructions().back()->get_free_sram_size());
   _used_sram_size += op->get_required_sram_size();
   _tiles.push_back(std::move(op));
 }
@@ -93,17 +94,19 @@ void Core::dma_cycle() {
     }
   }
   /* Generate MemoryAccess */
-  MemoryAccess *access = _tma.get_memory_access();
-  if (access == nullptr)
-    return;
+  while (1) {
+    MemoryAccess *access = _tma.get_memory_access();
+    if (access == nullptr)
+      return;
 
-  //spdlog::debug("[TMA {}] access: 0x{:x}, write: {}", _id, access->dram_address, access->write);
-  /* Access couldn't be nullptr, since it is not finished */
-  assert(access != nullptr);
+    //spdlog::debug("[TMA {}] access: 0x{:x}, write: {}", _id, access->dram_address, access->write);
+    /* Access couldn't be nullptr, since it is not finished */
+    assert(access != nullptr);
 
-  access->core_id = _id;
-  access->start_cycle = _core_cycle;
-  _request_queue.push(access);
+    access->core_id = _id;
+    access->start_cycle = _core_cycle;
+    _request_queue.push(access);
+  }
 
   /* Increase tma stat cycle */
   _stat_tma_cycle++;
@@ -187,12 +190,13 @@ void Core::cycle() {
 void Core::finish_instruction(std::shared_ptr<Instruction>& inst) {
   size_t free_sram_size = inst->get_free_sram_size();
   if (inst->finished) {
-    spdlog::error("[Core {}][{}] {} inst already finished!!", _id, _core_cycle, opcode_to_string(inst->get_opcode()));
+    spdlog::error("[Core {}][{}] <finish_instruction> {} inst already finished!!", _id, _core_cycle, opcode_to_string(inst->get_opcode()));
     exit(EXIT_FAILURE);
   }
   inst->finish_instruction();
   static_cast<Tile*>(inst->get_owner())->inc_finished_inst();
-  spdlog::trace("[Core {}][{}] Used sram: {}, Release sram: {}, inst: {}", _id, _core_cycle, _used_sram_size, inst->get_free_sram_size(), opcode_to_string(inst->get_opcode()));
+  spdlog::trace("[Core {}][{}] <finish_instruction> Used sram: {}, Release sram: {}, inst: {}",
+    _id, _core_cycle, _used_sram_size, inst->get_free_sram_size(), opcode_to_string(inst->get_opcode()));
   _used_sram_size -= free_sram_size;
 }
 
