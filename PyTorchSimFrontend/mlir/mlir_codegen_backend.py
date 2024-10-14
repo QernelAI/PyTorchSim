@@ -836,7 +836,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
             indices = self.cse.generate(self.loads, f"affine.apply #{mapping}(%{indices})") # FIXME. Only loads?
         if name not in self.global_vars_set:
             # Add definition to header
-            self.header.writeline(f"{c_type} {name}_spad[{tile_row}][{tile_col}] __attribute__ ((section(\".spad\")));")
+            self.header.writeline(f"{c_type} {name}_spad[{tile_row//self.vector_lane}][{tile_col}] __attribute__ ((section(\".spad\")));")
             self.global_vars_set.add(name)
             self.global_vars.writeline(f"memref.global @{name}_spad : memref<{dram_tile_shape}x{mlir_type}, 1>")
         buffer = self.cse.generate(code_buffer, f"memref.get_global @{name}_spad : memref<{dram_tile_shape}x{mlir_type}, 1>")

@@ -221,10 +221,10 @@ class MLIRConvTemplate(MLIRTemplate):
         if not os.path.exists(write_path):
             os.makedirs(write_path)
         write_path = os.path.join(write_path, "global_var.h")
-        header = f"float X_spad[{TILE_M}][{TILE_K}] __attribute__ ((section(\".spad\")));\n"
-        header += f"float W_spad[{TILE_K}][{TILE_N}] __attribute__ ((section(\".spad\")));\n"
-        header += f"float B_spad[{TILE_M}][{TILE_N}] __attribute__ ((section(\".spad\")));\n"
-        header += f"float Y_spad[{TILE_M}][{TILE_N}] __attribute__ ((section(\".spad\")));\n"
+        header = f"float X_spad[{TILE_M//kernel.vector_lane}][{TILE_K}] __attribute__ ((section(\".spad\")));\n"
+        header += f"float W_spad[{TILE_K//kernel.vector_lane}][{TILE_N}] __attribute__ ((section(\".spad\")));\n"
+        header += f"float B_spad[{TILE_M//kernel.vector_lane}][{TILE_N}] __attribute__ ((section(\".spad\")));\n"
+        header += f"float Y_spad[{TILE_M//kernel.vector_lane}][{TILE_N}] __attribute__ ((section(\".spad\")));\n"
         if not os.path.exists(write_path):
             write_atomic(write_path, header)
         kernel.add_loop_info([options["M"], options["N"], options["K"]], [options["TILE_M"], options["TILE_N"], options["TILE_K"]])
