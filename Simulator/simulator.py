@@ -30,7 +30,7 @@ class FunctionalSimulator():
         self.path = path
         self.key = key
 
-    def load_tensor(self, arg, arg_name, arg_attribute, path, original_arg):
+    def load_tensor(self, arg, arg_name, arg_attribute, path):
         # path = os.path.join(dump_path, arg_name, f'{n_call}.raw')
         with open(path, 'rb') as f:
             np_array = np.fromfile(f, dtype=TORCH_TO_NUMPY[arg.dtype])
@@ -38,10 +38,6 @@ class FunctionalSimulator():
                 np_array = np.unpackbits(np_array)
             src_tensor = torch.as_strided(torch.from_numpy(np_array), arg.size(), arg.stride())
             arg.copy_(src_tensor.to(dtype=arg.dtype))
-            # trim arg to original size
-            if arg.size() != original_arg.size():
-                slices = [slice(0, s) for s in original_arg.size()]
-                original_arg.copy_(arg[tuple(slices)])
 
     def get_biggest_filename(self, path):
         return len(os.listdir(path))
@@ -78,23 +74,9 @@ class FunctionalSimulator():
 
         return array_size, file_path
 
-    def run_spike(self, args, arg_attributes, path, binary, intermediate_op=None, vectorlane_size=4, tile_size={0: 16, 1: 4}, spad_info=None):
+    def run_spike(self, args, arg_attributes, path, binary, intermediate_op=None, vectorlane_size=4, spad_info=None):
         load_path = self.path
         dump_path = self.path
-        original_args = args
-        if list(tile_size.values())[0] > 1:
-            for idx, arg in enumerate(args):
-                dims_to_pad = [0] if len(arg.shape) == 1 else [-2, -1]
-                for t, i in enumerate(dims_to_pad):
-                    if arg.shape[i] > 1 and arg.shape[i] % tile_size[t] != 0:
-                        pad_shape = list(arg.shape)
-                        pad_shape[i] = tile_size[t] - arg.shape[i] % tile_size[t] # diff
-                        zeros = torch.zeros(pad_shape, dtype=arg.dtype, device=arg.device)
-                        arg = torch.cat([arg, zeros], dim=i).to(device=arg.device)
-                        args = list(args)
-                        args[idx] = arg
-                        args = tuple(args)
-                        arg_attributes[idx][1][2] = arg.numel()
 
         target_binary = os.path.join(path, binary)
         objdump = f"riscv64-unknown-elf-objdump -d {target_binary} > {os.path.join(path, 'binary.dump')}"
@@ -135,9 +117,9 @@ class FunctionalSimulator():
             print("[SpikeSimulator] Error output:", e.output)
             assert(0)
 
-        for (arg_name, arg_attribute), arg, path, original_arg in zip(arg_attributes, args, file_path, original_args):
+        for (arg_name, arg_attribute), arg, path in zip(arg_attributes, args, file_path):
             if LLVMKernelArgs.is_llvm_arg_out(arg_attribute[0]):
-                self.load_tensor(arg, arg_name, arg_attribute, path, original_arg)
+                self.load_tensor(arg, arg_name, arg_attribute, path)
 
 class CycleSimulator():
     GEM5_PATH = os.environ.get('GEM5_PATH',

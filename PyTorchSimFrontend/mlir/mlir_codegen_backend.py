@@ -249,10 +249,6 @@ class MLIRTile():
         self.n_row = n_row
         self.n_col = n_col
         self.vector_lane = vector_lane
-        self.axis_strides = []
-        self.axis_dict = {} # dram_axis : iter_axix
-        self.axis_size = {}
-        self.reverse_axis_dict = {} # iter_axis : dram_axis
 
     def get_tile_size(self):
         return self.n_row * self.n_col
@@ -286,30 +282,6 @@ class MLIRTile():
 
     def is_vector(self):
         return self.n_row == 1
-
-    def update_axis_stride(self, cv):
-        self.axis_strides.clear()
-        for axis, stride in enumerate(cv):
-            self.axis_strides.append([axis, stride[0]])
-        self.axis_strides = sorted(self.axis_strides, key=lambda x: x[1], reverse=True)
-        self.axis_dict = {}
-        self.reverse_axis_dict = {}
-        self.axis_size = {}
-        self.iter_info = list(enumerate(self.axis_strides))
-        for dram_axis, (iter_axis, _) in self.iter_info:
-            self.axis_dict[dram_axis] = iter_axis
-            self.reverse_axis_dict[iter_axis] = dram_axis
-            if dram_axis == 0:
-                self.axis_size[dram_axis] = -1
-            else:
-                self.axis_size[dram_axis] = self.axis_strides[dram_axis-1][1] // self.axis_strides[dram_axis][1]
-
-    def get_axis_and_tile_info(self):
-        axis = self.axis_strides
-        if len(axis) > 1:
-            return {len(axis)-2: self.n_row, len(axis)-1: self.n_col}
-        else:
-            return {0: self.n_row, 1: self.n_col}
 
 class MLIRKernel(mlir_common.BaseMLIRKernel):
     overrides = ExtensionOverrides
@@ -469,35 +441,6 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
     def parse_indices(self, expr):
         if len(expr.args) == 0:
             return expr, expr
-
-       # update cv
-        cv = self.get_constant_vector(expr)
-        cv2 = self.get_constant_vector2(expr)
-        if len(cv) != len(cv2) and len(cv2) == 3:
-            # FIXME. this is really shitty code :(
-            cv = [[1 if x[0] == 0 else x[0], x[1]] for x in cv]
-        self.tile_desc.update_axis_stride(cv)
-        tile_size = self.tile_desc.get_axis_and_tile_info()
-        axis_size = self.tile_desc.axis_size
-
-        # Padding axis and size dict
-        for dram_axis, tile_axis_size in tile_size.items():
-            size = axis_size[dram_axis]
-            new_size = ((size + tile_axis_size - 1) // tile_axis_size) * tile_axis_size
-            axis_size[dram_axis] = new_size
-
-        # Reconstruct padded stride dict
-        padded_stride = {}
-        for dram_axis in list(range(len(self.itervars)))[::-1]:
-            if dram_axis == len(self.itervars) - 1:
-                padded_stride[dram_axis] = 1
-            else:
-                padded_stride[dram_axis] = padded_stride[dram_axis+1] * axis_size[dram_axis+1]
-
-        # Update expr
-        for iter_axis, iter_var in enumerate(self.itervars):
-            dram_axis = self.tile_desc.reverse_axis_dict[iter_axis]
-            expr = expr.subs(expr.coeff(iter_var), padded_stride[dram_axis])
 
         # Extract index var
         expr_str = str(expr)
@@ -864,13 +807,6 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         if len(self.itervars) >= 3 and self.reduction_depth < len(self.itervars):
             raise NotImplementedError()
 
-    def pad_ranges(self):
-        if len(self.itervars) == 1:
-            self.ranges[0] = (self.ranges[0] + self.tile_desc.get_tile_size() - 1) // self.tile_desc.get_tile_size() * self.tile_desc.get_tile_size()
-        elif len(self.itervars) > 1:
-            self.ranges[-1] = (self.ranges[-1] + self.tile_desc.n_col - 1) // self.tile_desc.n_col * self.tile_desc.n_col
-            self.ranges[-2] = (self.ranges[-2] + self.tile_desc.n_row - 1) // self.tile_desc.n_row * self.tile_desc.n_row
-
     def set_ranges(self, lengths, reduction_lengths, read_writes):
         self.read_writes = read_writes
         if self.call_ranges:
@@ -886,7 +822,6 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
 
         # Adjust time size when it is vector
         self.adjust_tile_size()
-        self.pad_ranges()
 
         return (
             self.itervars[: self.reduction_depth],
@@ -994,7 +929,7 @@ class MLIRScheduling(BaseScheduling):
         kernel_name = f"extension_kernel_{MLIRScheduling.count}"
         MLIRScheduling.count += 1
         src_code = ex_kernel.codegen_nodes(nodes, kernel_name)
-        self.define_kernel(src_code, kernel_name, ex_kernel.vector_lane, ex_kernel.tile_desc.get_axis_and_tile_info(), ex_kernel.spad_info)
+        self.define_kernel(src_code, kernel_name, ex_kernel.vector_lane, ex_kernel.spad_info)
         ex_kernel.call_kernel(kernel_name)
         _, args, _, _ = ex_kernel.args.mlir_argdefs()
         args = ", ".join(args)
@@ -1022,7 +957,7 @@ class MLIRScheduling(BaseScheduling):
             wrapper.header.writeline(code)
             self.outer_function.add(function_name)
 
-    def define_kernel(self, src_code, kernel_name, vector_lane, tile_size, spad_info):
+    def define_kernel(self, src_code, kernel_name, vector_lane, spad_info):
         wrapper = V.graph.wrapper_code
         if src_code in wrapper.src_to_kernel:
             kernel_name = wrapper.src_to_kernel[src_code]
@@ -1032,7 +967,6 @@ class MLIRScheduling(BaseScheduling):
             codecache_def = IndentedBuffer()
             codecache_def.writeline(f"custom_async_compile.mlir('''{src_code}''', ")
             codecache_def.writeline(f"vectorlane_size={vector_lane},")
-            codecache_def.writeline(f"tile_size={tile_size},")
             codecache_def.writeline(f"spad_info={spad_info},")
             codecache_def.writeline("arg_attributes=arg_attributes)")
             wrapper.define_kernel(kernel_name, codecache_def.getvalue(), cuda=False)
@@ -1060,7 +994,7 @@ class MLIRScheduling(BaseScheduling):
         with V.set_kernel_handler(kernel):
             node_schedule = [template_node, *epilogue_nodes]
             kernel.meta_kernel()
-            kernel_name = self.define_kernel(src_code, kernel.kernel_name, kernel.vector_lane, {0:kernel.vector_lane, 1:kernel.vector_lane}, kernel.spad_info)
+            kernel_name = self.define_kernel(src_code, kernel.kernel_name, kernel.vector_lane, kernel.spad_info)
             self.define_function(kernel)
         kernel.call_kernel(kernel_name)
         _, args, _, _ = kernel.args.mlir_argdefs()

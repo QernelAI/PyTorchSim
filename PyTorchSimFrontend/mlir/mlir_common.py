@@ -98,50 +98,13 @@ class MLIRKernelArgs(common.KernelArgs):
     def is_mlir_arg_inout(value):
         return MLIRKernelArgs.MLIR_ARGS_INOUT & value
 
-    def pad_args(self, arg):
-        if self.tile_row is not None and self.tile_col is not None and len(arg.layout.size) > 1:
-            if arg.layout.size[0].is_number:
-                if arg.layout.size[0] > 1:
-                    arg.layout.size[0] = ((arg.get_size()[0] + self.tile_row - 1) // self.tile_row) * self.tile_row
-                # reducction has no layout
-                if hasattr(arg, "data") and hasattr(arg.data, "layout") and arg.data.layout.size[0] > 1:
-                    arg.data.layout.size[0] = ((arg.data.get_size()[0] + self.tile_row - 1) // self.tile_row) * self.tile_row
-            else:
-                raise ValueError("The size of the buffer is not a constant, so it is not padded.")
-            if arg.layout.size[1].is_number:
-                if len(arg.get_size()) > 1 and arg.layout.size[1] > 1:
-                    arg.layout.size[1] = ((arg.get_size()[1] + self.tile_col - 1) // self.tile_col) * self.tile_col
-                    if hasattr(arg, "data") and hasattr(arg.data, "layout") and arg.data.layout.size[1] > 1:
-                        arg.data.layout.size[1] = ((arg.data.get_size()[1] + self.tile_col - 1) // self.tile_col) * self.tile_col
-            else:
-                raise ValueError("The size of the buffer is not a constant, so it is not padded.")
-
     def mlir_argdefs(self, extra_node=dict()):
-        buffer_types = {}
-        for x in V.graph.buffers:
-            if not isinstance(x.layout, MultiOutputLayout):
-                origin_x_size = x.get_size()
-                if hasattr(x, "data"):
-                    origin_x_data_size = x.data.get_size()
-                if self.tile_row is not None and self.tile_row > 1:
-                    self.pad_args(x)
-                buffer_types[x.get_name()] = [x.get_dtype(), x.get_numel()]
-                x.layout.size = origin_x_size
-                if hasattr(x, "data") and hasattr(x.data, "layout"):
-                    x.data.layout.size = origin_x_data_size
+        buffer_types = {x.get_name(): [x.get_dtype(), x.get_numel()] for x in V.graph.buffers}
         for name, val in V.graph.graph_inputs.items():
-            origin_val_size = val.get_size()
-            if hasattr(val, "data"):
-                origin_val_data_size = val.data.get_size()
-            if self.tile_row is not None and self.tile_row > 1:
-                self.pad_args(val)
             if isinstance(val, sympy.Expr):
                 buffer_types[name] = [get_sympy_Expr_dtype(val), 1]
             else:
                 buffer_types[name] = [val.get_dtype(), val.get_numel()]
-            val.layout.size = origin_val_size
-            if hasattr(val, "data") and hasattr(val.data, "layout"):
-                val.data.layout.size = origin_val_data_size
         buffer_types.update(
             {name: val.dtype for name, val in V.graph.constants.items()}
         )
