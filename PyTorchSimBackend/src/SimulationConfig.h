@@ -5,7 +5,7 @@
 
 using json = nlohmann::json;
 
-enum class DramType { SIMPLE, RAMULATOR };
+enum class DramType { SIMPLE, RAMULATOR1, RAMULATOR2 };
 
 enum class IcntType { SIMPLE, BOOKSIM2 };
 

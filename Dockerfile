@@ -32,7 +32,7 @@ RUN apt -y update && apt -y upgrade && \
     libprotobuf-dev protobuf-compiler libprotoc-dev libgoogle-perftools-dev \
     python3-dev python-is-python3 doxygen libboost-all-dev \
     libhdf5-serial-dev python3-pydot libpng-dev libelf-dev pkg-config pip \
-    python3-venv black
+    python3-venv black libssl-dev libasan5 libubsan1
 RUN pip install mypy pre-commit
 
 # Build Gem5
@@ -63,7 +63,7 @@ ENV PATH $RISCV/bin:$PATH
 
 # Install Spike simulator
 RUN apt -y install device-tree-compiler
-RUN git clone https://github.com/PSAL-POSTECH/riscv-isa-sim.git --branch custom_instruction && cd riscv-isa-sim && mkdir build && cd build && \
+RUN git clone https://github.com/PSAL-POSTECH/riscv-isa-sim.git --branch TorchSim && cd riscv-isa-sim && mkdir build && cd build && \
     ../configure --prefix=$RISCV && make -j && make install
 
 # Install Proxy kernel

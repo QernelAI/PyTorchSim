@@ -29,6 +29,11 @@ add_subdirectory("${PROJECT_SOURCE_DIR}/src")
 # Add libaray ramulator
 add_subdirectory("${PROJECT_SOURCE_DIR}/extern/ramulator_custom")
 
+# Add libaray ramulator
+add_subdirectory("${PROJECT_SOURCE_DIR}/extern/ramulator2")
+include_directories("${PROJECT_SOURCE_DIR}/extern/ramulator2/src")
+include_directories("${PROJECT_SOURCE_DIR}/extern/ramulator2/resources/ndp_wrappers")
+
 # Add libaray booksim
 add_subdirectory("${PROJECT_SOURCE_DIR}/extern/booksim")
 
@@ -44,9 +49,9 @@ set_target_properties(onnx PROPERTIES FOLDER "extern/onnx")
 set_target_properties(onnx_proto PROPERTIES FOLDER "extern/onnx")
 
 target_include_directories(Simulator PUBLIC ${ONNX_INCLUDE_DIRS})
-target_link_libraries(Simulator ramulator booksim2)
+target_link_libraries(Simulator ramulator1 booksim2 ramulator)
 target_link_libraries(Simulator ${PROTOBUF_LIB} onnx_proto ${CONAN_LIBS} stdc++fs)
 
 target_include_directories(Simulator_lib PUBLIC ${ONNX_INCLUDE_DIRS})
-target_link_libraries(Simulator_lib ramulator booksim2)
+target_link_libraries(Simulator_lib ramulator1 booksim2 ramulator)
 target_link_libraries(Simulator_lib ${PROTOBUF_LIB} onnx_proto ${CONAN_LIBS} stdc++fs)

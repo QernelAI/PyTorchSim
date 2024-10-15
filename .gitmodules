@@ -10,3 +10,6 @@
 [submodule "PyTorchSimBackend/extern/torch2timeloop"]
         path = PyTorchSimBackend/extern/torch2timeloop
         url = https://github.com/Accelergy-Project/pytorch2timeloop-converter.git
+[submodule "PyTorchSimBackend/extern/ramulator2"]
+	path = PyTorchSimBackend/extern/ramulator2
+	url = https://github.com/PSAL-POSTECH/ramulator2
