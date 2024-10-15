@@ -56,7 +56,7 @@ void TileNode::print_node() {
 TileComputeNode::TileComputeNode(onnx::NodeProto& node) : TileNode(node) {
   for (auto attribute : node.attribute()) {
     if (attribute.name() == "torchsim_cycle") {
-      _cycle = int(attribute.f());
+      _cycle = int(attribute.i());
     }
     if (attribute.name() == "torchsim_compute_type") {
       _compute_type = attribute.i();
