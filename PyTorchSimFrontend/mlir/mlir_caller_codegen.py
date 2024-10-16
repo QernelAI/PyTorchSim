@@ -5,12 +5,14 @@ from PyTorchSimFrontend.mlir.mlir_common import DTYPE_TO_C
 
 class MLIRKernelCallerCodeGen(LLVMKernelCallerCodeGen):
 
-    def __init__(self, validation, arg_attributes):
+    def __init__(self, validation, arg_attributes, cycle_sim=False):
         super().__init__(validation, arg_attributes)
+        self.cycle_sim = cycle_sim
 
     def write_header(self):
         super().write_header()
-        self.writeline(f"#include \"global_var.h\"")
+        global_var_header = "gem5_global_var.h" if self.cycle_sim else "global_var.h"
+        self.writeline(f"#include \"{global_var_header}\"")
         self.generate_args_define()
 
     def is_in_arg(self, value):

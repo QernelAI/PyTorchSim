@@ -300,6 +300,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         self.global_vars = IndentedBuffer()
         self.global_vars_set = set()
         self.header = IndentedBuffer()
+        self.gem5_header = IndentedBuffer()
         self.reduction_vars = {}
         self.reduction_cse = common.CSE(self.newvar_prefix, self.suffix, name_prefix="tmp_acc")
         self.iterator_cse = common.CSE(self.newvar_prefix, self.suffix, name_prefix="iter")
@@ -487,9 +488,12 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         write_path = extension_codecache.get_write_path(src_code)
         if not os.path.exists(write_path):
             os.makedirs(write_path)
-        write_path = os.path.join(write_path, "global_var.h")
-        if not os.path.exists(write_path):
-            write_atomic(write_path, self.header.getvalue())
+        spike_write_path = os.path.join(write_path, "global_var.h")
+        gem5_write_path = os.path.join(write_path, "gem5_global_var.h")
+        if not os.path.exists(spike_write_path):
+            write_atomic(spike_write_path, self.header.getvalue())
+        if not os.path.exists(gem5_write_path):
+            write_atomic(gem5_write_path, self.gem5_header.getvalue())
         return src_code
 
     def load(self, name: str, index: sympy.Expr):
@@ -836,7 +840,8 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
             indices = self.cse.generate(self.loads, f"affine.apply #{mapping}(%{indices})") # FIXME. Only loads?
         if name not in self.global_vars_set:
             # Add definition to header
-            self.header.writeline(f"{c_type} {name}_spad[{tile_row//self.vector_lane}][{tile_col}] __attribute__ ((section(\".spad\")));")
+            self.header.writeline(f"{c_type} {name}_spad[{tile_row * tile_col // self.vector_lane}] __attribute__ ((section(\".spad\")));")
+            self.gem5_header.writeline(f"{c_type} {name}_spad[{tile_row * tile_col}];")
             self.global_vars_set.add(name)
             self.global_vars.writeline(f"memref.global @{name}_spad : memref<{dram_tile_shape}x{mlir_type}, 1>")
         buffer = self.cse.generate(code_buffer, f"memref.get_global @{name}_spad : memref<{dram_tile_shape}x{mlir_type}, 1>")

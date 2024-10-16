@@ -175,7 +175,7 @@ class MLIRCodeCache:
             return key
 
         # Generate MLIR kernel calller and binary for cycle calculation
-        cycle_llvm_caller = MLIRKernelCallerCodeGen(False, arg_attributes)
+        cycle_llvm_caller = MLIRKernelCallerCodeGen(False, arg_attributes, cycle_sim=True)
         cycle_llvm_caller.generate_wrapper_file(write_path, cycle_wrapper_name)
         cycle_llvm_caller.compile_wih_kernel(write_path, key + "_sample", cycle_wrapper_name, cycle_binary_name, link_option)
         array_size = []
