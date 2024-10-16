@@ -159,9 +159,8 @@ class CycleSimulator():
         with open(f"{dir_path}/stats.txt", "r") as stat_file:
             raw_list = stat_file.readlines()
             cycle_per_tick = [int(line.split()[1]) for line in raw_list if "system.clk_domain.clock" in line][0]
-            cycle_list = [int(line.split()[1]) / cycle_per_tick for line in raw_list if "system.cpu.numCycles" in line]
-        #cycle_list = [cycle_list[i+1] - cycle_list[i] for i in range(len(cycle_list)-1)]
-        cycle_list = [128 for i in range(len(cycle_list))] # FIXME.
+            cycle_list = [int(line.split()[1]) for line in raw_list if "system.cpu.numCycles" in line]
+        cycle_list = cycle_list[:-1]
         return cycle_list
 
 class BackendSimulator():
