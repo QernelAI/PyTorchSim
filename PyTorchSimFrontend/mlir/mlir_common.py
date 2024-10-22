@@ -21,7 +21,6 @@ from torch._inductor.utils import (
     sympy_symbol,
     unique,
 )
-from torch._inductor.ir import Buffer
 
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 
@@ -110,9 +109,7 @@ class MLIRKernelArgs(common.KernelArgs):
             {name: val.dtype for name, val in V.graph.constants.items()}
         )
         buffer_types.update(
-            {name: [val.get_dtype() if isinstance(val, Buffer) else val.node.get_dtype(), \
-                val.get_numel() if isinstance(val, Buffer) else val.node.get_numel()] \
-                    for name, val in extra_node.items()}
+            {name: [val.get_dtype(), val.get_numel()] for name, val in extra_node.items()}
         )
 
         call_args = []
@@ -144,13 +141,13 @@ class MLIRKernelArgs(common.KernelArgs):
 class BaseMLIRHardwareInfo():
     def __init__(self):
         # Default HW setting
-        self.vector_lane = 4
+        self.vector_lane = 128
         self.spad_info = {
             "spad_vaddr" : 0x0B000000,
             "spad_paddr" : 0xD0000000,
             "spad_size" : 128 << 10 # 128KB per Lane
         }
-        self.vlen = 4
+        self.vlen = 8 # 256bits / 32bits = 8 [elements]
 
 class BaseMLIRKernel(common.Kernel, BaseMLIRHardwareInfo):
     newvar_prefix = "%"
