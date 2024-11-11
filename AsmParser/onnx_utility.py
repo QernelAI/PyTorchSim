@@ -83,6 +83,7 @@ class memory_wait_node(node):
     def __init__(self, tile_info, inst_list=list(), node_id=0):
         super().__init__(node_id)
         self.torchsim_tag_idx_list = tile_info["tag_idx_list"]
+        self.torchsim_base_addr = tile_info["base_addr"]
 
 class compute_node(node):
     def __init__(self, inst_list=list(), cycle=0, overlapping_cycle=0, compute_type=0, node_id=0):

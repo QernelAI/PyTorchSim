@@ -68,11 +68,14 @@ class Instruction {
   int get_compute_type() { return _compute_type; }
   std::vector<int>& get_idx_list() { return _idx_list; }
   std::vector<int>& get_tag_idx_list() { return _tag_idx_list; }
+  void set_addr_name(std::string name) { _addr_name = name; }
+  std::string get_addr_name() { return _addr_name; }
 
   cycle_type start_cycle;
   cycle_type finish_cycle;
 
   bool finished=false;
+  int subgraph_id;
  private:
   void *_owner;
   Opcode opcode;
@@ -90,4 +93,5 @@ class Instruction {
   int _compute_type = 0;
   std::vector<int> _idx_list;
   std::vector<int> _tag_idx_list;
+  std::string _addr_name;
 };

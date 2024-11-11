@@ -35,50 +35,34 @@ class TMA {
   void issue_tile(std::shared_ptr<Instruction> inst);
   bool is_finished() { return _finished; }
   bool empty() { return _current_inst==nullptr; }
-  void register_tag(void* subgraph, std::vector<int> key) {
-    if (!subgraph) {
-      throw std::invalid_argument("subgraph cannot be null");
+  void register_tag(int subgraph_id, const std::pair<std::string, std::vector<int>>& key) {
+    if (tag_table.find(subgraph_id) == tag_table.end()) {
+      tag_table[subgraph_id] = std::map<std::pair<std::string, std::vector<int>>, bool>();
     }
-    if (tag_table.find(subgraph) == tag_table.end()) {
-      tag_table[subgraph] = std::map<std::vector<int>, bool, VectorCompare>();
-    }
-    tag_table[subgraph][key] = false;
+    tag_table[subgraph_id][key] = false;
   }
-  void set_tag_finish(void* subgraph, std::vector<int> key) {
-    if (!subgraph) {
-      throw std::invalid_argument("subgraph cannot be null");
-    }
-    if (tag_table.find(subgraph) == tag_table.end()) {
+  void set_tag_finish(int subgraph_id, const std::pair<std::string, std::vector<int>>& key) {
+    if (tag_table.find(subgraph_id) == tag_table.end()) {
       throw std::runtime_error("Subgraph does not exist in tag_table");
     }
-    tag_table[subgraph][key] = true;
+    tag_table[subgraph_id][key] = true;
   }
-  bool get_tag_finish(void* subgraph, std::vector<int> key) {
-    if (!subgraph) {
-      throw std::invalid_argument("subgraph cannot be null");
-    }
-    auto subgraph_it = tag_table.find(subgraph);
-    if (subgraph_it == tag_table.end()) {
-      return false;
-    }
+  bool get_tag_finish(int subgraph_id, const std::pair<std::string, std::vector<int>>& key) {
+    auto subgraph_it = tag_table.find(subgraph_id);
     auto& key_map = subgraph_it->second;
     auto key_it = key_map.find(key);
     if (key_it == key_map.end()) {
       throw std::runtime_error("Key does not exist in subgraph's tag table");
     }
-    return tag_table[subgraph][key];
+    return tag_table[subgraph_id][key];
   }
-  void erase_tag_table(void* subgraph) {
-    if (!subgraph) {
-      throw std::invalid_argument("subgraph cannot be null");
-    }
-    auto subgraph_it = tag_table.find(subgraph);
+  void erase_tag_table(int subgraph_id) {
+    auto subgraph_it = tag_table.find(subgraph_id);
     if (subgraph_it == tag_table.end()) {
       throw std::runtime_error("Subgraph does not exist in tag_table");
     }
-    tag_table.erase(subgraph);
+    tag_table.erase(subgraph_id);
   }
-
   std::shared_ptr<Instruction>& get_current_inst() { return _current_inst; }
   MemoryAccess* get_memory_access();
   uint32_t generate_mem_access_id();
@@ -92,6 +76,6 @@ class TMA {
   size_t _tile_idx_stride=1;
   uint32_t _tile_idx;
   bool _finished=true;
-  std::map<void*, std::map<std::vector<int>, bool, VectorCompare>> tag_table;
+  std::map<int, std::map<std::pair<std::string, std::vector<int>>, bool>> tag_table;
 };
 #endif

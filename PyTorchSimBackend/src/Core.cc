@@ -66,12 +66,14 @@ void Core::dma_cycle() {
     /* Set tag table of async dma load */
     if (instruction->is_dma_read() && instruction->is_async_dma()) {
       std::ostringstream oss;
-      _tma.set_tag_finish(static_cast<Tile*>(instruction->get_owner())->get_owner(), instruction->get_tag_idx_list());
+      _tma.set_tag_finish(instruction->subgraph_id,
+                          std::make_pair(instruction->get_addr_name(), instruction->get_tag_idx_list()));
       for (const auto& idx : instruction->get_tag_idx_list())
         oss << idx << ", ";
-      spdlog::trace("[Core {}][{}] {} ASYNC FINISHED, Used sram: {}, Release sram: {}, tag_idx_list: {}",
+      spdlog::trace("[Core {}][{}] {} ASYNC FINISHED, Used sram: {}, Release sram: {}, addr_name: {} tag_idx_list: {}",
                     _id, _core_cycle, opcode_to_string(instruction->get_opcode()),
-                    _used_sram_size, instruction->get_free_sram_size(), oss.str());
+                    _used_sram_size, instruction->get_free_sram_size(),
+                    instruction->get_addr_name(), oss.str());
     }
 
     /* Erase the instruction in DMA waiting queue */
@@ -88,7 +90,8 @@ void Core::dma_cycle() {
         finish_instruction(finished_inst);
       } else if (finished_inst->is_dma_read() && finished_inst->is_async_dma()) {
         /* Register tag table for async dma load */
-        _tma.register_tag(static_cast<Tile*>(finished_inst->get_owner())->get_owner(), finished_inst->get_tag_idx_list());
+        _tma.register_tag(finished_inst->subgraph_id,
+                          std::make_pair(finished_inst->get_addr_name(), finished_inst->get_tag_idx_list()));
         finish_instruction(finished_inst);
       } else if(!finished_inst->is_dma_read()) {
         spdlog::error("[Core {}][{}] TMA instruction in not valid", _id, _core_cycle);
@@ -157,8 +160,9 @@ void Core::cycle() {
             std::ostringstream oss;
             for (const auto& idx : inst->get_tag_idx_list())
               oss << idx << ", ";
-            spdlog::trace("[Core {}][{}] {} ISSUED, free_sram_size: {} tag_idx_list: {}", _id, _core_cycle,
-                          opcode_to_string(inst->get_opcode()), inst->get_free_sram_size(), oss.str());
+            spdlog::trace("[Core {}][{}] {} ISSUED, free_sram_size: {} addr_name: {} tag_idx_list: {}", _id, _core_cycle,
+                          opcode_to_string(inst->get_opcode()), inst->get_free_sram_size(),
+                          inst->get_addr_name(), oss.str());
             _ld_inst_queue.push(inst);
             issued = true;
           }
@@ -187,10 +191,11 @@ void Core::cycle() {
             std::ostringstream oss;
             for (const auto& idx : inst->get_tag_idx_list())
               oss << idx << ", ";
-            bool finished = _tma.get_tag_finish(static_cast<Tile*>(inst->get_owner())->get_owner(), inst->get_tag_idx_list());
+            bool finished = _tma.get_tag_finish(inst->subgraph_id,
+                                                std::make_pair(inst->get_addr_name(), inst->get_tag_idx_list()));
             if (finished) {
-              spdlog::trace("[Core {}][{}] {} FINISHED, tag_list: {}", _id, _core_cycle,
-                            opcode_to_string(inst->get_opcode()), oss.str());
+              spdlog::trace("[Core {}][{}] {} FINISHED, addr_name: {} tag_list: {}", _id, _core_cycle,
+                            opcode_to_string(inst->get_opcode()), inst->get_addr_name(), oss.str());
               finish_instruction(inst);
               issued = true;
             }
@@ -245,8 +250,9 @@ void Core::finish_instruction(std::shared_ptr<Instruction>& inst) {
     std::ostringstream oss;
     for (const auto& idx : inst->get_tag_idx_list())
       oss << idx << ", ";
-    spdlog::trace("[Core {}][{}] {} ASYNC REGISTERED, Used sram: {}, Release sram: {} tag_idx_list: {}",
-      _id, _core_cycle, opcode_to_string(inst->get_opcode()), _used_sram_size, inst->get_free_sram_size(), oss.str());
+    spdlog::trace("[Core {}][{}] {} ASYNC REGISTERED, Used sram: {}, Release sram: {} addr_name: {} tag_idx_list: {}",
+      _id, _core_cycle, opcode_to_string(inst->get_opcode()), _used_sram_size,
+      inst->get_free_sram_size(), inst->get_addr_name(), oss.str());
   }
   //_used_sram_size -= free_sram_size;
 }

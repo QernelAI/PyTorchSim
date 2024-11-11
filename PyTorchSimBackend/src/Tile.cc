@@ -1,4 +1,5 @@
 #include "Tile.h"
+#include "TileGraph.h"
 
 Tile::Tile(Status status) {
   _status = status;

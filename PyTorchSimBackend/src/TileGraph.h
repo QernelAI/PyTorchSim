@@ -14,6 +14,7 @@ class TileSubGraph {
   bool is_finished() { return _ready_tile_queue.empty() && _tile_set.empty(); }
   const std::shared_ptr<Tile> peek_tile();
   std::shared_ptr<Tile> get_tile();
+  int get_id() { return _id; }
   struct CompareReadyTile {
     bool operator()(const std::shared_ptr<Tile>& a, const std::shared_ptr<Tile>& b) const {
       return a->get_required_sram_size() > b->get_required_sram_size();
@@ -23,6 +24,8 @@ class TileSubGraph {
  protected:
   std::priority_queue<std::shared_ptr<Tile>, std::vector<std::shared_ptr<Tile>>, CompareReadyTile> _ready_tile_queue;
   std::set<std::shared_ptr<Tile>> _tile_set;
+  int _id;
+  static int _next_id;
 };
 
 class TileGraph {

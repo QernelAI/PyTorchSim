@@ -125,6 +125,8 @@ TileMemoryWaitNode::TileMemoryWaitNode(onnx::NodeProto& node) : TileNode(node) {
     if (attribute.name() == "torchsim_tag_idx_list") {
       for (int i = 0; i < attribute.strings_size(); i++)
         _tag_idx_list.push_back(attribute.strings(i));
+    } else if (attribute.name() == "torchsim_base_addr") {
+      _base_addr_name = attribute.s();
     }
   }
 }
@@ -204,7 +206,7 @@ std::vector<std::shared_ptr<Tile>> TileLoopNode::get_tiles_from_iter(TileGraphPa
       }
       for (auto loop_idx: mem_node->get_tag_idx_list()) {
         if (iter.find(loop_idx) == iter.end())
-          tag_list.push_back(-1);
+          tag_list.push_back(0);
         else {
           auto iter_value = iter.at(loop_idx);
           tag_list.push_back(iter_value);
@@ -217,6 +219,7 @@ std::vector<std::shared_ptr<Tile>> TileLoopNode::get_tiles_from_iter(TileGraphPa
         mem_node->get_tile_size(), mem_node->get_tile_stride(), mem_node->get_precision(),
         iter_list, tag_list
       );
+      inst->set_addr_name(base_addr_name);
       link_map[tile_node] = inst;
       tile_vec.back()->append_instuction(inst);
     } else if (tile_node->get_type() == TileType::STORE_NODE) {
@@ -237,16 +240,20 @@ std::vector<std::shared_ptr<Tile>> TileLoopNode::get_tiles_from_iter(TileGraphPa
         mem_node->get_tile_size(), mem_node->get_tile_stride(), mem_node->get_precision(),
         iter_list, std::vector<int>()
       );
+      inst->set_addr_name(base_addr_name);
       link_map[tile_node] = inst;
       tile_vec.back()->append_instuction(inst);
     } else if (tile_node->get_type() == TileType::MEMORY_WAIT_NODE) {
       printIndexMap("[TOGParser] DMA Wait Node ", iter);
       std::shared_ptr<TileMemoryWaitNode> wait_node = std::static_pointer_cast<TileMemoryWaitNode>(tile_node);
+      auto base_addr_name = wait_node->get_base_addr_name();
+      addr_type base_addr = tog_parser->lookup(base_addr_name);
+      /* Lookup given name's address */
       std::vector<int> iter_list;
       std::vector<int> tag_list;
       for (auto loop_idx: wait_node->get_tag_idx_list()) {
         if (iter.find(loop_idx) == iter.end())
-          tag_list.push_back(-1);
+          tag_list.push_back(0);
         else {
           auto iter_value = iter.at(loop_idx) * 128;
           tag_list.push_back(iter_value);
@@ -255,10 +262,11 @@ std::vector<std::shared_ptr<Tile>> TileLoopNode::get_tiles_from_iter(TileGraphPa
 
       std::shared_ptr<Instruction> inst = std::make_shared<Instruction>(
         Opcode::BAR, 0,
-        0, 0,
+        0, base_addr,
         std::vector<size_t>(), std::vector<size_t>(), 0,
         iter_list, tag_list
       );
+      inst->set_addr_name(base_addr_name);
       link_map[tile_node] = inst;
       tile_vec.back()->append_instuction(inst);
     } else if (tile_node->get_type() == TileType::COMPUTE_NODE) {
@@ -302,19 +310,21 @@ std::vector<std::shared_ptr<Tile>> TileLoopNode::get_tiles_from_iter(TileGraphPa
       std::shared_ptr<Tile> parent = tile_vec.back();
       std::shared_ptr<Tile> child = std::make_shared<Tile>(Tile::Status::INITIALIZED);
 
-      /* Set last instruction's free sram size */
-      if(parent->get_instructions().size())
-        parent->get_instructions().back()->set_free_sram_size(parent->get_required_sram_size());
-
       std::map<std::string, int> inner_indices = iter;
       auto loop_type = loop_node->get_loop_type();
+      auto& parent_instructions = parent->get_instructions();
+      auto& last_instruction = parent_instructions.back();
+      auto nr_inst = parent_instructions.size();
       for (int i=start; i<end; i+=stride) {
         inner_indices[loop_node->get_idx_name()] = i;
         std::vector<std::shared_ptr<Tile>> ret = loop_node->get_tiles_from_iter(tog_parser, inner_indices);
         if (loop_type == TileLoopNode::INNER_LOOP) {
-          for (const auto& inner_tile : ret) {
+         for (const auto& inner_tile : ret) {
             for (auto& inner_inst : inner_tile->get_instructions()) {
               tile_vec.back()->append_instuction(inner_inst);
+              if (nr_inst) {
+                last_instruction->add_child(inner_inst);
+              }
             }
           }
         } else {
@@ -325,6 +335,10 @@ std::vector<std::shared_ptr<Tile>> TileLoopNode::get_tiles_from_iter(TileGraphPa
           }
         }
       }
+      /* Set last instruction's free sram size */
+      if(parent->get_instructions().size())
+        parent->get_instructions().back()->set_free_sram_size(parent->get_required_sram_size());
+
       parent->append_child(child);
       /* Create new tile */
       tile_vec.push_back(child);

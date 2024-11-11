@@ -115,11 +115,13 @@ class TileMemoryNode : public TileNode {
 class TileMemoryWaitNode : public TileNode {
  public:
   TileMemoryWaitNode(onnx::NodeProto& node);
+  std::string get_base_addr_name() { return _base_addr_name; }
   std::vector<std::string>& get_tag_idx_list() { return _tag_idx_list; }
   void print_node() override;
 
  private:
   std::vector<std::string> _tag_idx_list;
+  std::string _base_addr_name;
 };
 
 class TileLoopNode : public TileNode {
