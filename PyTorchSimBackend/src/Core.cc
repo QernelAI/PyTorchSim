@@ -13,7 +13,7 @@ Core::Core(uint32_t id, SimulationConfig config)
 
 bool Core::can_issue(const std::shared_ptr<Tile>& op) {
   /* Check SRAM is enough to run tile */
-  return op->get_required_sram_size() + _used_sram_size <= _sram_size; // && _tiles.size() < 2;
+  return op->get_required_sram_size() + _used_sram_size <= _sram_size && _tiles.size() < 1;
 }
 
 void Core::issue(std::shared_ptr<Tile> op) {
@@ -64,8 +64,15 @@ void Core::dma_cycle() {
       finish_instruction(instruction);
 
     /* Set tag table of async dma load */
-    if (instruction->is_dma_read() && instruction->is_async_dma())
+    if (instruction->is_dma_read() && instruction->is_async_dma()) {
+      std::ostringstream oss;
       _tma.set_tag_finish(static_cast<Tile*>(instruction->get_owner())->get_owner(), instruction->get_tag_idx_list());
+      for (const auto& idx : instruction->get_tag_idx_list())
+        oss << idx << ", ";
+      spdlog::trace("[Core {}][{}] {} ASYNC FINISHED, Used sram: {}, Release sram: {}, tag_idx_list: {}",
+                    _id, _core_cycle, opcode_to_string(instruction->get_opcode()),
+                    _used_sram_size, instruction->get_free_sram_size(), oss.str());
+    }
 
     /* Erase the instruction in DMA waiting queue */
     _dma_waiting_queue.erase(_dma_waiting_queue.begin() + i);
@@ -138,62 +145,67 @@ void Core::cycle() {
 
   for (int i=0; i<_tiles.size() && !issued; i++) {
     auto& instructions = _tiles[i]->get_instructions();
-    if (instructions.size() == 0)
-      continue;
+    for (int j=0; j<instructions.size(); j++) {
+      auto inst = instructions.at(j);
+      /* Skip instruction is not ready  */
+      if (!inst->is_ready())
+        continue;
 
-    std::shared_ptr<Instruction> inst = instructions.front();
-    /* Skip instruction is not ready  */
-    if (!inst->is_ready())
-      continue;
-
-    switch (inst->get_opcode()) {
-      case Opcode::MOVIN:
-        {
-          std::ostringstream oss;
-          for (const auto& idx : inst->get_tag_idx_list())
-            oss << idx << ", ";
-          spdlog::trace("[Core {}][{}] MOVIN issued free_sram_size: {} tag_idx_list: {}", _id, _core_cycle, inst->get_free_sram_size(), oss.str());
-          _ld_inst_queue.push(inst);
-          issued = true;
-        }
-        break;
-      case Opcode::MOVOUT:
-        spdlog::trace("[Core {}][{}] MOVOUT issued free_sram_size: {}", _id, _core_cycle, inst->get_free_sram_size());
-        _st_inst_queue.push(inst);
-        issued = true;
-        break;
-      case Opcode::COMP:
-        {
-          auto& target_pipeline = _compute_pipeline.at(inst->get_compute_type());
-          if (target_pipeline.empty())
-            inst->finish_cycle = _core_cycle + inst->get_compute_cycle();
-          else
-            inst->finish_cycle = target_pipeline.back()->finish_cycle + inst->get_compute_cycle() - inst->get_overlapping_cycle();
-          spdlog::trace("[Core {}][{}] compute instruction[{}] issued, finsh at {}", _id, _core_cycle, inst->get_compute_type(), inst->finish_cycle);
-          target_pipeline.push(inst);
-          issued = true;
-        }
-        break;
-      case Opcode::BAR:
-        {
-          std::ostringstream oss;
-          for (const auto& idx : inst->get_tag_idx_list())
-            oss << idx << ", ";
-          bool finished = _tma.get_tag_finish(static_cast<Tile*>(inst->get_owner())->get_owner(), inst->get_tag_idx_list());
-          if (finished) {
-            spdlog::trace("[Core {}][{}] BAR Done, tag_list: {}", _id, _core_cycle, oss.str());
-            finish_instruction(inst);
+      switch (inst->get_opcode()) {
+        case Opcode::MOVIN:
+          {
+            std::ostringstream oss;
+            for (const auto& idx : inst->get_tag_idx_list())
+              oss << idx << ", ";
+            spdlog::trace("[Core {}][{}] {} ISSUED, free_sram_size: {} tag_idx_list: {}", _id, _core_cycle,
+                          opcode_to_string(inst->get_opcode()), inst->get_free_sram_size(), oss.str());
+            _ld_inst_queue.push(inst);
             issued = true;
           }
-        }
-        break;
-      default:
-        spdlog::error("Undefined instruction opcode type");
-        exit(EXIT_FAILURE);
-    }
+          break;
+        case Opcode::MOVOUT:
+          spdlog::trace("[Core {}][{}] {} ISSUED, free_sram_size: {}", _id, _core_cycle,
+                        opcode_to_string(inst->get_opcode()), inst->get_free_sram_size());
+          _st_inst_queue.push(inst);
+          issued = true;
+          break;
+        case Opcode::COMP:
+          {
+            auto& target_pipeline = _compute_pipeline.at(inst->get_compute_type());
+            if (target_pipeline.empty())
+              inst->finish_cycle = _core_cycle + inst->get_compute_cycle();
+            else
+              inst->finish_cycle = target_pipeline.back()->finish_cycle + inst->get_compute_cycle() - inst->get_overlapping_cycle();
+            spdlog::trace("[Core {}][{}] {}-{} ISSUED, finsh at {}", _id, _core_cycle,
+                          opcode_to_string(inst->get_opcode()), inst->get_compute_type(), inst->finish_cycle);
+            target_pipeline.push(inst);
+            issued = true;
+          }
+          break;
+        case Opcode::BAR:
+          {
+            std::ostringstream oss;
+            for (const auto& idx : inst->get_tag_idx_list())
+              oss << idx << ", ";
+            bool finished = _tma.get_tag_finish(static_cast<Tile*>(inst->get_owner())->get_owner(), inst->get_tag_idx_list());
+            if (finished) {
+              spdlog::trace("[Core {}][{}] {} FINISHED, tag_list: {}", _id, _core_cycle,
+                            opcode_to_string(inst->get_opcode()), oss.str());
+              finish_instruction(inst);
+              issued = true;
+            }
+          }
+          break;
+        default:
+          spdlog::error("Undefined instruction opcode type");
+          exit(EXIT_FAILURE);
+      }
 
-    if (issued) {
-      instructions.pop_front();
+      if (issued) {
+        auto it = instructions.begin() + j; // Position 2 is the third element
+        instructions.erase(it);
+        break;
+      }
     }
   }
 
@@ -219,14 +231,24 @@ void Core::cycle() {
 void Core::finish_instruction(std::shared_ptr<Instruction>& inst) {
   size_t free_sram_size = inst->get_free_sram_size();
   if (inst->finished) {
-    spdlog::error("[Core {}][{}] <finish_instruction> {} inst already finished!!", _id, _core_cycle, opcode_to_string(inst->get_opcode()));
+    spdlog::error("[Core {}][{}] {} FINISHED, inst already finished!!", _id, _core_cycle,
+                  opcode_to_string(inst->get_opcode()));
     exit(EXIT_FAILURE);
   }
   inst->finish_instruction();
   static_cast<Tile*>(inst->get_owner())->inc_finished_inst();
-  spdlog::trace("[Core {}][{}] <finish_instruction> Used sram: {}, Release sram: {}, inst: {}",
-    _id, _core_cycle, _used_sram_size, inst->get_free_sram_size(), opcode_to_string(inst->get_opcode()));
-  _used_sram_size -= free_sram_size;
+  if (inst->get_opcode() == Opcode::COMP) {
+    spdlog::trace("[Core {}][{}] {}-{} FINISHED, Used sram: {}, Release sram: {}",
+      _id, _core_cycle, opcode_to_string(inst->get_opcode()), inst->get_compute_type(),
+      _used_sram_size, inst->get_free_sram_size());
+  } else if (inst->get_opcode() != Opcode::BAR && inst->is_async_dma()){
+    std::ostringstream oss;
+    for (const auto& idx : inst->get_tag_idx_list())
+      oss << idx << ", ";
+    spdlog::trace("[Core {}][{}] {} ASYNC REGISTERED, Used sram: {}, Release sram: {} tag_idx_list: {}",
+      _id, _core_cycle, opcode_to_string(inst->get_opcode()), _used_sram_size, inst->get_free_sram_size(), oss.str());
+  }
+  //_used_sram_size -= free_sram_size;
 }
 
 bool Core::running() {

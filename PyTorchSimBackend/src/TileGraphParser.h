@@ -1,5 +1,6 @@
 #pragma once
 #include <fstream>
+#include <algorithm>
 #include <nlohmann/json.hpp>
 #include <fmt/ranges.h>
 #include <google/protobuf/io/zero_copy_stream_impl.h>

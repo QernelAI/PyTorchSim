@@ -204,7 +204,7 @@ std::vector<std::shared_ptr<Tile>> TileLoopNode::get_tiles_from_iter(TileGraphPa
       }
       for (auto loop_idx: mem_node->get_tag_idx_list()) {
         if (iter.find(loop_idx) == iter.end())
-          tag_list.push_back(0);
+          tag_list.push_back(-1);
         else {
           auto iter_value = iter.at(loop_idx);
           tag_list.push_back(iter_value);
@@ -246,7 +246,7 @@ std::vector<std::shared_ptr<Tile>> TileLoopNode::get_tiles_from_iter(TileGraphPa
       std::vector<int> tag_list;
       for (auto loop_idx: wait_node->get_tag_idx_list()) {
         if (iter.find(loop_idx) == iter.end())
-          tag_list.push_back(0);
+          tag_list.push_back(-1);
         else {
           auto iter_value = iter.at(loop_idx) * 128;
           tag_list.push_back(iter_value);
@@ -325,7 +325,7 @@ std::vector<std::shared_ptr<Tile>> TileLoopNode::get_tiles_from_iter(TileGraphPa
           }
         }
       }
-
+      parent->append_child(child);
       /* Create new tile */
       tile_vec.push_back(child);
     }
