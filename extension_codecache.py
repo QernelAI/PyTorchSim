@@ -78,7 +78,7 @@ def mlir_compile_command(filename, vectorlane_size, vlen=256):
     ).strip(),
             re.sub(r"[ \n]+", " ",
         f"""
-            {TORCHSIM_LLVM_PATH}/llc -march=riscv64 -mattr=+m,+f,+d,+a,+c,+v,+xsfvcp,zvl{vlen}b -O2 {filename}.ll -o {filename}.s
+            {TORCHSIM_LLVM_PATH}/llc -relocation-model=pic -march=riscv64 -mattr=+m,+f,+d,+a,+c,+v,+xsfvcp,zvl{vlen}b -O2 {filename}.ll -o {filename}.s
         """,
     ).strip()]
 
@@ -98,7 +98,7 @@ def mlir_gem5_compile_command(filename, sample_filename, tog_file, vectorlane_si
     ).strip(),
             re.sub(r"[ \n]+", " ",
         f"""
-            {TORCHSIM_LLVM_PATH}/llc -march=riscv64 -mattr=+m,+f,+d,+a,+c,+v,+xsfvcp,zvl{vlen}b -O2 {sample_filename}.ll -o {sample_filename}.s
+            {TORCHSIM_LLVM_PATH}/llc -relocation-model=pic -march=riscv64 -mattr=+m,+f,+d,+a,+c,+v,+xsfvcp,zvl{vlen}b -O2 {sample_filename}.ll -o {sample_filename}.s
         """,
     ).strip()]
 

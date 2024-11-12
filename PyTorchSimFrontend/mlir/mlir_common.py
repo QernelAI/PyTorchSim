@@ -146,7 +146,7 @@ class BaseMLIRHardwareInfo():
         # Default HW setting
         self.vector_lane = 128
         self.spad_info = {
-            "spad_vaddr" : 0x0B000000,
+            "spad_vaddr" : 0xD0000000,
             "spad_paddr" : 0xD0000000,
             "spad_size" : 128 << 10 # 128KB per Lane
         }
