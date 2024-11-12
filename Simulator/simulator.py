@@ -139,14 +139,17 @@ class CycleSimulator():
                 sys.stdout.write("\r[Gem5Simulator] Simulation is still running." + tail)
                 time.sleep(1)
             print("")
+
+        dir_path = os.path.join(os.path.dirname(target_binary), "m5out")
+        gem5_cmd = [self.GEM5_PATH, "-d", dir_path, self.GEM5_SCRIPT_PATH, "-c", target_binary, "--vlane", str(vectorlane_size)]
+        print("[Gem5Simulator] cmd> ", " ".join(gem5_cmd))
+
         # Create progress thread
         finished = False
         progress_thread = threading.Thread(target=show_progress)
         progress_thread.start()
 
-        dir_path = os.path.join(os.path.dirname(target_binary), "m5out")
         try:
-            gem5_cmd = [self.GEM5_PATH, "-d", dir_path, self.GEM5_SCRIPT_PATH, "-c", target_binary, "--vlane", str(vectorlane_size)]
             output = subprocess.check_output(gem5_cmd, stderr=subprocess.DEVNULL)
             finished = True
             progress_thread.join()
