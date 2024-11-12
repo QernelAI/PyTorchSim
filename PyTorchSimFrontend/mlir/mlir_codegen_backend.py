@@ -1068,7 +1068,7 @@ class MLIRScheduling(BaseScheduling):
             wrapper.header.writeline(code)
             self.outer_function.add(function_name)
 
-    def define_kernel(self, src_code, kernel_name, vector_lane, spad_info):
+    def define_kernel(self, src_code, kernel_name, vector_lane, spad_info, tile_size=[1, 1, 1]):
         wrapper = V.graph.wrapper_code
         if src_code in wrapper.src_to_kernel:
             kernel_name = wrapper.src_to_kernel[src_code]
@@ -1078,6 +1078,7 @@ class MLIRScheduling(BaseScheduling):
             codecache_def = IndentedBuffer()
             codecache_def.writeline(f"custom_async_compile.mlir('''{src_code}''', ")
             codecache_def.writeline(f"vectorlane_size={vector_lane},")
+            codecache_def.writeline(f"tile_size={tile_size},")
             codecache_def.writeline(f"spad_info={spad_info},")
             codecache_def.writeline("arg_attributes=arg_attributes)")
             wrapper.define_kernel(kernel_name, codecache_def.getvalue(), cuda=False)
@@ -1118,7 +1119,7 @@ class MLIRScheduling(BaseScheduling):
             codegen_header(src_code, (kernel.header.getvalue(), kernel.gem5_header.getvalue()))
             # node_schedule = [template_node, *epilogue_nodes]
             kernel.meta_kernel()
-            kernel_name = self.define_kernel(src_code, kernel.kernel_name, kernel.vector_lane, kernel.spad_info)
+            kernel_name = self.define_kernel(src_code, kernel.kernel_name, kernel.vector_lane, kernel.spad_info, kernel.tile_size)
             self.define_function(kernel)
 
         kernel.call_kernel(kernel_name)
