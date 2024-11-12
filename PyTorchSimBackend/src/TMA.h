@@ -38,8 +38,10 @@ class TMA {
   void register_tag(int subgraph_id, const std::pair<std::string, std::vector<int>>& key) {
     if (tag_table.find(subgraph_id) == tag_table.end()) {
       tag_table[subgraph_id] = std::map<std::pair<std::string, std::vector<int>>, bool>();
+      waiters[subgraph_id] = std::map<std::pair<std::string, std::vector<int>>, std::vector<std::shared_ptr<Instruction>>>();
     }
     tag_table[subgraph_id][key] = false;
+    waiters[subgraph_id][key] = std::vector<std::shared_ptr<Instruction>>();
   }
   void set_tag_finish(int subgraph_id, const std::pair<std::string, std::vector<int>>& key) {
     if (tag_table.find(subgraph_id) == tag_table.end()) {
@@ -62,7 +64,27 @@ class TMA {
       throw std::runtime_error("Subgraph does not exist in tag_table");
     }
     tag_table.erase(subgraph_id);
+    waiters.erase(subgraph_id);
   }
+  void register_tag_waiter(int subgraph_id, const std::pair<std::string, std::vector<int>>& key, std::shared_ptr<Instruction> inst) {
+    auto subgraph_it = tag_table.find(subgraph_id);
+    auto& key_map = subgraph_it->second;
+    auto key_it = key_map.find(key);
+    if (key_it == key_map.end()) {
+      throw std::runtime_error("Key does not exist in subgraph's tag table");
+    }
+    waiters[subgraph_id][key].push_back(inst);
+  }
+  std::vector<std::shared_ptr<Instruction>>& get_tag_waiter(int subgraph_id, const std::pair<std::string, std::vector<int>>& key) {
+    auto subgraph_it = tag_table.find(subgraph_id);
+    auto& key_map = subgraph_it->second;
+    auto key_it = key_map.find(key);
+    if (key_it == key_map.end()) {
+      throw std::runtime_error("Key does not exist in subgraph's tag table");
+    }
+    return waiters[subgraph_id][key];
+  }
+
   std::shared_ptr<Instruction>& get_current_inst() { return _current_inst; }
   MemoryAccess* get_memory_access();
   uint32_t generate_mem_access_id();
@@ -77,5 +99,6 @@ class TMA {
   uint32_t _tile_idx;
   bool _finished=true;
   std::map<int, std::map<std::pair<std::string, std::vector<int>>, bool>> tag_table;
+  std::map<int, std::map<std::pair<std::string, std::vector<int>>, std::vector<std::shared_ptr<Instruction>>>> waiters;
 };
 #endif

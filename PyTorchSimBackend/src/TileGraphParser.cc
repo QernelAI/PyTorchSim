@@ -389,7 +389,7 @@ TileGraphParser::TileGraphParser(std::string onnx_path, json& attribute_json) {
   if (_attribute_json.contains("address_info")) {
     auto address_info = _attribute_json["address_info"];
     for (auto it = address_info.begin(); it != address_info.end(); ++it) {
-      int value = it.value();
+      uint64_t value = it.value();
       _arg_to_address[it.key()] = value;
       spdlog::info("[TOGPaser] Address Attribute key: {} address: 0x{:x}", it.key(), value);
     }

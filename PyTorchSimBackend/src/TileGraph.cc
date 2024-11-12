@@ -6,12 +6,12 @@ TileSubGraph::TileSubGraph() : _ready_tile_queue(), _tile_set(), _id(_next_id++)
 
 void TileSubGraph::add_tile(std::shared_ptr<Tile> tile) {
   tile->set_ownwer(this);
+  for (auto& inst : tile->get_instructions())
+    inst->subgraph_id = _id;
   if (tile->get_ready_counter() == 0) {
-    _ready_tile_queue.push(tile);
+   _ready_tile_queue.push(tile);
   } else {
     _tile_set.insert(tile);
-    for (auto& inst : tile->get_instructions())
-      inst->subgraph_id = _id;
   }
 }
 

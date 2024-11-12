@@ -66,14 +66,17 @@ void Core::dma_cycle() {
     /* Set tag table of async dma load */
     if (instruction->is_dma_read() && instruction->is_async_dma()) {
       std::ostringstream oss;
-      _tma.set_tag_finish(instruction->subgraph_id,
-                          std::make_pair(instruction->get_addr_name(), instruction->get_tag_idx_list()));
+      auto key = std::make_pair(instruction->get_addr_name(), instruction->get_tag_idx_list());
+      _tma.set_tag_finish(instruction->subgraph_id, key);
       for (const auto& idx : instruction->get_tag_idx_list())
         oss << idx << ", ";
-      spdlog::trace("[Core {}][{}] {} ASYNC FINISHED, Used sram: {}, Release sram: {}, addr_name: {} tag_idx_list: {}",
+      spdlog::trace("[Core {}][{}] {} ASYNC FINISHED, Used sram: {}, Release sram: {}, subgraph_id: {} addr_name: {} tag_idx_list: {}",
                     _id, _core_cycle, opcode_to_string(instruction->get_opcode()),
                     _used_sram_size, instruction->get_free_sram_size(),
-                    instruction->get_addr_name(), oss.str());
+                    instruction->subgraph_id, instruction->get_addr_name(), oss.str());
+      for (auto & wait_inst : _tma.get_tag_waiter(instruction->subgraph_id, key)) {
+        finish_instruction(wait_inst);
+      }
     }
 
     /* Erase the instruction in DMA waiting queue */
@@ -96,6 +99,12 @@ void Core::dma_cycle() {
       } else if(!finished_inst->is_dma_read()) {
         spdlog::error("[Core {}][{}] TMA instruction in not valid", _id, _core_cycle);
         exit(EXIT_FAILURE);
+      } else if (finished_inst->get_opcode() == Opcode::BAR) {
+        std::ostringstream oss;
+        for (const auto& idx : finished_inst->get_tag_idx_list())
+          oss << idx << ", ";
+        spdlog::trace("[Core {}][{}] {} FINISHED, addr_name: {} tag_list: {}", _id, _core_cycle,
+                      opcode_to_string(finished_inst->get_opcode()), finished_inst->get_addr_name(), oss.str());
       }
       /*Pass to waiting queue */
       _dma_waiting_queue.push_back(std::move(finished_inst));
@@ -149,7 +158,7 @@ void Core::cycle() {
   for (int i=0; i<_tiles.size() && !issued; i++) {
     auto& instructions = _tiles[i]->get_instructions();
     for (int j=0; j<instructions.size(); j++) {
-      auto inst = instructions.at(j);
+      auto& inst = instructions.at(j);
       /* Skip instruction is not ready  */
       if (!inst->is_ready())
         continue;
@@ -189,16 +198,14 @@ void Core::cycle() {
         case Opcode::BAR:
           {
             std::ostringstream oss;
-            for (const auto& idx : inst->get_tag_idx_list())
-              oss << idx << ", ";
-            bool finished = _tma.get_tag_finish(inst->subgraph_id,
-                                                std::make_pair(inst->get_addr_name(), inst->get_tag_idx_list()));
+            auto key = std::make_pair(inst->get_addr_name(), inst->get_tag_idx_list());
+            bool finished = _tma.get_tag_finish(inst->subgraph_id, key);
             if (finished) {
-              spdlog::trace("[Core {}][{}] {} FINISHED, addr_name: {} tag_list: {}", _id, _core_cycle,
-                            opcode_to_string(inst->get_opcode()), inst->get_addr_name(), oss.str());
               finish_instruction(inst);
-              issued = true;
+            } else {
+              _tma.register_tag_waiter(inst->subgraph_id, key, inst);
             }
+            issued = true;
           }
           break;
         default:
@@ -250,9 +257,9 @@ void Core::finish_instruction(std::shared_ptr<Instruction>& inst) {
     std::ostringstream oss;
     for (const auto& idx : inst->get_tag_idx_list())
       oss << idx << ", ";
-    spdlog::trace("[Core {}][{}] {} ASYNC REGISTERED, Used sram: {}, Release sram: {} addr_name: {} tag_idx_list: {}",
+    spdlog::trace("[Core {}][{}] {} ASYNC REGISTERED, Used sram: {}, Release sram: {} subgraph_id: {} addr_name: {} tag_idx_list: {}",
       _id, _core_cycle, opcode_to_string(inst->get_opcode()), _used_sram_size,
-      inst->get_free_sram_size(), inst->get_addr_name(), oss.str());
+      inst->get_free_sram_size(), inst->subgraph_id, inst->get_addr_name(), oss.str());
   }
   //_used_sram_size -= free_sram_size;
 }
