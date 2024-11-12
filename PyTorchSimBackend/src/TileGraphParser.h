@@ -100,6 +100,7 @@ class TileMemoryNode : public TileNode {
   std::vector<size_t> get_tile_stride() { return _tile_stride; }
   std::vector<std::string>& get_tag_idx_list() { return _tag_idx_list; }
   std::vector<std::string>& get_loop_idx_list() { return _loop_idx_list; }
+  bool is_async_node() { return _tag_idx_list.size() >= 2; } // FIXME.
   void print_node() override;
 
  private:

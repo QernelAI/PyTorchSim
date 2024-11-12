@@ -175,25 +175,27 @@ std::vector<std::shared_ptr<Tile>> TileLoopNode::get_tiles_from_iter(TileGraphPa
       std::vector<int> values;
       bool skip = false;
       /* Find axis */
-      for (int i=0;i<tag_idx_list.size();i++) {
-        if (tag_idx_list.at(i) == "0")
-          skip_idx_list.push_back(i);
-      }
-
-      /* Extract iter values */
-      std::transform(iter.begin(), iter.end(), std::back_inserter(values),
-                   [](const std::pair<std::string, int>& pair) { return pair.second; });
-
-      for (auto axis : skip_idx_list) {
-        if (values.at(iter.size() - tag_idx_list.size() + axis) != 0) {
-          skip = true;
-          break;
+      if (mem_node->is_async_node()) {
+        for (int i=0;i<tag_idx_list.size();i++) {
+          if (tag_idx_list.at(i) == "0")
+            skip_idx_list.push_back(i);
         }
-      }
 
-      /* Skip this node */
-      if (skip)
-        continue;
+        /* Extract iter values */
+        std::transform(iter.begin(), iter.end(), std::back_inserter(values),
+                    [](const std::pair<std::string, int>& pair) { return pair.second; });
+
+        for (auto axis : skip_idx_list) {
+          if (values.at(iter.size() - tag_idx_list.size() + axis) != 0) {
+            skip = true;
+            break;
+          }
+        }
+
+        /* Skip this node */
+        if (skip)
+          continue;
+      }
 
       printIndexMap("[TOGParser] Load Node " + tile_node->get_name(), iter);
       /* Lookup given name's address */
