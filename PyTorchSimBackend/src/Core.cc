@@ -260,6 +260,10 @@ void Core::finish_instruction(std::shared_ptr<Instruction>& inst) {
     spdlog::trace("[Core {}][{}] {} ASYNC REGISTERED, Used sram: {}, Release sram: {} subgraph_id: {} addr_name: {} tag_idx_list: {}",
       _id, _core_cycle, opcode_to_string(inst->get_opcode()), _used_sram_size,
       inst->get_free_sram_size(), inst->subgraph_id, inst->get_addr_name(), oss.str());
+  } else if ((inst->get_opcode() == Opcode::MOVIN || inst->get_opcode() == Opcode::MOVOUT) && !inst->is_async_dma()) {
+    spdlog::trace("[Core {}][{}] {} FINISHED, free_sram_size: {} addr_name: {}", _id, _core_cycle,
+      opcode_to_string(inst->get_opcode()), inst->get_free_sram_size(),
+      inst->get_addr_name());
   }
   //_used_sram_size -= free_sram_size;
 }
