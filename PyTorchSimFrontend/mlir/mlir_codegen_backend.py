@@ -371,7 +371,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
     def get_dma_info(self, name, index, dtype, is_store):
         cv = self.get_constant_vector(index)
         cv2 = self.get_constant_vector2(index)
-        tile_size_per_lane = min(self.tile_desc.get_tile_size_per_lane(), self.buffer_types[name][1])
+        tile_size_per_lane = self.tile_desc.get_tile_size_per_lane()
 
         if len(cv) != len(cv2) and len(cv2) == 3:
             print("Mismatch! ", cv)
@@ -1115,7 +1115,7 @@ class MLIRScheduling(BaseScheduling):
 
         if src_code in wrapper.src_to_kernel: # [CONV] check inner function is already defined
             kernel_name = wrapper.src_to_kernel[src_code]
-            kernel, render = template_buffer.make_kernel_render(template_buffer, epilogue_nodes=epilogue_nodes, kernel_name=kernel_name) # update kernel name
+            kernel, render, codegen_header = template_buffer.make_kernel_render(template_buffer, epilogue_nodes=epilogue_nodes, kernel_name=kernel_name) # update kernel name
             src_code = self.codegen_src_code(kernel, render, template_node, epilogue_nodes)
 
         with V.set_kernel_handler(kernel):
