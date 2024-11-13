@@ -25,8 +25,8 @@ func.func @{{ KERNEL_NAME }}{{kernel.def_kernel(inputs=[X, W, Bias], outputs=[Y]
   %c_set = arith.constant 2 : index
   %c{{ TILE_K * 2 + 0}} = arith.constant {{ TILE_K * 2 + 0}} : index{% if Bias_rank == 1 %}
   %c0 = arith.constant 0 : index{% endif %}{% if X_transposed %}
-  %x_chunk = arith.constant {{ TILE_M * 2 + 0 }} : index{% endif %}{% if W_transposed %}
-  %w_chunk = arith.constant {{ TILE_K * 2 + 0 }} : index{% endif %}
+  %x_chunk = arith.constant {{ kernel.vector_lane * 2 + 0 }} : index{% endif %}{% if W_transposed %}
+  %w_chunk = arith.constant {{ kernel.vector_lane * 2 + 0 }} : index{% endif %}
   %M = arith.constant {{ M }} : index
   %N = arith.constant {{ N }} : index
   %K = arith.constant {{ K }} : index
@@ -34,7 +34,7 @@ func.func @{{ KERNEL_NAME }}{{kernel.def_kernel(inputs=[X, W, Bias], outputs=[Y]
   %W_buffer = memref.get_global @W_spad : memref<{{ TILE_K }}x{{ TILE_N }}xf32, 1>
   %Y_buffer = memref.get_global @Y_spad : memref<{{ TILE_M }}x{{ TILE_N }}xf32, 1>
   %tag = memref.alloc() : memref<1xi32>
-  %v0 = arith.constant dense<0.0> : vector<{{ TILE_N }}xf32>
+  %v0 = arith.constant dense<0.0> : vector<{{ TILE_M * TILE_N // kernel.vector_lane }}xf32>
 
   affine.for %b=0 to {{ B }} {
     affine.for %t_m = 0 to {{ M }} step {{ TILE_M }} {
