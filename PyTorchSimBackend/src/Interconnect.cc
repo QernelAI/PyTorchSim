@@ -75,9 +75,9 @@ Booksim2Interconnect::Booksim2Interconnect(SimulationConfig config) {
   _config = config;
   _n_nodes = config.num_cores + config.dram_channels;
   spdlog::info("Initialize Booksim2"); 
-  char* onnxim_path_env = std::getenv("ONNXIM_HOME");
+  char* onnxim_path_env = std::getenv("TORCHSIM_DIR");
   std::string onnxim_path = onnxim_path_env != NULL?
-    std::string(onnxim_path_env) : std::string("./");
+    std::string(onnxim_path_env) + "/PyTorchSimBackend" : std::string("./");
 
   _config_path = fs::path(onnxim_path).append("configs").append((std::string)config.icnt_config_path).string();
   spdlog::info("Config path : {}", _config_path);

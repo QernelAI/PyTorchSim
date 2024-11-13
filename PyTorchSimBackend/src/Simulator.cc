@@ -20,9 +20,9 @@ Simulator::Simulator(SimulationConfig config)
   _n_memories = config.dram_channels;
   _memory_req_size = config.dram_req_size;
 
-  char* onnxim_path_env = std::getenv("ONNXIM_HOME");
+  char* onnxim_path_env = std::getenv("TORCHSIM_DIR");
   std::string onnxim_path = onnxim_path_env != NULL?
-  std::string(onnxim_path_env) : std::string("./");
+    std::string(onnxim_path_env) + "/PyTorchSimBackend" : std::string("./");
   if (config.dram_type == DramType::SIMPLE) {
     _dram = std::make_unique<SimpleDram>(config);
   } else if (config.dram_type == DramType::RAMULATOR1) {
