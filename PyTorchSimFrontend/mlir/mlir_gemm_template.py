@@ -87,9 +87,9 @@ class MLIRGemmTemplate(MLIRTemplate):
         # Use BaseMLIRHardwareInfo
         def round_with_lanes(value):
             return ((value + kernel.vector_lane - 1) // kernel.vector_lane) * kernel.vector_lane
-        TILE_M = max(kernel.vector_lane, round_with_lanes(X.get_size()[0]))
-        TILE_N = max(kernel.vector_lane, round_with_lanes(W.get_size()[1]))
-        TILE_K = max(kernel.vector_lane, round_with_lanes(X.get_size()[1]))
+        TILE_M = round_with_lanes(X.get_size()[0])
+        TILE_N = round_with_lanes(W.get_size()[1])
+        TILE_K = round_with_lanes(X.get_size()[1])
         kernel.tile_size = [TILE_M, TILE_N, TILE_K]
 
         W_transposed = self.is_transposed(W)

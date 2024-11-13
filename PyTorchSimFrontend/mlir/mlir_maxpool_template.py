@@ -61,6 +61,7 @@ class MLIRMaxPoolTemplate(MLIRTemplate):
         H = Y.get_size()[2]
         W = Y.get_size()[3]
         BCH = B * C * H
+        kernel.tile_size = [1, 1, 1] # Dummy Tile
         options = {
           "KERNEL_NAME" : self.name,
           "kernel" : kernel,
