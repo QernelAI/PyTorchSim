@@ -187,8 +187,10 @@ void Core::cycle() {
             auto& target_pipeline = _compute_pipeline.at(inst->get_compute_type());
             if (target_pipeline.empty())
               inst->finish_cycle = _core_cycle + inst->get_compute_cycle();
-            else
-              inst->finish_cycle = target_pipeline.back()->finish_cycle + inst->get_compute_cycle() - inst->get_overlapping_cycle();
+            else {
+              int overlapped_cycle = std::min(target_pipeline.back()->finish_cycle - _core_cycle, inst->get_overlapping_cycle());
+              inst->finish_cycle = target_pipeline.back()->finish_cycle + inst->get_compute_cycle() - overlapped_cycle;
+            }
             spdlog::trace("[Core {}][{}] {}-{} ISSUED, finsh at {}", _id, _core_cycle,
                           opcode_to_string(inst->get_opcode()), inst->get_compute_type(), inst->finish_cycle);
             target_pipeline.push(inst);
