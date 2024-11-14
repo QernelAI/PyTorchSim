@@ -257,7 +257,7 @@ std::vector<std::shared_ptr<Tile>> TileLoopNode::get_tiles_from_iter(TileGraphPa
         if (iter.find(loop_idx) == iter.end())
           tag_list.push_back(0);
         else {
-          auto iter_value = iter.at(loop_idx) * 128;
+          auto iter_value = iter.at(loop_idx);
           tag_list.push_back(iter_value);
         }
       }
