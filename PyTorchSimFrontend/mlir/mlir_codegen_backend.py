@@ -268,18 +268,18 @@ class MLIRTile():
 
     def get_rows_per_lane(self):
         if self.n_row % self.vector_lane != 0 and self.n_row > 1:
-            print("[Warning] n_row % vector_lane != 0")
+            print(f"[Warning] n_row({self.n_row}) % vector_lane({self.vector_lane}) != 0")
         return self.n_row // self.vector_lane
 
     def get_cols_per_lane(self):
         if self.n_col % self.vector_lane != 0 and self.n_col > 1:
-            print("[Warning] n_col % vector_lane != 0")
+            print(f"[Warning] n_col({self.n_col}) % vector_lane({self.vector_lane}) != 0")
         return self.n_col // self.vector_lane
 
     def get_tile_size_per_lane(self):
         if self.get_tile_size() % self.vector_lane != 0:
-            print("[Warning] n_col % vector_lane != 0")
-        return self.get_tile_size() // self.vector_lane
+            print(f"[Warning] n_col({self.n_col}) % vector_lane({self.vector_lane}) != 0")
+        return (self.get_tile_size() + self.vector_lane - 1) // self.vector_lane
 
     def get_tile_shape(self):
         return f"{self.n_row}x{self.n_col}"
