@@ -202,9 +202,13 @@ std::vector<std::shared_ptr<Tile>> TileLoopNode::get_tiles_from_iter(TileGraphPa
       addr_type base_addr = tog_parser->lookup(base_addr_name);
       std::vector<int> iter_list;
       std::vector<int> tag_list;
+      std::vector<int> loop_size_list;
+      int nr_inner_loop = 0;
       for (auto loop_idx: mem_node->get_loop_idx_list()) {
         auto iter_value = iter.at(loop_idx);
         iter_list.push_back(iter_value);
+        loop_size_list.push_back(tog_parser->get_loop_size(loop_idx));
+        nr_inner_loop += int(tog_parser->get_loop_type(loop_idx));
       }
       for (auto loop_idx: mem_node->get_tag_idx_list()) {
         if (iter.find(loop_idx) == iter.end())
@@ -219,9 +223,11 @@ std::vector<std::shared_ptr<Tile>> TileLoopNode::get_tiles_from_iter(TileGraphPa
         Opcode::MOVIN, 0,
         0, base_addr,
         mem_node->get_tile_size(), mem_node->get_tile_stride(), mem_node->get_precision(),
-        iter_list, tag_list
+        iter_list, tag_list, loop_size_list
       );
       inst->set_addr_name(base_addr_name);
+      inst->set_nr_inner_loop(nr_inner_loop);
+      inst->adjust_dram_address();
       link_map[tile_node] = inst;
       tile_vec.back()->append_instuction(inst);
     } else if (tile_node->get_type() == TileType::STORE_NODE) {
@@ -231,18 +237,24 @@ std::vector<std::shared_ptr<Tile>> TileLoopNode::get_tiles_from_iter(TileGraphPa
       /* Lookup given name's address */
       addr_type base_addr = tog_parser->lookup(base_addr_name);
       std::vector<int> iter_list;
+      std::vector<int> loop_size_list;
+      int nr_inner_loop = 0;
       for (auto loop_idx: mem_node->get_loop_idx_list()) {
         auto iter_value = iter.at(loop_idx);
         iter_list.push_back(iter_value);
+        loop_size_list.push_back(tog_parser->get_loop_size(loop_idx));
+        nr_inner_loop += int(tog_parser->get_loop_type(loop_idx));
       }
 
       std::shared_ptr<Instruction> inst = std::make_shared<Instruction>(
         Opcode::MOVOUT, 0,
         0, base_addr,
         mem_node->get_tile_size(), mem_node->get_tile_stride(), mem_node->get_precision(),
-        iter_list, std::vector<int>()
+        iter_list, std::vector<int>(), loop_size_list
       );
       inst->set_addr_name(base_addr_name);
+      inst->set_nr_inner_loop(nr_inner_loop);
+      inst->adjust_dram_address();
       link_map[tile_node] = inst;
       tile_vec.back()->append_instuction(inst);
     } else if (tile_node->get_type() == TileType::MEMORY_WAIT_NODE) {
@@ -266,7 +278,7 @@ std::vector<std::shared_ptr<Tile>> TileLoopNode::get_tiles_from_iter(TileGraphPa
         Opcode::BAR, 0,
         0, base_addr,
         std::vector<size_t>(), std::vector<size_t>(), 0,
-        iter_list, tag_list
+        iter_list, tag_list, std::vector<int>()
       );
       inst->set_addr_name(base_addr_name);
       link_map[tile_node] = inst;
@@ -279,7 +291,7 @@ std::vector<std::shared_ptr<Tile>> TileLoopNode::get_tiles_from_iter(TileGraphPa
         Opcode::COMP, compute_node->get_cycle(),
         0, 0,
         std::vector<size_t>(), std::vector<size_t>(), 0,
-        iter_list, std::vector<int>()
+        iter_list, std::vector<int>(), std::vector<int>()
       );
       inst->set_overlapping_cycle(compute_node->get_overlapping_cycle());
       inst->set_compute_type(compute_node->get_compute_type());
@@ -413,6 +425,13 @@ TileGraphParser::TileGraphParser(std::string onnx_path, json& attribute_json) {
       register_tile(tile_node);
       register_loop(tile_node);
       increase_loop_top();
+
+      /* Register loop info to parser */
+      std::string loop_idx = tile_node->get_idx_name();
+      bool is_inner = tile_node->get_loop_type() == TileLoopNode::INNER_LOOP;
+      uint64_t start = tile_node->get_start();
+      uint64_t end = tile_node->get_end();
+      _loop_size_map[loop_idx] = std::make_pair(end - start, is_inner);
     } else if (type == TileType::LOOP_END_NODE) {
       std::shared_ptr<TileLoopEndNode> tile_node = std::make_shared<TileLoopEndNode>(node_proto);
       register_tile(tile_node);

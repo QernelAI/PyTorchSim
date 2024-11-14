@@ -60,6 +60,8 @@ class TileGraphParser {
   void register_loop(std::shared_ptr<TileNode>);
   void increase_loop_top() { _loop_stack_pointer++; }
   void decrease_loop_top() { _loop_stack_pointer--; }
+  int get_loop_size(std::string key) { return _loop_size_map[key].first; }
+  bool get_loop_type(std::string key) { return _loop_size_map[key].second; }
  private:
   void register_tile(std::shared_ptr<TileNode> tile_node);
   void _tile_generate() {}
@@ -74,6 +76,7 @@ class TileGraphParser {
   std::vector<std::shared_ptr<TileNode>> _tile_vec;
   std::unique_ptr<TileGraph> _tile_graph;
   std::map<std::string, addr_type> _arg_to_address;
+  std::map<std::string, std::pair<int, bool>> _loop_size_map;
 };
 
 class TileComputeNode : public TileNode {
