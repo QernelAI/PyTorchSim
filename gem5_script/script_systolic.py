@@ -493,7 +493,7 @@ if args.cpu not in (
 ):
     system.mem_mode = "timing"
 
-system.mem_ranges = [AddrRange("512MB")]
+system.mem_ranges = [AddrRange("8192MB")]
 
 system.cpu = valid_cpu[args.cpu]()
 

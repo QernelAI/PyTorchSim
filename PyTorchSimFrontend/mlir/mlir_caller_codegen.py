@@ -13,7 +13,6 @@ class MLIRKernelCallerCodeGen(LLVMKernelCallerCodeGen):
         super().write_header()
         global_var_header = "gem5_global_var.h" if self.cycle_sim else "global_var.h"
         self.writeline(f"#include \"{global_var_header}\"")
-        self.generate_args_define()
 
     def is_in_arg(self, value):
         return MLIRKernelArgs.is_mlir_arg_in(value)
@@ -53,16 +52,24 @@ class MLIRKernelCallerCodeGen(LLVMKernelCallerCodeGen):
         name_set = set()
         for arg_name, (_, arg_type, arg_size) in self.arg_attributes:
             if not arg_name in name_set:
-                self.writeline(f'{DTYPE_TO_C[arg_type]} {arg_name}[{arg_size}]{self.ending}')
+                if self.validation:
+                    self.writeline(f'{DTYPE_TO_C[arg_type]} {arg_name}[{arg_size}]{self.ending}')
+                else:
+                    self.writeline(f'{DTYPE_TO_C[arg_type]}* {arg_name} = malloc({arg_size*torch.finfo(arg_type).bits // 8}){self.ending}')
                 name_set.add(arg_name)
         self.writeline(self.newline)
 
     def generate_main(self):
+        if self.validation:
+            self.generate_args_define()
+
         self.writeline(f'{self.newline}int main(int argc, char *argv[]) {self.open_bracket}{self.newline}')
         with self.code.indent():
             if self.validation:
                 self.load_arg()
                 self.writeline(self.newline)
+            else:
+                self.generate_args_define()
 
             func_arguments = [f"{arg_name}, {arg_name}, 0, {arg_shape}, 1" if arg_type != torch.bool else f"{arg_name}, {arg_name}, 0, {(arg_shape + 7) // 8}, 1" for arg_name, (_, arg_type, arg_shape) in self.arg_attributes]
             self.writeline(f"wrapper_{self.kernel_name}({', '.join(func_arguments)}){self.ending}{self.newline}")
