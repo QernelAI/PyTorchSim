@@ -43,6 +43,9 @@ void Core::compute_cycle() {
     if (!target_pipeline.empty()) {
       _stat_compute_cycle[i]++;
       if(target_pipeline.front()->finish_cycle <= _core_cycle) {
+        int bubble = target_pipeline.front()->bubble_cycle;
+        _stat_compute_idle_cycle[i] += bubble;
+        _stat_compute_cycle[i] -= bubble;
         finish_instruction(target_pipeline.front());
         target_pipeline.pop();
       }
@@ -190,7 +193,9 @@ void Core::cycle() {
               inst->finish_cycle = _core_cycle + inst->get_compute_cycle();
             else {
               int overlapped_cycle = std::min(target_pipeline.back()->finish_cycle - _core_cycle, inst->get_overlapping_cycle());
+              int bubble_cycle = inst->get_overlapping_cycle() - overlapped_cycle;
               inst->finish_cycle = target_pipeline.back()->finish_cycle + inst->get_compute_cycle() - overlapped_cycle;
+              inst->bubble_cycle = bubble_cycle;
             }
             spdlog::trace("[Core {}][{}] {}-{} ISSUED, finsh at {}", _id, _core_cycle,
                           opcode_to_string(inst->get_opcode()), inst->get_compute_type(), inst->finish_cycle);

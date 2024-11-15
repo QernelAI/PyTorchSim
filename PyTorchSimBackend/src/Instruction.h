@@ -93,6 +93,7 @@ class Instruction {
 
   cycle_type start_cycle;
   cycle_type finish_cycle;
+  cycle_type bubble_cycle;
 
   bool finished=false;
   int subgraph_id;
