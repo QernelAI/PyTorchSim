@@ -21,6 +21,13 @@ enum class TileType{
   MEMORY_WAIT_NODE
 };
 
+enum class LoopType {
+  NORMAL_LOOP,
+  PARALLEL_LOOP,
+  ACCUMULATION_LOOP,
+  INNER_LOOP
+};
+
 class TileNode {
  public:
   TileNode(onnx::NodeProto& node);
@@ -53,7 +60,6 @@ class TileNode {
 class TileGraphParser {
  public:
   TileGraphParser(std::string onnx_path, json& attribute_json);
-  void initialize_tile(std::string op_type);
   std::shared_ptr<TileNode> get_top_loop();
   std::unique_ptr<TileGraph>& get_tile_graph() { return _tile_graph; }
   addr_type lookup(std::string key);
@@ -61,7 +67,7 @@ class TileGraphParser {
   void increase_loop_top() { _loop_stack_pointer++; }
   void decrease_loop_top() { _loop_stack_pointer--; }
   int get_loop_size(std::string key) { return _loop_size_map[key].first; }
-  bool get_loop_type(std::string key) { return _loop_size_map[key].second; }
+  LoopType get_loop_type(std::string key) { return _loop_size_map[key].second; }
  private:
   void register_tile(std::shared_ptr<TileNode> tile_node);
   void _tile_generate() {}
@@ -76,7 +82,7 @@ class TileGraphParser {
   std::vector<std::shared_ptr<TileNode>> _tile_vec;
   std::unique_ptr<TileGraph> _tile_graph;
   std::map<std::string, addr_type> _arg_to_address;
-  std::map<std::string, std::pair<int, bool>> _loop_size_map;
+  std::map<std::string, std::pair<int, LoopType>> _loop_size_map;
 };
 
 class TileComputeNode : public TileNode {
@@ -128,15 +134,11 @@ class TileMemoryWaitNode : public TileNode {
   std::string _base_addr_name;
 };
 
+
+
 class TileLoopNode : public TileNode {
  public:
-  enum LoopType {
-    NORMAL_LOOP,
-    PARALLEL_LOOP,
-    ACCUMULATION_LOOP,
-    INNER_LOOP
-  };
-  TileLoopNode(onnx::NodeProto& node);
+ TileLoopNode(onnx::NodeProto& node);
   void add_body(std::shared_ptr<TileNode> body) { _body_node.push_back(body); }
   std::vector<std::shared_ptr<Tile>> get_tiles_from_iter(TileGraphParser*, std::map<std::string, int>&);
   std::string get_idx_name() { return _tile_index_name; }

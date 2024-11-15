@@ -149,13 +149,13 @@ TileLoopNode::TileLoopNode(onnx::NodeProto& node) : TileNode(node) {
       _tile_index_name = attribute.s();
     } else if (attribute.name() == "torchsim_loop_type") {
       if (attribute.s() == "outer_loop") {
-        _loop_type = PARALLEL_LOOP;
+        _loop_type = LoopType::PARALLEL_LOOP;
       } else if (attribute.s() == "accumulation_loop") {
-        _loop_type = ACCUMULATION_LOOP;
+        _loop_type = LoopType::ACCUMULATION_LOOP;
       } else if (attribute.s() == "inner_loop") {
-        _loop_type = INNER_LOOP;
+        _loop_type = LoopType::INNER_LOOP;
       } else {
-        _loop_type = NORMAL_LOOP;
+        _loop_type = LoopType::NORMAL_LOOP;
       }
     }
   }
@@ -178,7 +178,8 @@ std::vector<std::shared_ptr<Tile>> TileLoopNode::get_tiles_from_iter(TileGraphPa
       if (mem_node->is_async_node()) {
         int nr_inner_loop = 0;
         for (auto loop_idx: mem_node->get_loop_idx_list())
-          nr_inner_loop += int(tog_parser->get_loop_type(loop_idx));
+          if (tog_parser->get_loop_type(loop_idx)==LoopType::INNER_LOOP)
+            nr_inner_loop++;
 
         for (int i=0;i<tag_idx_list.size();i++) {
           /* Nasty exception handling from tag indices :( */
@@ -212,12 +213,24 @@ std::vector<std::shared_ptr<Tile>> TileLoopNode::get_tiles_from_iter(TileGraphPa
       std::vector<int> tag_list;
       std::vector<int> loop_size_list;
       int nr_inner_loop = 0;
-      for (auto loop_idx: mem_node->get_loop_idx_list()) {
+      auto& loop_idx_list = mem_node->get_loop_idx_list();
+      for (auto loop_idx: loop_idx_list) {
         auto iter_value = iter.at(loop_idx);
         iter_list.push_back(iter_value);
         loop_size_list.push_back(tog_parser->get_loop_size(loop_idx));
-        nr_inner_loop += int(tog_parser->get_loop_type(loop_idx));
+        if (tog_parser->get_loop_type(loop_idx)==LoopType::INNER_LOOP)
+          nr_inner_loop++;
       }
+      /* Add accumulation loop info to tag list */
+      for (auto loop_idx = loop_idx_list.begin();
+            loop_idx != loop_idx_list.end() - nr_inner_loop; ++loop_idx) {
+        // Check loop type and process
+        if (tog_parser->get_loop_type(*loop_idx)==LoopType::ACCUMULATION_LOOP) {
+            auto iter_value = iter.at(*loop_idx);
+            tag_list.push_back(iter_value);
+        }
+      }
+
       for (auto loop_idx: mem_node->get_tag_idx_list()) {
         if (iter.find(loop_idx) == iter.end())
           tag_list.push_back(0);
@@ -247,11 +260,13 @@ std::vector<std::shared_ptr<Tile>> TileLoopNode::get_tiles_from_iter(TileGraphPa
       std::vector<int> iter_list;
       std::vector<int> loop_size_list;
       int nr_inner_loop = 0;
-      for (auto loop_idx: mem_node->get_loop_idx_list()) {
+      auto& loop_idx_list = mem_node->get_loop_idx_list();
+      for (auto loop_idx: loop_idx_list) {
         auto iter_value = iter.at(loop_idx);
         iter_list.push_back(iter_value);
         loop_size_list.push_back(tog_parser->get_loop_size(loop_idx));
-        nr_inner_loop += int(tog_parser->get_loop_type(loop_idx));
+        if (tog_parser->get_loop_type(loop_idx)==LoopType::INNER_LOOP)
+          nr_inner_loop++;
       }
 
       std::shared_ptr<Instruction> inst = std::make_shared<Instruction>(
@@ -273,7 +288,16 @@ std::vector<std::shared_ptr<Tile>> TileLoopNode::get_tiles_from_iter(TileGraphPa
       /* Lookup given name's address */
       std::vector<int> iter_list;
       std::vector<int> tag_list;
-      for (auto loop_idx: wait_node->get_tag_idx_list()) {
+      auto& wait_tag_list = wait_node->get_tag_idx_list();
+      /* Add accumulation loop info to tag list */
+      for (auto loop_idx = iter.begin();
+            loop_idx != std::next(iter.begin(), wait_tag_list.size()); ++loop_idx) {
+        if (tog_parser->get_loop_type(loop_idx->first)==LoopType::ACCUMULATION_LOOP) {
+            tag_list.push_back(loop_idx->second);
+        }
+      }
+
+      for (auto loop_idx: wait_tag_list) {
         if (iter.find(loop_idx) == iter.end())
           tag_list.push_back(0);
         else {
@@ -340,7 +364,7 @@ std::vector<std::shared_ptr<Tile>> TileLoopNode::get_tiles_from_iter(TileGraphPa
       for (int i=start; i<end; i+=stride) {
         inner_indices[loop_node->get_idx_name()] = i;
         std::vector<std::shared_ptr<Tile>> ret = loop_node->get_tiles_from_iter(tog_parser, inner_indices);
-        if (loop_type == TileLoopNode::INNER_LOOP) {
+        if (loop_type == LoopType::INNER_LOOP) {
          for (const auto& inner_tile : ret) {
             for (auto& inner_inst : inner_tile->get_instructions()) {
               tile_vec.back()->append_instuction(inner_inst);
@@ -436,10 +460,9 @@ TileGraphParser::TileGraphParser(std::string onnx_path, json& attribute_json) {
 
       /* Register loop info to parser */
       std::string loop_idx = tile_node->get_idx_name();
-      bool is_inner = tile_node->get_loop_type() == TileLoopNode::INNER_LOOP;
       uint64_t start = tile_node->get_start();
       uint64_t end = tile_node->get_end();
-      _loop_size_map[loop_idx] = std::make_pair(end - start, is_inner);
+      _loop_size_map[loop_idx] = std::make_pair(end - start, tile_node->get_loop_type());
     } else if (type == TileType::LOOP_END_NODE) {
       std::shared_ptr<TileLoopEndNode> tile_node = std::make_shared<TileLoopEndNode>(node_proto);
       register_tile(tile_node);
@@ -475,7 +498,7 @@ TileGraphParser::TileGraphParser(std::string onnx_path, json& attribute_json) {
   /* Extract outer loop */
   for (int i=0;i<_loop_nodes.size();i++) {
     std::shared_ptr<TileLoopNode> outer_loop = std::static_pointer_cast<TileLoopNode>(_loop_nodes.at(i).front());
-    if (outer_loop->get_loop_type() != TileLoopNode::PARALLEL_LOOP)
+    if (outer_loop->get_loop_type() != LoopType::PARALLEL_LOOP)
       break;
     last_outer_idx = i;
     std::string loop_idx = outer_loop->get_idx_name();

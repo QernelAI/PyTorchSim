@@ -67,6 +67,7 @@ void Core::dma_cycle() {
     if (instruction->is_dma_read() && instruction->is_async_dma()) {
       std::ostringstream oss;
       auto key = std::make_pair(instruction->get_addr_name(), instruction->get_tag_idx_list());
+      assert(!_tma.get_tag_finish(instruction->subgraph_id, key));
       _tma.set_tag_finish(instruction->subgraph_id, key);
       for (const auto& idx : instruction->get_tag_idx_list())
         oss << idx << ", ";
