@@ -48,8 +48,8 @@ func.func @{{ KERNEL_NAME }}{{kernel.def_kernel(inputs=[X, W, Bias], outputs=[Y]
         affine.dma_start %W[%index1], %W_buffer[0, 0], %tag[0], %c_mvin2, {% if W_transposed %}%K, %w_chunk{% else %}%N, %c_set{% endif %} : memref<{{ K * N }}xf32>, memref<{{ TILE_K }}x{{ TILE_N }}xf32, 1>, memref<1xi32>
         linalg.matmul ins(%X_buffer, %W_buffer : memref<{{ TILE_M }}x{{ TILE_K }}x{{ DATA_STYPE }}, 1>, memref<{{ TILE_K }}x{{ TILE_N }}x{{ DATA_STYPE }}, 1>)
                 outs(%Y_buffer : memref<{{ TILE_M }}x{{ TILE_N }}x{{ DATA_STYPE }}, 1>)
-        {{kernel.store_output()}}
       } { accumulation_loop=true }
+    {{kernel.store_output()}}
     } { outer_loop=true }
   } { outer_loop=true }
   return
