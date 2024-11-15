@@ -285,11 +285,20 @@ std::vector<std::shared_ptr<Tile>> TileLoopNode::get_tiles_from_iter(TileGraphPa
       std::vector<int> iter_list;
       std::vector<int> tag_list;
       auto& wait_tag_list = wait_node->get_tag_idx_list();
+      int inner_step = -1;
       /* Add accumulation loop info to tag list */
       for (auto loop_idx = iter.begin();
-            loop_idx != std::next(iter.begin(), wait_tag_list.size()); ++loop_idx) {
+          loop_idx != std::next(iter.begin(), wait_tag_list.size()); ++loop_idx) {
         if (tog_parser->get_loop_type(loop_idx->first)==LoopType::ACCUMULATION_LOOP) {
-            tag_list.push_back(loop_idx->second);
+          tag_list.push_back(loop_idx->second);
+        }
+      }
+
+      /* FIXME. To get the systolic array size, we find first inner_loop's step size */
+      for (auto& iter : tog_parser->get_loop_map()) {
+        if (tog_parser->get_loop_type(iter.first) ==LoopType::INNER_LOOP && inner_step == -1) {
+          inner_step = tog_parser->get_loop_step(iter.first);
+          break;
         }
       }
 
@@ -297,7 +306,7 @@ std::vector<std::shared_ptr<Tile>> TileLoopNode::get_tiles_from_iter(TileGraphPa
         if (iter.find(loop_idx) == iter.end())
           tag_list.push_back(0);
         else {
-          auto iter_value = iter.at(loop_idx) * 128;
+          auto iter_value = iter.at(loop_idx) * inner_step;
           tag_list.push_back(iter_value);
         }
       }
@@ -458,7 +467,8 @@ TileGraphParser::TileGraphParser(std::string onnx_path, json& attribute_json) {
       std::string loop_idx = tile_node->get_idx_name();
       uint64_t start = tile_node->get_start();
       uint64_t end = tile_node->get_end();
-      _loop_size_map[loop_idx] = std::make_pair(end - start, tile_node->get_loop_type());
+      uint64_t step = tile_node->get_stride();
+      _loop_size_map[loop_idx] = std::tuple<int, int, LoopType>(end - start, step, tile_node->get_loop_type());
     } else if (type == TileType::LOOP_END_NODE) {
       std::shared_ptr<TileLoopEndNode> tile_node = std::make_shared<TileLoopEndNode>(node_proto);
       register_tile(tile_node);
