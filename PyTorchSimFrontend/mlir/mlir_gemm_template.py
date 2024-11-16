@@ -94,10 +94,7 @@ class MLIRGemmTemplate(MLIRTemplate):
             TILE_M, TILE_N, TILE_K = 0, 0, 0
             template = EMPTY_TEMPLATE
         else:
-            m, n, k = kernel.gemmini_gemm_mapping(M, N, K)
-            TILE_M = kernel.round_with_lanes(M // m)
-            TILE_N = kernel.round_with_lanes(N // n)
-            TILE_K = kernel.round_with_lanes(K // k)
+            TILE_M, TILE_N, TILE_K = kernel.gemmini_gemm_mapping(M, N, K)
             template = GEMM_TEMPLATE
         kernel.tile_size = [TILE_M, TILE_N, TILE_K]
 

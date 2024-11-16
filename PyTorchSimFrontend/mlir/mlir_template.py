@@ -50,9 +50,6 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
         for idx, (loop_size, stride) in enumerate(zip(mat_size, tile_size)):
             self.loop_info[f"index{idx}"] = [0, loop_size, stride]
 
-    def round_with_lanes(self, value):
-        return ((value + self.vector_lane - 1) // self.vector_lane) * self.vector_lane
-
     def gemmini_gemm_mapping(self, M, N, K):
         spad_size = self.spad_info["spad_size"] * self.vector_lane
         num_cores = self.num_cores
@@ -72,7 +69,7 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
         db_partitions_rows = max_spad_rows // 2
         db_mats_in_partition = db_partitions_rows // dim
         db_mats_in_acc = max_acc_rows // dim
-        db_max_tile_i_j = math.sqrt(db_mats_in_acc)
+        db_max_tile_i_j = int(math.sqrt(db_mats_in_acc))
         db_max_tile_k = db_mats_in_partition // db_max_tile_i_j
 
         tile_I = min(dim_I_padded // dim, math.ceil(dim_I / (db_max_tile_i_j * dim)))
@@ -98,15 +95,15 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
         inner_J = math.ceil(dim_J_padded / tile_J)
         inner_K = math.ceil(dim_K_padded / tile_K)
 
-        inner_I = inner_I - (inner_I & (dim) - 1)
-        inner_J = inner_J - (inner_J & (dim) - 1)
-        inner_K = inner_K - (inner_K & (dim) - 1)
+        inner_I -= inner_I & (dim) - 1
+        inner_J -= inner_J & (dim) - 1
+        inner_K -= inner_K & (dim) - 1
 
         tile_I = math.ceil(dim_I / inner_I)
         tile_J = math.ceil(dim_J / inner_J)
         tile_K = math.ceil(dim_K / inner_K)
 
-        return tile_I, tile_J, tile_K
+        return inner_I, inner_J, inner_K
 
     def meta_kernel(self):
         wrapper = V.graph.wrapper_code
