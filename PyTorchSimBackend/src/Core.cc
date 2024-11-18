@@ -24,7 +24,7 @@ void Core::issue(std::shared_ptr<Tile> op) {
     spdlog::trace("[Core {}][{}] New Tile is issued, remain sram: {} Required size: {}",
       _id, _core_cycle, _sram_size-_used_sram_size, op->get_required_sram_size());
   }
-  _used_sram_size += op->get_required_sram_size();
+  //_used_sram_size += op->get_required_sram_size();
   _tiles.push_back(std::move(op));
 }
 
