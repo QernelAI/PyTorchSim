@@ -6,12 +6,12 @@ MemorySystem:
   clock_ratio: 1
 
   DRAM:
-    impl: HBM2
+    impl: DDR4
     org:
-      preset: HBM2_8Gb
+      preset: DDR4_16Gb_x4
       channel: 1
     timing:
-      preset: HBM2_1.4Gbps
+      preset: DDR4_1600J
 
   Controller:
     impl: Generic
@@ -22,4 +22,4 @@ MemorySystem:
     plugins:
 
   AddrMapper:
-    impl: RoBaRaCoCh
+    impl: RoBaRaCoCh 
