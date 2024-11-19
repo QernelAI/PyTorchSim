@@ -279,7 +279,7 @@ class MLIRTile():
     def get_tile_size_per_lane(self):
         if self.get_tile_size() % self.vector_lane != 0:
             print(f"[Warning] n_col({self.n_col}) % vector_lane({self.vector_lane}) != 0")
-        return max((self.get_tile_size() + self.vector_lane - 1) // self.vector_lane, 2) # Use at least two-size vector
+        return (self.get_tile_size() + self.vector_lane - 1) // self.vector_lane
 
     def get_tile_shape(self):
         return f"{self.n_row}x{self.n_col}"
@@ -933,7 +933,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
     def get_scratchpad_buffer(self, dtype, name, tile_row, tile_col, dram_tile_shape, code_buffer, indices):
         c_type = mlir_common.DTYPE_TO_C[dtype]
         mlir_type = mlir_common.DTYPE_TO_MLIR[dtype]
-        tile_size = max(self.roundup_vectorlane(tile_row * tile_col), self.vector_lane * 2) # Use at least two-size vector
+        tile_size = self.roundup_vectorlane(tile_row * tile_col)
         if dtype == torch.bool and not self.is_template_kernel:     #FIXME: epilogue ReLU does not need this
             if self.is_template_kernel:
                 mapping = f"template_{indices} "
