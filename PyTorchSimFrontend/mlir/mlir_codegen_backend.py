@@ -372,6 +372,8 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         cv = self.get_constant_vector(index)
         cv2 = self.get_constant_vector2(index)
         tile_size_per_lane = self.tile_desc.get_tile_size_per_lane()
+        # Avoid scalar operation
+        tile_size_per_lane = 2 if tile_size_per_lane==1 else tile_size_per_lane
 
         if len(cv) != len(cv2) and len(cv2) == 3:
             print("Mismatch! ", cv)
@@ -902,7 +904,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
 
         # Case 2. 3-D tensor kernel without reduction. Access vector granule!
         if len(self.itervars) == 3 and self.reduction_depth == len(self.itervars):
-            self.tile_desc.n_col = min(self.tile_desc.get_tile_size(), self.roundup_vectorlane(self.ranges[-1], 8)) # FIXME. To inefficient?
+            self.tile_desc.n_col = self.ranges[-1]
             self.tile_desc.n_row = 1
 
         # Case 3. N-D tensor kernel with reduction. Not implemented. Need this?
@@ -933,7 +935,8 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
     def get_scratchpad_buffer(self, dtype, name, tile_row, tile_col, dram_tile_shape, code_buffer, indices):
         c_type = mlir_common.DTYPE_TO_C[dtype]
         mlir_type = mlir_common.DTYPE_TO_MLIR[dtype]
-        tile_size = self.roundup_vectorlane(tile_row * tile_col)
+        # Make sure each lane's buffer has at least two element
+        tile_size = max(self.roundup_vectorlane(tile_row * tile_col), self.vector_lane * 2)
         if dtype == torch.bool and not self.is_template_kernel:     #FIXME: epilogue ReLU does not need this
             if self.is_template_kernel:
                 mapping = f"template_{indices} "
