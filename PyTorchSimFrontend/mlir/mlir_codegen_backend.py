@@ -902,7 +902,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
 
         # Case 2. 3-D tensor kernel without reduction. Access vector granule!
         if len(self.itervars) == 3 and self.reduction_depth == len(self.itervars):
-            self.tile_desc.n_col = min(self.tile_desc.get_tile_size(), self.roundup_vectorlane(self.ranges[-1], 8)) # FIXME. To inefficient?
+            self.tile_desc.n_col = self.ranges[-1]
             self.tile_desc.n_row = 1
 
         # Case 3. N-D tensor kernel with reduction. Not implemented. Need this?
@@ -933,6 +933,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
     def get_scratchpad_buffer(self, dtype, name, tile_row, tile_col, dram_tile_shape, code_buffer, indices):
         c_type = mlir_common.DTYPE_TO_C[dtype]
         mlir_type = mlir_common.DTYPE_TO_MLIR[dtype]
+        tile_size = self.roundup_vectorlane(tile_row * tile_col)
         if dtype == torch.bool and not self.is_template_kernel:     #FIXME: epilogue ReLU does not need this
             if self.is_template_kernel:
                 mapping = f"template_{indices} "
@@ -943,8 +944,8 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
 
         if name not in self.global_vars_set:
             # Add definition to header
-            self.header.writeline(f"{c_type} {name}_spad[{tile_row * tile_col // self.vector_lane}] __attribute__ ((section(\".spad\")));")
-            self.gem5_header.writeline(f"{c_type} {name}_spad[{tile_row * tile_col}];")
+            self.header.writeline(f"{c_type} {name}_spad[{tile_size // self.vector_lane}] __attribute__ ((section(\".spad\")));")
+            self.gem5_header.writeline(f"{c_type} {name}_spad[{tile_size}];")
             self.global_vars_set.add(name)
             self.global_vars.writeline(f"memref.global @{name}_spad : memref<{dram_tile_shape}x{mlir_type}, 1>")
         buffer = self.cse.generate(code_buffer, f"memref.get_global @{name}_spad : memref<{dram_tile_shape}x{mlir_type}, 1>")
