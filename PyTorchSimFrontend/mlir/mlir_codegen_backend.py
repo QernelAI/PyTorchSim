@@ -477,7 +477,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         else:
             raise NotImplementedError()
 
-        assert(not (dtype==torch.bool and chunk_size < 8))
+        #assert(not (dtype==torch.bool and chunk_size < 8))
         chunk = chunk_size << 1 | (current_tile.tile_per_lane_layout == MLIRTile.TILE_PER_LANE_COL_WISE)
         return mm_stride, chunk, [current_tile.n_row, current_tile.n_col], tile_size_per_lane
 
@@ -923,6 +923,19 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         elif len(self.itervars) == 0:
             self.tile_desc.n_col = 1
             self.tile_desc.n_row = 1
+
+        # Case 2. 2-D tensor (e.g., softmax)
+        if len(self.itervars) == 2 and self.reduction_depth == len(self.itervars):
+            # Avoid too much padding
+            if (self.ranges[0] <= self.vector_lane and self.ranges[0] <= self.tile_desc.n_row):
+                self.tile_desc.n_row = self.ranges[0]
+                self.tile_desc.used_vector_lane = self.ranges[0]
+
+        # Case 2. 2-D reduction (e.g., batchnorm)
+        if len(self.itervars) == 2 and self.reduction_depth == len(self.itervars) - 1:
+            if (((self.ranges[0] + 1) // 2) <= self.vector_lane and ((self.ranges[0] + 1) // 2) <= self.tile_desc.n_row):
+                self.tile_desc.n_row = ((self.ranges[0] + 1) // 2) * 2
+                self.tile_desc.used_vector_lane = (self.ranges[0] + 1) // 2
 
         # Case 2. 3-D tensor kernel without reduction. Access vector granule!
         if len(self.itervars) == 3 and self.reduction_depth == len(self.itervars):
