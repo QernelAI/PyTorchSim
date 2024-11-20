@@ -45,6 +45,7 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
         self.buffer_names = dict()
         self.render_options = dict()
         self.tile_size = []
+        self.loop_size = None
 
     def add_loop_info(self, mat_size, tile_size):
         for idx, (loop_size, stride) in enumerate(zip(mat_size, tile_size)):

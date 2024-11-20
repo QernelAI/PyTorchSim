@@ -100,6 +100,7 @@ class MLIRBMMTemplate(MLIRTemplate):
         M, N, K = X.get_size()[1], W.get_size()[2], X.get_size()[2]
         TILE_M, TILE_N, TILE_K = kernel.gemmini_gemm_mapping(M, N, K)
         kernel.tile_size = [TILE_M, TILE_N, TILE_K]
+        kernel.loop_size = [M, N, K]
 
         W_transposed = self.is_transposed(W)
         X_transposed = self.is_transposed(X)
