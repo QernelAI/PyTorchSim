@@ -269,7 +269,9 @@ class MLIRTile():
             self.used_vector_lane = self.vector_lane
         else:
             self.used_vector_lane = used_vector_lane
-        self.vector_lane_axis = (self.n_col//self.used_vector_lane) > 0 #(0: Row major, 1: Column major)
+        self.tile_per_lane_layout = self.TILE_PER_LANE_ROW_WISE # How a given tile per lane is stored
+        self.tile_layout = self.TILE_ROW_WISE # How a given tile is stored per lane
+        self.vector_lane_axis = (self.n_col//self.used_vector_lane) > 0 #(0: Col major, 1: Row major)
 
     def get_tile_size(self):
         return self.n_row * self.n_col
@@ -292,17 +294,12 @@ class MLIRTile():
     def get_tile_shape(self):
         return f"{self.n_row}x{self.n_col}"
 
-    def get_chunk_size(self, is_vector_lane_row_major,):
-        if self.is_vector():
-            return self.get_tile_size_per_lane()
-        if is_vector_lane_row_major:
+    def get_chunk_size(self):
+        if self.tile_layout == self.TILE_ROW_WISE:
             chunk_size = self.get_tile_size_per_lane()
         else:
             chunk_size = self.get_cols_per_lane()
         return chunk_size
-
-    def is_vector(self):
-        return self.n_row == 1
 
     @staticmethod
     def div_round_up(size, round_val):
@@ -381,11 +378,11 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
                     return output_node
 
     def get_dma_info(self, name, index, dtype, is_store):
+        current_tile = MLIRTile(self.tile_desc.n_row, self.tile_desc.n_col, self.tile_desc.vector_lane, self.tile_desc.used_vector_lane)
         cv = self.get_constant_vector(index)
         cv2 = self.get_constant_vector2(index)
-        tile_size_per_lane = self.tile_desc.get_tile_size_per_lane()
-        # Avoid scalar operation
-        tile_size_per_lane = 2 if tile_size_per_lane==1 else tile_size_per_lane
+        tile_size_per_lane = self.tile_desc.get_tile_size_per_lane()            # FIXME. move this
+        tile_size_per_lane = 2 if tile_size_per_lane==1 else tile_size_per_lane # Avoid scalar operation
 
         if len(cv) != len(cv2) and len(cv2) == 3:
             print("Mismatch! ", cv)
@@ -394,82 +391,95 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
 
         # Case 0. Tile is 0-D scalar
         if len(cv) == 0:
-            is_col_major = False
-            chunk_size, mm_stride, t_row, t_col, tile_size_per_lane = 1, 1, 1, 1, 1
+            # Use only one vectorlane to handle scalar data
+            current_tile.n_row = 1
+            current_tile.n_col = 1
+            current_tile.tile_layout = MLIRTile.TILE_ROW_WISE
+            current_tile.tile_per_lane_layout = MLIRTile.TILE_PER_LANE_ROW_WISE
+            mm_stride, tile_size_per_lane = 1, 1
+            chunk_size = current_tile.get_chunk_size()
         # Case 1. Tile is 1-D vector type
         elif len(cv) == 1 and len(cv) <= self.reduction_depth:
-            is_col_major = True # Actually it is not needed in vector case
-            t_row = 1
-            t_col = self.tile_desc.get_tile_size()
-            chunk_size = self.tile_desc.get_tile_size_per_lane()
-            mm_stride = t_col
+            current_tile.n_row = 1
+            current_tile.n_col = self.tile_desc.get_tile_size()
+            current_tile.tile_layout = MLIRTile.TILE_ROW_WISE
+            current_tile.tile_per_lane_layout = MLIRTile.TILE_PER_LANE_COL_WISE # Actually it is not needed in vector case
+            chunk_size = current_tile.get_chunk_size()
+            mm_stride = current_tile.n_col
         # Case 2. Tile is 1-D vector type with reduction
         elif len(cv) == 1 and len(cv) == self.reduction_depth + 1:
             # Use only one vectorlane to reduce a vector
-            is_col_major = False
-            t_row = 1
-            t_col = self.tile_desc.get_tile_size()
-            chunk_size = self.tile_desc.get_tile_size()
+            current_tile.tile_layout = MLIRTile.TILE_ROW_WISE
+            current_tile.tile_per_lane_layout = MLIRTile.TILE_PER_LANE_ROW_WISE
+            current_tile.n_row = 1
+            current_tile.n_col = self.tile_desc.get_tile_size()
+            current_tile.used_vector_lane = 1
+            chunk_size = current_tile.get_chunk_size()
         # Case 3. Tile is 2-D tile
         elif len(cv) == 2:
             is_reduction = self.reduction_depth == 1
             if cv[0][0] != 0 and cv[1][0] != 0:
                 is_transposed = cv[0][0] < cv[1][0]
                 if is_transposed:
-                    t_row = self.tile_desc.n_col
-                    t_col = self.tile_desc.n_row
+                    current_tile.n_row = self.tile_desc.n_col
+                    current_tile.n_col = self.tile_desc.n_row
                     mm_stride = self.ranges[0]
                 else:
-                    t_row = self.tile_desc.n_row
-                    t_col = self.tile_desc.n_col
+                    current_tile.n_row = self.tile_desc.n_row
+                    current_tile.n_col = self.tile_desc.n_col
                     mm_stride = self.ranges[1]
 
                 if is_reduction and is_transposed:
-                    is_col_major = False
-                    chunk_size = t_col // self.vector_lane
+                    current_tile.tile_layout = MLIRTile.TILE_COL_WISE
+                    current_tile.tile_per_lane_layout = MLIRTile.TILE_PER_LANE_ROW_WISE
+                    chunk_size = current_tile.get_chunk_size()
                 elif is_reduction and not is_transposed:
-                    is_col_major = True
-                    chunk_size = self.tile_desc.get_tile_size() // self.vector_lane
+                    current_tile.tile_layout = MLIRTile.TILE_ROW_WISE
+                    current_tile.tile_per_lane_layout = MLIRTile.TILE_PER_LANE_COL_WISE
+                    chunk_size = current_tile.get_chunk_size()
                 elif not is_reduction and is_transposed:
                     # Transposed case
-                    is_col_major = True
-                    chunk_size = self.tile_desc.get_rows_per_lane()
-                else:
-                    is_col_major = False
-                    chunk_size = self.tile_desc.get_cols_per_lane() if self.tile_desc.vector_lane_axis else self.tile_desc.get_tile_size_per_lane()
+                    current_tile.tile_layout = MLIRTile.TILE_COL_WISE
+                    current_tile.tile_per_lane_layout = MLIRTile.TILE_PER_LANE_COL_WISE
+                    chunk_size = current_tile.get_chunk_size()
+                else: # not is_reduction and not is_transpose
+                    current_tile.tile_layout = MLIRTile.TILE_COL_WISE if self.tile_desc.vector_lane_axis else MLIRTile.TILE_ROW_WISE
+                    current_tile.tile_per_lane_layout = MLIRTile.TILE_PER_LANE_ROW_WISE
+                    chunk_size = current_tile.get_chunk_size()
             else:
                 # Broadcast pattern
-                is_col_major = False
+                current_tile.tile_per_lane_layout = MLIRTile.TILE_PER_LANE_ROW_WISE
                 mm_stride = 0
                 if cv[0][0] == 0:
-                    t_row = self.tile_desc.n_row
-                    t_col = self.tile_desc.n_col
-                    chunk_size = self.tile_desc.get_cols_per_lane() if self.tile_desc.vector_lane_axis else self.tile_desc.get_tile_size_per_lane()
+                    current_tile.tile_layout = MLIRTile.TILE_COL_WISE if self.tile_desc.vector_lane_axis else MLIRTile.TILE_ROW_WISE
+                    current_tile.n_row = self.tile_desc.n_row
+                    current_tile.n_col = self.tile_desc.n_col
+                    chunk_size = current_tile.get_chunk_size()
                 else: # cv[1][0] == 0
-                    t_row = self.tile_desc.n_col
-                    t_col = self.tile_desc.n_row
-                    chunk_size = self.tile_desc.get_rows_per_lane()
+                    current_tile.n_row = self.tile_desc.n_col
+                    current_tile.n_col = self.tile_desc.n_row
+                    chunk_size = current_tile.get_cols_per_lane()
                     if not is_reduction:
-                        is_col_major = True
-                        chunk_size = t_col if self.tile_desc.vector_lane_axis else chunk_size
+                        current_tile.tile_per_lane_layout = MLIRTile.TILE_PER_LANE_COL_WISE
+                        chunk_size = current_tile.n_col if self.tile_desc.vector_lane_axis else chunk_size
         elif len(cv) == 3:
-            is_col_major = True # Actually it is not needed in vector case
+            current_tile.tile_per_lane_layout = MLIRTile.TILE_PER_LANE_COL_WISE # Actually it is not needed in vector case
             mm_stride = cv[-1][0]
-            # When t_col stride is 1, we can access row vector
+            # When current_tile.n_col stride is 1, we can access row vector
             if mm_stride == 1:
-                t_row = 1
-                t_col = self.tile_desc.get_tile_size()
-            # if t_col stride is not 1, we have to access in a column vector
+                current_tile.n_row = 1
+                current_tile.n_col = self.tile_desc.get_tile_size()
+            # if current_tile.n_col stride is not 1, we have to access in a column vector
             else:
-                t_row = self.tile_desc.get_tile_size()
-                t_col = 1
-            chunk_size = self.tile_desc.get_tile_size_per_lane()
+                current_tile.n_row = self.tile_desc.get_tile_size()
+                current_tile.n_col = 1
+            chunk_size = current_tile.get_tile_size_per_lane()
         else:
             raise NotImplementedError()
 
         assert(not (dtype==torch.bool and chunk_size < 8))
-        chunk = chunk_size << 1 | is_col_major
-        return mm_stride, chunk, [t_row, t_col], tile_size_per_lane
+        chunk = chunk_size << 1 | (current_tile.tile_per_lane_layout == MLIRTile.TILE_PER_LANE_COL_WISE)
+        return mm_stride, chunk, [current_tile.n_row, current_tile.n_col], tile_size_per_lane
 
     def parse_indices(self, expr):
         if len(expr.args) == 0:
@@ -767,9 +777,9 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         # MVOUT Encoding
         dmaType = 3 # MVIN 2, MVIN2 1, MVIN3 14, MVOUT 3
         mm_stride = tile_col
-        is_col_major = False
+        is_col_major = MLIRTile.TILE_PER_LANE_ROW_WISE
         chunk_size = self.tile_desc.get_rows_per_lane()
-        chunk = chunk_size << 1 | is_col_major
+        chunk = chunk_size << 1 | (is_col_major == MLIRTile.TILE_PER_LANE_COL_WISE)
         self.consts.add(dmaType)
         self.consts.add(mm_stride)
         self.consts.add(chunk)
