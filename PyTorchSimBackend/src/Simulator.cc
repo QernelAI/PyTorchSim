@@ -19,7 +19,7 @@ Simulator::Simulator(SimulationConfig config)
   _n_cores = config.num_cores;
   _n_memories = config.dram_channels;
   _memory_req_size = config.dram_req_size;
-
+  _noc_node_per_core = config.icnt_node_per_core;
   char* onnxim_path_env = std::getenv("TORCHSIM_DIR");
   std::string onnxim_path = onnxim_path_env != NULL?
     std::string(onnxim_path_env) + "/PyTorchSimBackend" : std::string("./");
@@ -104,21 +104,24 @@ void Simulator::icnt_cycle() {
   _icnt_cycle++;
 
   for (int core_id = 0; core_id < _n_cores; core_id++) {
+    for (int noc_id = 0; noc_id < _noc_node_per_core; noc_id++) {
     // PUHS core to ICNT. memory request
-    if (_cores[core_id]->has_memory_request()) {
-      MemoryAccess *front = _cores[core_id]->top_memory_request();
-      front->core_id = core_id;
-      if (!_icnt->is_full(core_id, front)) {
-        _icnt->push(core_id, get_dest_node(front), front);
-        _cores[core_id]->pop_memory_request();
-        _nr_from_core++;
+      int port_id = core_id * _noc_node_per_core + noc_id;
+      if (_cores[core_id]->has_memory_request()) {
+        MemoryAccess *front = _cores[core_id]->top_memory_request();
+        front->core_id = core_id;
+        if (!_icnt->is_full(port_id, front)) {
+          _icnt->push(port_id , get_dest_node(front), front);
+          _cores[core_id]->pop_memory_request();
+          _nr_from_core++;
+        }
       }
-    }
-    // Push response from ICNT. to Core.
-    if (!_icnt->is_empty(core_id)) {
-      _cores[core_id]->push_memory_response(_icnt->top(core_id));
-      _icnt->pop(core_id);
-      _nr_to_core++;
+      // Push response from ICNT. to Core.
+      if (!_icnt->is_empty(port_id)) {
+        _cores[core_id]->push_memory_response(_icnt->top(port_id));
+        _icnt->pop(port_id);
+        _nr_to_core++;
+      }
     }
   }
 
@@ -242,8 +245,8 @@ void Simulator::set_cycle_mask() {
 
 uint32_t Simulator::get_dest_node(MemoryAccess *access) {
   if (access->request) {
-    return _config.num_cores + _dram->get_channel_id(access);
+    return _config.num_cores * _noc_node_per_core + _dram->get_channel_id(access);
   } else {
-    return access->core_id;
+    return access->core_id * _noc_node_per_core + (_dram->get_channel_id(access) % _noc_node_per_core);
   }
 }

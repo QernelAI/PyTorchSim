@@ -59,6 +59,8 @@ SimulationConfig initialize_config(json config) {
     parsed_config.icnt_config_path = config["icnt_config_path"];
   if (config.contains("icnt_print_interval"))
     parsed_config.icnt_print_interval = config["icnt_print_interval"];
+  if (config.contains("icnt_node_per_core"))
+    parsed_config.icnt_node_per_core = config["icnt_node_per_core"];
 
   parsed_config.num_patition = config["num_partition"];
   parsed_config.scheduler_type = config["scheduler"];
