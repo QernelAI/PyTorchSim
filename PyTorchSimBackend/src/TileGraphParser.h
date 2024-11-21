@@ -71,6 +71,7 @@ class TileGraphParser {
   LoopType get_loop_type(std::string key) { return std::get<2>(_loop_size_map[key]); }
   const std::map<std::string, std::tuple<int, int, LoopType>> & get_loop_map() { return _loop_size_map; }
   const std::vector<uint32_t> &lookupNumaInfo(std::string key);
+  int getCoreIdFromJson(const json& attribute_json, int subgraph_id);
  private:
   void register_tile(std::shared_ptr<TileNode> tile_node);
   void _tile_generate() {}

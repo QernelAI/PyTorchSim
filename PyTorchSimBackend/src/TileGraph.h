@@ -15,6 +15,7 @@ class TileSubGraph {
   const std::shared_ptr<Tile> peek_tile();
   std::shared_ptr<Tile> get_tile();
   int get_id() { return _id; }
+  void set_core_id(int core_id) { _core_id = core_id; }
   int get_core_id() { return _core_id; }
   struct CompareReadyTile {
     bool operator()(const std::shared_ptr<Tile>& a, const std::shared_ptr<Tile>& b) const {
@@ -122,7 +123,7 @@ class TileGraph {
   std::vector<std::string> _loop_index_list;
   std::vector<std::tuple<int, int, int>> _ranges;
   std::vector<std::shared_ptr<TileSubGraph>> _subgraph_vec;
-  std::map<int , std::queue<std::shared_ptr<TileSubGraph>>> _mapped_subgraph;
+  std::vector<std::shared_ptr<TileSubGraph>> _finished_subgraph_vec;
   std::map<int, std::map<int, std::shared_ptr<TileSubGraph>>> _cpu_graph_map;
   cycle_type _arrival_time;
   static std::shared_ptr<Tile> null_tile;

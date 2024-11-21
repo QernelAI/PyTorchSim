@@ -261,8 +261,6 @@ std::vector<std::shared_ptr<Tile>> TileLoopNode::get_tiles_from_iter(TileGraphPa
       if (numa_stride_size) {
         int total_idx = calculateAddress(outer_loop_size, outer_loop_idx);
         int stride_idx = calculateAddress(outer_loop_size, tog_parser->lookupNumaInfo(base_addr_name));
-        spdlog::trace("[Numa trace] t_idx: {}, s_idx: {}", fmt::join(outer_loop_idx, ", "), fmt::join(tog_parser->lookupNumaInfo(base_addr_name), ", "));
-        spdlog::trace("[Numa trace] total_idx {} stride_idx {}", total_idx, stride_idx);
         numa_id = total_idx / stride_idx;
       }
 
@@ -311,8 +309,6 @@ std::vector<std::shared_ptr<Tile>> TileLoopNode::get_tiles_from_iter(TileGraphPa
       if (numa_stride_size) {
         int total_idx = calculateAddress(outer_loop_size, outer_loop_idx);
         int stride_idx = calculateAddress(outer_loop_size, tog_parser->lookupNumaInfo(base_addr_name));
-        spdlog::trace("[Numa trace] t_idx: {}, s_idx: {}", fmt::join(outer_loop_idx, ", "), fmt::join(tog_parser->lookupNumaInfo(base_addr_name), ", "));
-        spdlog::trace("[Numa trace] total_idx {} stride_idx {}", total_idx, stride_idx);
         numa_id = total_idx / stride_idx;
       }
 
@@ -582,6 +578,7 @@ TileGraphParser::TileGraphParser(std::string onnx_path, json& attribute_json) {
   /* Iterate outer loop and initialize inner loop */
   for (auto iter=_tile_graph->begin(); iter!=_tile_graph->end(); ++iter) {
     std::shared_ptr<TileSubGraph> subgraph = std::make_shared<TileSubGraph>();
+    subgraph->set_core_id(getCoreIdFromJson(attribute_json, subgraph->get_id()));
     auto indices = iter.get_indices();
     for (auto loop : _loop_nodes.at(last_outer_idx)) {
       std::shared_ptr<TileLoopNode> outer_loop = std::static_pointer_cast<TileLoopNode>(loop);
@@ -660,4 +657,14 @@ const std::vector<uint32_t>& TileGraphParser::lookupNumaInfo(std::string key) {
   if (val == _arg_numa_stride.end())
     return dummy_result;
   return _arg_numa_stride.at(key);
+}
+
+int TileGraphParser::getCoreIdFromJson(const json& attribute_json, int subgraph_id) {
+  if (attribute_json.contains("subgraph_map")) {
+    const auto& subgraph_map = attribute_json["subgraph_map"];
+    if (subgraph_map.contains(std::to_string(subgraph_id)) && subgraph_map[std::to_string(subgraph_id)].is_number_integer()) {
+        return subgraph_map[std::to_string(subgraph_id)];
+    }
+  }
+  return -1;
 }
