@@ -168,7 +168,7 @@ class BaseMLIRKernel(common.Kernel, BaseMLIRHardwareInfo):
         self.reductions_suffix = IndentedBuffer()
         self.cse = common.CSE(self.newvar_prefix, self.suffix)
         self.tile_row = int(os.getenv("TORCHSIM_TILE_ROW", self.vlen * self.vector_lane))
-        self.tile_col = int(os.getenv("TORCHSIM_TILE_COL", 4)) # FIXME: tile_col is not always vector_lane * vlen
+        self.tile_col = int(os.getenv("TORCHSIM_TILE_COL", 8)) # FIXME: tile_col is not always vector_lane * vlen
         self.tile_info = {}
 
     def load(self, name: str, index: sympy.Expr):
