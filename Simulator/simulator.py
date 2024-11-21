@@ -13,6 +13,8 @@ import numpy as np
 from PyTorchSimFrontend.llvm.llvm_common import LLVMKernelArgs
 
 TORCHSIM_DIR = os.environ.get('TORCHSIM_DIR', default='/workspace/PyTorchSim')
+BACKENDSIM_DEBUG_LEVEL = os.environ.get("BACKENDSIM_DEBUG_LEVEL", "")
+
 TORCH_TO_NUMPY = {
     torch.float32: np.float32,
     torch.float64: np.float64,
@@ -194,6 +196,8 @@ class BackendSimulator():
                 time.sleep(1)
             print("")
         cmd = f"{self.get_backend_command()} --models_list {model_path}"
+        if BACKENDSIM_DEBUG_LEVEL:
+            cmd += f" --log_level {BACKENDSIM_DEBUG_LEVEL}"
         if attribute_path:
             cmd = f"{cmd} --attributes_list {attribute_path}"
         print("[BackendSimulator] cmd> ", cmd)
@@ -226,6 +230,9 @@ class BackendSimulator():
 
     def interactive_simulation(self):
         cmd = f"{self.get_backend_command()} --mode interactive"
+        if BACKENDSIM_DEBUG_LEVEL:
+            cmd += f" --log_level {BACKENDSIM_DEBUG_LEVEL}"
+ 
         print("[BackendSimulator] cmd> ", cmd)
         if self.process is None:
             self.process = subprocess.Popen(
