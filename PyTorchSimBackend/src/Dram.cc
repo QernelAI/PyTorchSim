@@ -7,7 +7,7 @@ uint32_t Dram::get_channel_id(MemoryAccess* access) {
   else
     channel_id = ipoly_hash_function((new_addr_type)access->dram_address/_config.dram_req_size, 0, 16) % _n_ch_per_partition;
   
-  channel_id += (access->parition_id * _n_ch_per_partition);
+  channel_id += ((access->numa_id % _n_partitions)* _n_ch_per_partition);
   return channel_id;
 }
 

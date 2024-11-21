@@ -15,9 +15,6 @@ uint32_t calculateAddress(const std::vector<uint32_t>& loop_size, const std::vec
   for (int i = loop_size.size() - 2; i >= 0; --i) {
     stride_list[i] = stride_list[i + 1] * loop_size[i + 1];
   }
-
-  spdlog::trace("Numa stride_list: {}", fmt::join(stride_list, ", "));
-
   int address = std::inner_product(
       stride_list.begin(), stride_list.end(),
       loop_idx.begin(),
