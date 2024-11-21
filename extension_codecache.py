@@ -25,7 +25,7 @@ TORCHSIM_DIR = os.environ.get('TORCHSIM_DIR', default='/workspace/PyTorchSim')
 TORCHSIM_CUSTOM_PASS_PATH = os.environ.get('TORCHSIM_CUSTOM_PASS_PATH',
                                            default=f"{TORCHSIM_DIR}/GemminiLowerPass/build")
 TORCHSIM_BACKEND_CONFIG = os.environ.get('TORCHSIM_CONFIG',
-                                        default=f'{TORCHSIM_DIR}/PyTorchSimBackend/configs/systolic_ws_128x128_c1_simple_noc_tpuv4.json')
+                                        default=f'{TORCHSIM_DIR}/PyTorchSimBackend/configs/systolic_ws_128x128_c2_simple_noc_tpuv2.json')
 GEM5_PATH = os.environ.get('GEM5_PATH',
                            default = f"/workspace/gem5/build/RISCV/gem5.opt")
 GEM5_SCRIPT_PATH = os.environ.get('GEM5_SCRIPT_PATH',
