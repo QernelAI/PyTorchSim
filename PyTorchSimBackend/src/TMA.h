@@ -17,6 +17,7 @@ typedef struct {
   bool request;
   uint32_t core_id;
   Instruction* owner_instruction;
+  uint32_t parition_id = 0;
   cycle_type start_cycle;
   cycle_type dram_enter_cycle;
   cycle_type dram_finish_cycle;

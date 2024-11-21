@@ -27,6 +27,8 @@ class Dram {
  protected:
   SimulationConfig _config;
   uint32_t _n_ch;
+  uint32_t _n_partitions;
+  uint32_t _n_ch_per_partition;
   cycle_type _cycles;
 };
 

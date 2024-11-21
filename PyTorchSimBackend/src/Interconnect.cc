@@ -73,7 +73,7 @@ void SimpleInterconnect::pop(uint32_t nid) {
 
 Booksim2Interconnect::Booksim2Interconnect(SimulationConfig config) {
   _config = config;
-  _n_nodes = config.num_cores + config.dram_channels;
+  _n_nodes = config.num_cores * _config.icnt_node_per_core + config.dram_channels;
   spdlog::info("Initialize Booksim2"); 
   char* onnxim_path_env = std::getenv("TORCHSIM_DIR");
   std::string onnxim_path = onnxim_path_env != NULL?

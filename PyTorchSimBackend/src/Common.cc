@@ -43,6 +43,8 @@ SimulationConfig initialize_config(json config) {
     parsed_config.dram_req_size = config["dram_req_size"];
   if (config.contains("dram_print_interval"))
     parsed_config.dram_print_interval = config["dram_print_interval"];
+  if (config.contains("dram_num_partitions"))
+    parsed_config.dram_num_partitions = config["dram_num_partitions"];
 
   /* Icnt config */
   if ((std::string)config["icnt_type"] == "simple")

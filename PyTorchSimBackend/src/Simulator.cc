@@ -127,16 +127,17 @@ void Simulator::icnt_cycle() {
 
   for (int mem_id = 0; mem_id < _n_memories; mem_id++) {
     // ICNT to memory
-    if (!_icnt->is_empty(_n_cores + mem_id) &&
-        !_dram->is_full(mem_id, _icnt->top(_n_cores + mem_id))) {
-      _dram->push(mem_id, _icnt->top(_n_cores + mem_id));
-      _icnt->pop(_n_cores + mem_id);
+    int core_offset = _n_cores * _noc_node_per_core;
+    if (!_icnt->is_empty(core_offset + mem_id) &&
+        !_dram->is_full(mem_id, _icnt->top(core_offset + mem_id))) {
+      _dram->push(mem_id, _icnt->top(core_offset + mem_id));
+      _icnt->pop(core_offset + mem_id);
       _nr_to_mem++;
     }
     // Pop response to ICNT from dram
     if (!_dram->is_empty(mem_id) &&
-        !_icnt->is_full(_n_cores + mem_id, _dram->top(mem_id))) {
-      _icnt->push(_n_cores + mem_id, get_dest_node(_dram->top(mem_id)),
+        !_icnt->is_full(core_offset + mem_id, _dram->top(mem_id))) {
+      _icnt->push(core_offset + mem_id, get_dest_node(_dram->top(mem_id)),
                   _dram->top(mem_id));
       _dram->pop(mem_id);
       _nr_from_mem++;

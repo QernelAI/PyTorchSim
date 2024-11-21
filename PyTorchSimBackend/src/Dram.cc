@@ -2,10 +2,12 @@
 
 uint32_t Dram::get_channel_id(MemoryAccess* access) {
   uint32_t channel_id;
-  if (_n_ch >= 16)
-    channel_id = ipoly_hash_function((new_addr_type)access->dram_address/_config.dram_req_size, 0, _n_ch);
+  if (_n_ch_per_partition >= 16)
+    channel_id = ipoly_hash_function((new_addr_type)access->dram_address/_config.dram_req_size, 0, _n_ch_per_partition);
   else
-    channel_id = ipoly_hash_function((new_addr_type)access->dram_address/_config.dram_req_size, 0, 16) % _n_ch;
+    channel_id = ipoly_hash_function((new_addr_type)access->dram_address/_config.dram_req_size, 0, 16) % _n_ch_per_partition;
+  
+  channel_id += (access->parition_id * _n_ch_per_partition);
   return channel_id;
 }
 
@@ -15,6 +17,8 @@ SimpleDram::SimpleDram(SimulationConfig config)
   _cycles = 0;
   _config = config;
   _n_ch = config.dram_channels;
+  _n_partitions = config.dram_num_partitions;
+  _n_ch_per_partition = _n_ch / _n_partitions;
   _waiting_queue.resize(_n_ch);
   _response_queue.resize(_n_ch);
 }
@@ -133,6 +137,8 @@ void DramRamulator::print_stat() {
 DramRamulator2::DramRamulator2(SimulationConfig config) {
   _n_ch = config.dram_channels;
   _req_size = config.dram_req_size;
+  _n_partitions = config.dram_num_partitions;
+  _n_ch_per_partition = _n_ch / _n_partitions;
   _config = config;
   _mem.resize(_n_ch);
   for (int ch = 0; ch < _n_ch; ch++) {
@@ -140,7 +146,7 @@ DramRamulator2::DramRamulator2(SimulationConfig config) {
       ch, _n_ch, config.dram_config_path, "Ramulator2", _config.dram_print_interval, 1);
   }
   _tx_log2 = log2(_req_size);
-  _tx_ch_log2 = log2(_n_ch) + _tx_log2;
+  _tx_ch_log2 = log2(_n_ch_per_partition) + _tx_log2;
 }
 
 bool DramRamulator2::running() {

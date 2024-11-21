@@ -18,6 +18,7 @@ struct SimulationConfig {
 
   /* DRAM config */
   DramType dram_type;
+  uint32_t dram_num_partitions = 1;
   uint32_t dram_freq;
   uint32_t dram_channels;
   uint32_t dram_req_size;
