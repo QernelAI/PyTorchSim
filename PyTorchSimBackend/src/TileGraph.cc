@@ -118,11 +118,12 @@ void TileGraph::allocate_subgraph(int core_id, int slot_id) {
     if(_mapped_subgraph[core_id].empty())
       _mapped_subgraph.erase(core_id);
   }
-  if (_vec_index !=_subgraph_vec.size()) {
+  else if (_vec_index !=_subgraph_vec.size()) {
     spdlog::trace("[TileGraph] Core {} allocated new subgraph ({}/{})", core_id, _vec_index, _subgraph_vec.size());
     std::shared_ptr<TileSubGraph> subgraph = _subgraph_vec.at(_vec_index++);
     _cpu_graph_map[core_id][slot_id] = subgraph;
   }
-  _cpu_graph_map[core_id][slot_id] = nullptr;
-  return;
+  else {
+    _cpu_graph_map[core_id][slot_id] = nullptr;
+  }
 }

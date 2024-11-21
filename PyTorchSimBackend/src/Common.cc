@@ -64,9 +64,9 @@ SimulationConfig initialize_config(json config) {
   if (config.contains("icnt_node_per_core"))
     parsed_config.icnt_node_per_core = config["icnt_node_per_core"];
 
-  parsed_config.num_patition = config["num_partition"];
   parsed_config.scheduler_type = config["scheduler"];
-
+  if (config.contains("num_partition"))
+    parsed_config.num_patition = config["num_partition"];
   if (config.contains("partition")) {
     for (int i=0; i<parsed_config.num_cores; i++) {
       std::string core_partition = "core_" + std::to_string(i);
