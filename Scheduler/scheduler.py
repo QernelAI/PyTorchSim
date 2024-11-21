@@ -461,3 +461,11 @@ class Scheduler:
 
     def is_finished(self):
         return self.is_request_queue_empty() and self.execution_engine.is_idle()
+
+    def cycle_to_msec(self, cycle):
+        freq = self.backend_simulator.get_core_freq()
+        return cycle / (freq  / 1000)
+
+    def msec_to_cycle(self, msec):
+        freq = self.backend_simulator.get_core_freq()
+        return msec * (freq / 1000)

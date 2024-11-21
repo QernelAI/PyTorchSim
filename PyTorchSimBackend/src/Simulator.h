@@ -30,6 +30,7 @@ class Simulator {
   int until(cycle_type untile_cycle);
   int get_partition_id(int core_id) { return _config.partiton_map[core_id]; }
   std::unique_ptr<Scheduler>& get_partition_scheduler(int core_id) { return _partition_scheduler.at(get_partition_id(core_id)); }
+  void print_core_stat();
  private:
   void cycle();
   void core_cycle();
@@ -37,21 +38,20 @@ class Simulator {
   void icnt_cycle();
   bool running();
   void set_cycle_mask();
-  uint32_t get_dest_node(MemoryAccess* access);
+  uint32_t get_dest_node(MemoryAccess *access);
   SimulationConfig _config;
   uint32_t _n_cores;
   uint32_t _noc_node_per_core;
   uint32_t _n_memories;
   uint32_t _memory_req_size;
-  uint32_t _slot_id;    // Double buffer slot index
-  uint32_t _max_slot;   // Max number of slot
+  uint32_t _slot_id;  // Double buffer slot index
+  uint32_t _max_slot; // Max number of slot
 
   // Components
   std::vector<std::unique_ptr<Core>> _cores;
   std::unique_ptr<Interconnect> _icnt;
   std::unique_ptr<Dram> _dram;
   std::vector<std::unique_ptr<Scheduler>> _partition_scheduler;
-  
   // period information (ps)
   uint64_t _core_period;
   uint64_t _icnt_period;
@@ -67,10 +67,10 @@ class Simulator {
   uint32_t _cycle_mask;
 
   // Icnt stat
-  uint64_t _nr_from_core=0;
-  uint64_t _nr_to_core=0;
-  uint64_t _nr_from_mem=0;
-  uint64_t _nr_to_mem=0;
-  cycle_type _icnt_cycle=0;
-  uint64_t _icnt_interval=0;
+  uint64_t _nr_from_core = 0;
+  uint64_t _nr_to_core = 0;
+  uint64_t _nr_from_mem = 0;
+  uint64_t _nr_to_mem = 0;
+  cycle_type _icnt_cycle = 0;
+  uint64_t _icnt_interval = 0;
 };

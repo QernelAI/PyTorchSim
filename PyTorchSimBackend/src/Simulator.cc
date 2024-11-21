@@ -206,12 +206,6 @@ void Simulator::cycle() {
       icnt_cycle();
   }
   spdlog::info("Simulation Finished");
-  /* Print simulation stats */
-  for (int core_id = 0; core_id < _n_cores; core_id++) {
-    _cores[core_id]->print_stats();
-  }
-  _icnt->print_stats();
-  _dram->print_stat();
 }
 
 bool Simulator::running() {
@@ -250,4 +244,13 @@ uint32_t Simulator::get_dest_node(MemoryAccess *access) {
   } else {
     return access->core_id * _noc_node_per_core + (_dram->get_channel_id(access) % _noc_node_per_core);
   }
+}
+
+void Simulator::print_core_stat()
+{
+  for (int core_id = 0; core_id < _n_cores; core_id++) {
+    _cores[core_id]->print_stats();
+  }
+  _icnt->print_stats();
+  _dram->print_stat();
 }

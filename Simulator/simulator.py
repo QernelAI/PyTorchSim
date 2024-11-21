@@ -6,6 +6,7 @@ import sys
 import json
 import time
 import threading
+from pathlib import Path
 
 import torch
 import numpy as np
@@ -178,6 +179,7 @@ class BackendSimulator():
     def __init__(self, backend_path, config_path) -> None:
         self.base_dir = backend_path
         self.config_path = config_path
+        self.config_json = self.load_json(self.config_path)
         self.process = None
 
     def get_backend_command(self):
@@ -294,6 +296,24 @@ class BackendSimulator():
         with open(attribute_path, "w") as f:
             json.dump({"address_info" : address_info}, f, indent=4)
         return attribute_path
+
+    def load_json(self, config_path):
+        config_path = Path(config_path)
+        if not config_path.is_file():
+            raise FileNotFoundError(f"JSON file not found: {config_path}")
+
+        try:
+            with open(config_path, "r") as file:
+                data = json.load(file)
+                return data
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid JSON format: {e}")
+
+    def get_core_freq(self):
+        if "core_freq" in self.config_json:
+            return self.config_json["core_freq"] * 1000 * 1000 # MHz
+        else:
+            raise KeyError("Key 'core_freq' not found in JSON.")
 
     @staticmethod
     def get_result_from_file(result_path):
