@@ -72,6 +72,7 @@ class TileGraphParser {
   const std::map<std::string, std::tuple<int, int, LoopType>> & get_loop_map() { return _loop_size_map; }
   const std::vector<uint32_t> &lookupNumaInfo(std::string key);
   int getCoreIdFromJson(const json& attribute_json, int subgraph_id);
+  std::string getMetaByName(std::string key) { return _tog_meta[key]; }
  private:
   void register_tile(std::shared_ptr<TileNode> tile_node);
   void _tile_generate() {}
@@ -88,6 +89,7 @@ class TileGraphParser {
   std::map<std::string, addr_type> _arg_to_address;
   std::map<std::string, std::vector<uint32_t>> _arg_numa_stride;
   std::map<std::string, std::tuple<int, int, LoopType>> _loop_size_map;
+  std::map<std::string, std::string> _tog_meta;
 };
 
 class TileComputeNode : public TileNode {

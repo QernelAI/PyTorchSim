@@ -335,20 +335,12 @@ std::vector<std::shared_ptr<Tile>> TileLoopNode::get_tiles_from_iter(TileGraphPa
       std::vector<int> iter_list;
       std::vector<int> tag_list;
       auto& wait_tag_list = wait_node->get_tag_idx_list();
-      int inner_step = -1;
+      int inner_step = std::stoi(tog_parser->getMetaByName("systolic_size"));
       /* Add accumulation loop info to tag list */
       for (auto loop_idx = iter.begin(); loop_idx != iter.end(); ++loop_idx) {
         /* FIXME. Used heuristic that wait_tag_size has 2d dim */
         if (tog_parser->get_loop_type(loop_idx->first)==LoopType::ACCUMULATION_LOOP && wait_tag_list.size() != 2) {
           tag_list.push_back(loop_idx->second);
-        }
-      }
-
-      /* FIXME. To get the systolic array size, we find first inner_loop's step size */
-      for (auto& iter : tog_parser->get_loop_map()) {
-        if (tog_parser->get_loop_type(iter.first) ==LoopType::INNER_LOOP && inner_step == -1) {
-          inner_step = tog_parser->get_loop_step(iter.first);
-          break;
         }
       }
 
@@ -502,7 +494,7 @@ TileGraphParser::TileGraphParser(std::string onnx_path, json& attribute_json) {
       for (auto value : value_list) {
         _arg_numa_stride[it.key()].push_back(value);
       }
-      spdlog::info("[TOGPaser] Address numa info key: {} numa stride : {}", it.key(), fmt::join(_arg_numa_stride[it.key()], ", "));
+      spdlog::info("[TOGParser] Address numa info key: {} numa stride : {}", it.key(), fmt::join(_arg_numa_stride[it.key()], ", "));
     }
   }
 
@@ -513,6 +505,13 @@ TileGraphParser::TileGraphParser(std::string onnx_path, json& attribute_json) {
   auto input = model_proto.graph().input();
   auto graph_name = model_proto.graph().name();
   graph_name = graph_name == "" ? "?" : graph_name;
+
+  /* Get meta data from graph */
+  for (const auto& meta : model_proto.metadata_props()) {
+    spdlog::info("[TOGParser] Register Metadata \"{}\": \"{}\"", meta.key(), meta.value());
+    _tog_meta[meta.key()] = meta.value();
+  }
+
   for (onnx::NodeProto node_proto : model_proto.graph().node()) {
     std::string op_type = node_proto.op_type();
     TileType type = TileNode::get_tile_type(op_type);
