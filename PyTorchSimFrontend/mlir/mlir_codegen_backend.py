@@ -342,7 +342,6 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         self.affine_yield = {}
         self.welford_reduce_out = None
         self.reduce_iterator = {}
-        self.origins = None
 
     def get_constant_vector(self, expr):
         constant_vector = [[int(expr.coeff(var)),None] for var in self.itervars]
@@ -525,10 +524,6 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
                 _, _, _, kernel.buffer_types = kernel.args.mlir_argdefs()
                 kernel.reduction_idx = {var: i for i, var in enumerate(reduction_vars)}
                 node.run(vars, reduction_vars)
-
-                # Preserve origin node info
-                kernel.origins = { str(op) for op in node.node.origins }
-
         src_code = self.codegen_kernel(kernel_name=kernel_name)
         self.meta_kernel()
 
@@ -1094,7 +1089,8 @@ class MLIRScheduling(BaseScheduling):
         kernel_name = f"extension_kernel_{MLIRScheduling.count}"
         MLIRScheduling.count += 1
         src_code = ex_kernel.codegen_nodes(nodes, kernel_name)
-        self.define_kernel(src_code, kernel_name, ex_kernel.vector_lane, ex_kernel.spad_info, origins=ex_kernel.origins)
+        self.define_kernel(src_code, kernel_name, ex_kernel.vector_lane,
+                           ex_kernel.spad_info, origins= {str(i) for i in nodes[0].node.origins})
         ex_kernel.call_kernel(kernel_name)
         _, args, _, _ = ex_kernel.args.mlir_argdefs()
         args = ", ".join(args)
@@ -1175,7 +1171,8 @@ class MLIRScheduling(BaseScheduling):
             codegen_header(src_code, (kernel.header.getvalue(), kernel.gem5_header.getvalue()))
             # node_schedule = [template_node, *epilogue_nodes]
             kernel.meta_kernel()
-            kernel_name = self.define_kernel(src_code, kernel.kernel_name, kernel.vector_lane, kernel.spad_info, kernel.tile_size, kernel.loop_size)
+            kernel_name = self.define_kernel(src_code, kernel.kernel_name, kernel.vector_lane, kernel.spad_info,
+                                             kernel.tile_size, kernel.loop_size, origins={str(i) for i in template_node.node.origins})
             self.define_function(kernel)
 
         kernel.call_kernel(kernel_name)
