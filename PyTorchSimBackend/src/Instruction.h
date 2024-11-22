@@ -45,6 +45,7 @@ class Instruction {
   void set_overlapping_cycle(cycle_type cycle) { overlapping_cycle = cycle; }
   cycle_type get_overlapping_cycle() { return overlapping_cycle; }
   cycle_type get_compute_cycle() { return compute_cycle; }
+  void set_compute_cycle(cycle_type cycle) { compute_cycle = cycle; }
   void print();
   std::set<addr_type> get_dram_address(addr_type dram_req_size) {
     std::set<addr_type> address_set;

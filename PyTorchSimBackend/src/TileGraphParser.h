@@ -73,6 +73,7 @@ class TileGraphParser {
   const std::vector<uint32_t> &lookupNumaInfo(std::string key);
   int getCoreIdFromJson(const json& attribute_json, int subgraph_id);
   std::string getMetaByName(std::string key) { return _tog_meta[key]; }
+  const json& get_attribute_file() { return _attribute_json; }
  private:
   void register_tile(std::shared_ptr<TileNode> tile_node);
   void _tile_generate() {}
