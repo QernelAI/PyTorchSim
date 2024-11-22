@@ -140,9 +140,11 @@ class ExecutionEngine:
         self.module = self.setup_device()
         self.num_partion = num_partion
         self.launch_model_dicts = []
+        self.nested_launch_model_dicts = []
         self.partition_state = []
         for i in range(self.num_partion):
             self.launch_model_dicts.append({})
+            self.nested_launch_model_dicts.append({})
             self.partition_state.append(self.PARTITION_IDLE)
 
         self.finish_req_dict = {}
@@ -251,16 +253,29 @@ class FIFOExecutionEngine(ExecutionEngine):
         super().__init__(backend_simulator, num_partion)
 
     def select_kernel(self, partition_idx):
-        while self.launch_model_dicts[partition_idx]:
+        while len(self.nested_launch_model_dicts[partition_idx]) or len(self.launch_model_dicts[partition_idx]):
+            if len(self.nested_launch_model_dicts[partition_idx]):
+                target_dict = self.nested_launch_model_dicts
+            else:
+                target_dict = self.launch_model_dicts
+
             # Select FIFO manner
-            req, target_model = next(iter(self.launch_model_dicts[partition_idx].items()))
+            req, target_model = next(iter(target_dict[partition_idx].items()))
             try:
                 kernel, inputs = next(target_model)
+
+                # For convolution...
+                if not hasattr(kernel, "future"):
+                    nested_gen = kernel(*inputs)
+                    self.nested_launch_model_dicts[partition_idx] = {req : nested_gen}
+                    kernel, inputs = \
+                        next(self.nested_launch_model_dicts[partition_idx][req])
                 return kernel, inputs
             except StopIteration as e:
                 # Retry
-                self.finish_model(req, e.value)
-                del self.launch_model_dicts[partition_idx][req]
+                if target_dict == self.launch_model_dicts:
+                    self.finish_model(req, e.value)
+                del target_dict[partition_idx][req]
         # No proper kernel now
         return self.SELECT_NOTHING
 
@@ -270,8 +285,13 @@ class RRExecutionEngine(ExecutionEngine):
         self.next_pointer = None
 
     def select_kernel(self, partition_idx):
-        while self.launch_model_dicts[partition_idx]:
-            req_list = list(self.launch_model_dicts[partition_idx].keys())
+        while len(self.nested_launch_model_dicts[partition_idx]) or len(self.launch_model_dicts[partition_idx]):
+            if len(self.nested_launch_model_dicts[partition_idx]):
+                target_dict = self.nested_launch_model_dicts
+            else:
+                target_dict = self.launch_model_dicts
+
+            req_list = list(target_dict[partition_idx].keys())
             # Select RR manner
             if self.next_pointer is None or self.next_pointer not in req_list:
                 req = req_list[0]
@@ -289,10 +309,18 @@ class RRExecutionEngine(ExecutionEngine):
             target_model = self.launch_model_dicts[partition_idx][req]
             try:
                 kernel, inputs = next(target_model)
+
+                # For convolution...
+                if not hasattr(kernel, "future"):
+                    nested_gen = kernel(*inputs)
+                    self.nested_launch_model_dicts[partition_idx] = {req : nested_gen}
+                    kernel, inputs = \
+                        next(self.nested_launch_model_dicts[partition_idx][req])
                 return kernel, inputs
             except StopIteration as e:
                 # Retry
-                self.finish_model(req, e.value)
+                if target_dict == self.launch_model_dicts:
+                    self.finish_model(req, e.value)
                 del self.launch_model_dicts[partition_idx][req]
         # No proper kernel now
         return self.SELECT_NOTHING

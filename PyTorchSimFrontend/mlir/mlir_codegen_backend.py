@@ -1183,7 +1183,8 @@ class MLIRScheduling(BaseScheduling):
         _, args, _, _ = kernel.args.mlir_argdefs()
         args = ", ".join(args)
         if (bool(os.getenv(BackendSimulator.BACKENDSIM_EAGER_MODE, False))):
+            target_kernel_name = kernel_name if kernel.outer_func_name is None else kernel.outer_func_name
             V.graph.wrapper_code.writeline(
-                f"yield ({kernel_name}, ({args}))"
+                f"yield ({target_kernel_name}, ({args}))"
             )
         self._set_flush_status(True)

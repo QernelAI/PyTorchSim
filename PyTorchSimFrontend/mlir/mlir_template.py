@@ -124,7 +124,7 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
     def call_kernel(self, kernel_name):
         wrapper = V.graph.wrapper_code
         _, call_args, _, _ = self.args.mlir_argdefs()
-       # generate the code to call this
+        # generate the code to call this
         wrapper.generate_kernel_call(
             kernel_name if self.outer_func_name is None else self.outer_func_name,
             call_args, cuda=False)

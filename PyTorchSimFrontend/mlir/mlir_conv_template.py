@@ -104,6 +104,9 @@ def {{ FUNC_NAME }}({{ INPUT }}, {{ WEIGHT }}{% if BIAS %}, {{ BIAS }}{% endif %
             {% else %}
             {{ KERNEL_NAME }}(input_tile, kernel_tile, {{ OUT }}_cpu, {{ OUT }}_cpu)  # input, weight, bias, out
             {% endif %}
+            {% if BACKENDSIM_EAGER_MODE %}
+            yield ({{KERNEL_NAME}}, (input_tile, kernel_tile, {{ OUT }}_cpu, {{ OUT }}_cpu))
+            {% endif %}
 
     {{ OUT }}_cpu = {{ OUT }}_cpu.reshape(output_shape)
     {{ OUT }}_cpu = {{ OUT }}_cpu.permute(0, 3, 1, 2)
@@ -221,6 +224,7 @@ class MLIRConvTemplate(MLIRTemplate):
             DILATION_H=self.dilation[0],
             DILATION_W=self.dilation[1],
             VALIDATION_MODE=int(os.environ.get('TORCH_VALIDATION_MODE', default="True") == "True"),
+            BACKENDSIM_EAGER_MODE=bool(os.getenv("BACKENDSIM_EAGER_MODE", False)),
             HASH_VALUE=self.hash_value
         )
         code = self._template_from_string(CONV2D_FUNC_TEMPLATE).render(**options)
