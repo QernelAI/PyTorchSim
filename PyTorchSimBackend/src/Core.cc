@@ -40,17 +40,24 @@ std::shared_ptr<Tile> Core::pop_finished_tile() {
 void Core::compute_cycle() {
   for (int i=0; i<NR_COMPUTE_UNIT; i++) {
     auto& target_pipeline = _compute_pipeline.at(i);
-    if (!target_pipeline.empty()) {
-      _stat_compute_cycle[i]++;
-      if(target_pipeline.front()->finish_cycle <= _core_cycle) {
-        int bubble = target_pipeline.front()->bubble_cycle;
-        _stat_compute_idle_cycle[i] += bubble;
-        _stat_compute_cycle[i] -= bubble;
-        finish_instruction(target_pipeline.front());
-        target_pipeline.pop();
+    bool retry = true;
+    while (retry) {
+      if (!target_pipeline.empty()) {
+        _stat_compute_cycle[i]++;
+        if(target_pipeline.front()->finish_cycle <= _core_cycle) {
+          int bubble = target_pipeline.front()->bubble_cycle;
+          _stat_compute_idle_cycle[i] += bubble;
+          _stat_compute_cycle[i] -= bubble;
+          finish_instruction(target_pipeline.front());
+          target_pipeline.pop();
+        } else {
+          retry = false;
+        }
+      } else {
+        _stat_compute_idle_cycle[i]++;
+        retry = false;
       }
-    } else
-      _stat_compute_idle_cycle[i]++;
+    }
   }
 }
 

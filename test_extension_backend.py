@@ -46,6 +46,16 @@ def remove_build_path():
     if os.path.exists(default_build_root):
         shutil.rmtree(default_build_root, ignore_errors=True)
 
+def apply_random_zero(tensor, zero_prob):
+    if not 0 <= zero_prob <= 1:
+        raise ValueError("zero_prob must be between 0 and 1.")
+
+    # Generate a random mask with the same shape as the tensor
+    mask = torch.rand(tensor.shape) > zero_prob
+
+    # Apply the mask to the tensor (set elements to 0 where mask is False)
+    return tensor * mask
+
 class TestCase(TorchTestCase):
     @classmethod
     def setUpClass(cls):
@@ -446,6 +456,25 @@ def test_mlp(device, batch_size=64, input_size=64, hidden_size=32, output_size=8
     test_result("MLP Bias1 Backward", model.linear1.bias.grad, cpu_model.linear1.bias.grad)
     test_result("MLP Weight2 Backward", model.linear2.weight.grad, cpu_model.linear2.weight.grad)
     test_result("MLP Bias2 Backward", model.linear2.bias.grad, cpu_model.linear2.bias.grad)
+
+def test_mlp_inf(device, batch_size=64, input_size=64, hidden_size=32, output_size=8, sparsity=0.0):
+    torch.manual_seed(0)
+    input = torch.randn(batch_size, input_size)
+    x1 = copy.deepcopy(input).to(device=device)
+    x2 = copy.deepcopy(input).to("cpu")
+    target = torch.randn(batch_size, output_size)
+    model = MLP(input_size, hidden_size, output_size)
+    with torch.no_grad():
+        model.linear1.weight.copy_(apply_random_zero(model.linear1.weight, sparsity))
+        model.linear2.weight.copy_(apply_random_zero(model.linear2.weight, sparsity))
+    model.requires_grad = False
+    model.to(device=device)
+    opt_fn = torch.compile()(model)
+    y = opt_fn(x1)
+    cpu_model = copy.deepcopy(model).to("cpu")
+    cpu_model.requires_grad = False
+    cpu_y = cpu_model(x2)
+    test_result("MLP Forward", y, cpu_y)
 
 def test_CNN(device):
     torch.manual_seed(0)
@@ -880,6 +909,7 @@ if __name__ == "__main__":
     test_DecoderBlock(device)
     test_resnet(device)
     test_mlp(device)
+    test_mlp_inf(device, batch_size=64, input_size=256, hidden_size=512, output_size=256, sparsity=0.97)
 
     # # Fusion Test
     test_matmul_scalar(device)
