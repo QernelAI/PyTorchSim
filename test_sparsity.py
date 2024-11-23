@@ -38,6 +38,7 @@ from torch._inductor.codegen.common import (
 )
 from torch.testing._internal.common_utils import IS_MACOS
 from torch.testing._internal.common_utils import TestCase as TorchTestCase
+from test_extension_backend import DecoderBlock, MLP
 
 def remove_build_path():
     if sys.platform == "win32":
@@ -69,23 +70,6 @@ def count_zeros_in_tensor_list(tensor_list):
     print("Sparsity: ", zero_ratio * 100, "%")
     return total_zeros, total_elements, zero_ratio
 
-class MLP(nn.Module):
-    def __init__(self, input_size=28*28, hidden_size=64, output_size=8):
-        super(MLP, self).__init__()
-        self.linear1 = nn.Linear(input_size, hidden_size)
-        self.linear2 = nn.Linear(hidden_size, output_size)
-        self.relu = nn.ReLU()
-        self.softmax = nn.Softmax(dim=1)
-        # self.sigmoid = nn.Sigmoid()
-
-    def forward(self, x):
-        x = self.linear1(x)
-        x = self.relu(x)
-        x = self.linear2(x)
-        # x = self.relu(x)
-        # x = self.softmax(x)
-        return x
-
 def test_result(name, out, cpu_out, rtol=1e-4, atol=1e-4):
     message = f"|{name} Test Passed|"
     if torch.allclose(out.cpu(), cpu_out, rtol=rtol, atol=atol):
@@ -95,6 +79,35 @@ def test_result(name, out, cpu_out, rtol=1e-4, atol=1e-4):
     else:
         print("custom out: ", out.cpu())
         print("cpu out: ", cpu_out)
+
+def test_dec_inf(device, sparsity=0.0, block=8):
+    torch.manual_seed(0)
+    decoder_block = DecoderBlock(768, 12)
+    cpu_query = torch.randn(512, 768)
+    query = cpu_query.clone().to(device=device)
+
+    cpu_y = decoder_block(cpu_query)
+    with torch.no_grad():
+        decoder_block.multihead_attn.linears[0].weight.copy_(apply_random_zero(decoder_block.multihead_attn.linears[0].weight, sparsity, block_size=block))
+        decoder_block.multihead_attn.linears[1].weight.copy_(apply_random_zero(decoder_block.multihead_attn.linears[1].weight, sparsity, block_size=block))
+        decoder_block.multihead_attn.linears[2].weight.copy_(apply_random_zero(decoder_block.multihead_attn.linears[2].weight, sparsity, block_size=block))
+        decoder_block.multihead_attn.linears[3].weight.copy_(apply_random_zero(decoder_block.multihead_attn.linears[3].weight, sparsity, block_size=block))
+        decoder_block.ffn1.weight.copy_(apply_random_zero(decoder_block.ffn1.weight, sparsity, block_size=block))
+        decoder_block.ffn2.weight.copy_(apply_random_zero(decoder_block.ffn2.weight, sparsity, block_size=block))
+
+    count_zeros_in_tensor_list([
+        decoder_block.multihead_attn.linears[0].weight,
+        decoder_block.multihead_attn.linears[1].weight,
+        decoder_block.multihead_attn.linears[2].weight,
+        decoder_block.multihead_attn.linears[3].weight,
+        decoder_block.ffn1.weight,
+        decoder_block.ffn2.weight
+    ])
+
+    decoder_block.to(device=device)
+    opt_fn = torch.compile()(decoder_block)
+    y = opt_fn(query)
+    test_result("MLP Forward", y, cpu_y)
 
 def test_mlp_inf(device, batch_size=64, input_size=64, hidden_size=32, output_size=8, sparsity=0.0, block=8):
     torch.manual_seed(0)
@@ -121,7 +134,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--sparsity", 
         type=float, 
-        default=0.0
+        default=0.8
     )
     parser.add_argument(
         "--block", 
@@ -134,4 +147,4 @@ if __name__ == "__main__":
     module = ExecutionEngine.setup_device()
     device = module.custom_device()
 
-    test_mlp_inf(device, batch_size=32, input_size=784, hidden_size=512, output_size=256, sparsity=args.sparsity, block=args.block)
+    test_dec_inf(device, sparsity=args.sparsity, block=args.block)

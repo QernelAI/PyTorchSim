@@ -296,7 +296,7 @@ class BackendSimulator():
             address_info[f"arg{idx}"] = tensor.data_ptr()
         json_content["address_info"] = address_info
 
-        if len(kwargs['tile_size'])==3 and kwargs['tile_size'][0] != 1:
+        if "tile_size" in kwargs and len(kwargs['tile_size'])==3 and kwargs['tile_size'][0] != 1:
             # GEMM
             import copy
             zero_skip = {}
@@ -309,23 +309,43 @@ class BackendSimulator():
             original_input_shape = input.shape
             original_weight_shape = weight.shape
 
-            pad_M =  M - original_input_shape[0] if original_input_shape[0] < N else 0
-            pad_K =  K - original_weight_shape[0] if original_weight_shape[0] < N else 0
-            pad_N =  N - original_weight_shape[1] if original_weight_shape[1] < N else 0
+            # Initialize padding for all dimensions
+            pad_input = [(0, 0)] * input.ndim
+            pad_weight = [(0, 0)] * weight.ndim
 
+            if input.ndim == 2:
+                # 2D tensor: (Height, Width)
+                pad_input[0] = (0, M - original_input_shape[0] if original_input_shape[0] < M else 0)
+                pad_input[1] = (0, K - original_input_shape[1] if original_input_shape[1] < K else 0)
+            elif input.ndim == 3:
+                # 3D tensor: (Depth, Height, Width)
+                pad_input[1] = (0, M - original_input_shape[1] if original_input_shape[1] < M else 0)
+                pad_input[2] = (0, K - original_input_shape[2] if original_input_shape[2] < K else 0)
+
+            if weight.ndim == 2:
+                # 2D tensor: (Height, Width)
+                pad_weight[0] = (0, K - original_weight_shape[0] if original_weight_shape[0] < K else 0)
+                pad_weight[1] = (0, N - original_weight_shape[1] if original_weight_shape[1] < N else 0)
+            elif weight.ndim == 3:
+                # 3D tensor: (Depth, Height, Width)
+                pad_weight[1] = (0, K - original_weight_shape[1] if original_weight_shape[1] < K else 0)
+                pad_weight[2] = (0, N - original_weight_shape[2] if original_weight_shape[2] < N else 0)
+
+            # Apply padding
             padded_input = np.pad(
                 padded_input,
-                pad_width=((0, pad_M), (0, pad_K)),
+                pad_width=pad_input,
                 mode='constant',
                 constant_values=0
             )
 
             padded_weight = np.pad(
                 padded_weight,
-                pad_width=((0, pad_K), (0, pad_N)),
+                pad_width=pad_weight,
                 mode='constant',
                 constant_values=0
             )
+
             input_zero_pos = self.find_zero_sub_tensors(padded_input)
             weight_zero_pos = self.find_zero_sub_tensors(padded_weight)
             zero_skip["arg0"] = input_zero_pos
