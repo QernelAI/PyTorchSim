@@ -50,7 +50,8 @@ func.func @{{ KERNEL_NAME }}{{kernel.def_kernel(inputs=[X, W, Bias], outputs=[Y]
       {%- else -%}
       affine.vector_store %v0, %Y_buffer[0, 0] : memref<{{ TILE_M }}x{{ TILE_N }}xf32, 1>, vector<{{ TILE_M * TILE_N // kernel.vector_lane }}xf32>
       {%- endif %}
-      affine.for %t_k = 0 to {{ K }} step {{ TILE_K }} { %index0 = affine.apply #map0(%t_m, %t_k)
+      affine.for %t_k = 0 to {{ K }} step {{ TILE_K }} {
+        %index0 = affine.apply #map0(%t_m, %t_k)
         %index1 = affine.apply #map1(%t_k, %t_n)
         affine.dma_start %X[%index0], %X_buffer[0, 0], %tag[0], %c_mvin,
         {%- if X_transposed -%} %M, %x_chunk {%- else -%} %K, %x_chunk {%- endif -%}
