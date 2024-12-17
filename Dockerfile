@@ -45,7 +45,7 @@ RUN git clone https://${GIT_ACCESS_TOKEN}@github.com/PSAL-POSTECH/gem5.git --bra
 RUN cd gem5 && scons build/RISCV/gem5.opt -j $(nproc)
 
 # Build LLVM RISC-V
-RUN git clone https://${GIT_ACCESS_TOKEN}@github.com/PSAL-POSTECH/llvm-project.git --branch torchsim
+RUN git clone https://${GIT_ACCESS_TOKEN}@github.com/PSAL-POSTECH/llvm-project.git --branch torchsim --depth 1
 RUN cd llvm-project && mkdir build && cd build && \
     cmake -DLLVM_ENABLE_PROJECTS=mlir -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/riscv-llvm -DLLVM_TARGETS_TO_BUILD=RISCV -G "Unix Makefiles" ../llvm && \
     make -j && make install
