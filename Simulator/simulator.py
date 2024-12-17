@@ -346,9 +346,9 @@ class BackendSimulator():
                 constant_values=0
             )
 
-            input_zero_pos = self.find_zero_sub_tensors(padded_input)
+            #input_zero_pos = self.find_zero_sub_tensors(padded_input)
             weight_zero_pos = self.find_zero_sub_tensors(padded_weight)
-            zero_skip["arg0"] = input_zero_pos
+            #zero_skip["arg0"] = input_zero_pos
             zero_skip["arg1"] = weight_zero_pos
             json_content["zero_skip"] = zero_skip
 
