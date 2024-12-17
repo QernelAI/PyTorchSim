@@ -132,13 +132,13 @@ def test_mlp_inf(device, batch_size=64, input_size=64, hidden_size=32, output_si
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Count zeros in tensors from command-line arguments.")
     parser.add_argument(
-        "--sparsity", 
-        type=float, 
+        "--sparsity",
+        type=float,
         default=0.8
     )
     parser.add_argument(
-        "--block", 
-        type=int, 
+        "--block",
+        type=int,
         default=8
     )
     args = parser.parse_args()
@@ -147,4 +147,5 @@ if __name__ == "__main__":
     module = ExecutionEngine.setup_device()
     device = module.custom_device()
 
-    test_dec_inf(device, sparsity=args.sparsity, block=args.block)
+    #test_dec_inf(device, sparsity=args.sparsity, block=args.block)
+    test_mlp_inf(device, batch_size=64, input_size=784, hidden_size=512, output_size=256, sparsity=args.sparsity, block=args.block)
