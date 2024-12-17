@@ -1,0 +1,39 @@
+name: Docker Image CI
+
+on:
+  push:
+    branches: [ "master", "develop" ]
+  pull_request:
+    branches: [ "master", "develop" ]
+
+jobs:
+
+  build:
+
+    runs-on: ubuntu-latest
+    steps:
+      # Step 1: Checkout the repository
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # Step 2: Log in to GitHub Container Registry (optional)
+      # If you need to push the built image, authenticate here.
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Step 3: Build the Docker Image
+      - name: Build Docker Image with Token
+        env:
+          GIT_ACCESS_TOKEN: ${{ secrets.GIT_ACCESS_TOKEN }}
+        run: |
+          docker build \
+            --build-arg GIT_ACCESS_TOKEN=${GIT_ACCESS_TOKEN} \
+            -t torchsim-ci:$(date +%s) .
+      # Step 4: Test the Docker Image (Optional)
+      - name: Run a container for testing
+        run: |
+          docker run --rm torchsim-ci echo "Docker Build Successful"
