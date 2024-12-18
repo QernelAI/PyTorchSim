@@ -416,6 +416,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
             current_tile.n_col = self.tile_desc.get_tile_size()
             current_tile.used_vector_lane = 1
             chunk_size = current_tile.get_chunk_size()
+            mm_stride = 0 # don't care
         # Case 3. Tile is 2-D tile
         elif len(cv) == 2:
             is_reduction = self.reduction_depth == 1
@@ -761,7 +762,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         # Select mlir store operaiton
         if self.buffer_types[name][1] == 1 or self.tile_desc.get_rows_per_lane() == 1:
             operation = "affine.store"
-            raise NotImplementedError("Scalar store!")
+            # raise NotImplementedError("Scalar store!")
         else:
             operation =  "affine.vector_store"
 
@@ -1061,7 +1062,6 @@ class MLIRScheduling(BaseScheduling):
         return self.can_fuse_horizontal(node1, node2) and not node1.is_reduction()
 
     def can_fuse_horizontal(self, node1, node2):
-        return False
         _, (vars1, reduce1) = node1.group
         _, (vars2, reduce2) = node2.group
         if vars1 == vars2 and reduce1 == reduce2:
