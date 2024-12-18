@@ -647,8 +647,10 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         self.consts.add(stride)
         self.consts.add(chunk)
 
-        operation = "affine.vector_store" if tile_size_per_lane > 1 else "affine.store"
-        shape = f", vector<{tile_size_per_lane}x{type_name}>" if tile_size_per_lane > 1 else ""
+        store_size = self.tile_info[value][0]
+        operation = "affine.vector_store" if tile_size_per_lane > 1 and store_size > 1 else "affine.store"
+        shape = f", vector<{tile_size_per_lane}x{type_name}>" if tile_size_per_lane > 1 and store_size > 1 else ""
+
         line = f"{operation} %{value}, %{buffer}[0, 0] : memref<{dram_tile_shape}x{type_name}, 1>{shape}"
         self.cse.generate(self.stores, line, assignment = False)
         self.tags.add(f"{name}_tag")
