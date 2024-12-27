@@ -378,7 +378,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
                 if output_node.data.name == name:
                     return output_node
 
-    def get_dma_info(self, name, index, dtype, is_store):
+    def get_dma_info(self, name, index, dtype):
         current_tile = MLIRTile(self.tile_desc.n_row, self.tile_desc.n_col, self.tile_desc.vector_lane, self.tile_desc.used_vector_lane)
         cv = self.get_constant_vector(index)
         cv2 = self.get_constant_vector2(index)
@@ -574,7 +574,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         var = self.args.input(name)
         dtype = V.graph.get_dtype(name)
         type_name = mlir_common.DTYPE_TO_MLIR[dtype]
-        stride, chunk, tile_shape, tile_size_per_lane = self.get_dma_info(name, index, dtype, 0)
+        stride, chunk, tile_shape, tile_size_per_lane = self.get_dma_info(name, index, dtype)
         dram_tile_shape = f"{tile_shape[0]}x{tile_shape[1]}"
 
         # Define scratch pad buffer
@@ -609,6 +609,10 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         dtype = V.graph.get_dtype(name)
         type_name = mlir_common.DTYPE_TO_MLIR[dtype]
 
+        chunk_size = self.tile_desc.get_chunk_size()
+        chunk = chunk_size << 1 | (self.tile_desc.tile_per_lane_layout == MLIRTile.TILE_PER_LANE_COL_WISE)
+        self.consts.add(chunk)
+
         if name in self.buffer_names:
             buffer = self.buffer_names[name]
         else:
@@ -623,7 +627,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         self.cse.generate(self.stores, line, assignment = False)
 
         self.tags.add(f"{name}_tag")
-        code = f"affine.dma_start %{buffer}[0, 0], %{var}[%index2], %tag[0], %c_mvout, %N, %c_set : memref<{self.render_options['TILE_M']}x{self.render_options['TILE_N']}x{type_name}, 1>, memref<{self.render_options['M'] * self.render_options['N']}x{type_name}>, memref<1xi32>" #FIXME: Using constant index and tag
+        code = f"affine.dma_start %{buffer}[0, 0], %{var}[%index2], %tag[0], %c_mvout, %N, %c{chunk} : memref<{self.render_options['TILE_M']}x{self.render_options['TILE_N']}x{type_name}, 1>, memref<{self.render_options['M'] * self.render_options['N']}x{type_name}>, memref<1xi32>" #FIXME: Using constant index and tag
         self.cse.generate(self.stores, code, assignment = False)
 
     def store(self, name: str, index: sympy.Expr, value, *args, **kwargs):
@@ -635,7 +639,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         var = self.args.output(name)
         dtype = V.graph.get_dtype(name)
         type_name = mlir_common.DTYPE_TO_MLIR[dtype]
-        stride, chunk, tile_shape, tile_size_per_lane = self.get_dma_info(name, index, dtype, 1)
+        stride, chunk, tile_shape, tile_size_per_lane = self.get_dma_info(name, index, dtype)
         dram_tile_shape = f"{tile_shape[0]}x{tile_shape[1]}"
 
         # Define scratch pad buffer
@@ -795,7 +799,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         code = f"affine.dma_start %{buffer}[0, 0], %{var}[{prefix}{indices}], %{name}_tag[0], %c{dmaType}, %c{mm_stride}, %c{chunk} : memref<{tile_row}x{tile_col}x{type_name}, 1>, memref<{self.buffer_types[name][1]}x{type_name}>, memref<1xi32>"
         self.cse.generate(self.reductions_suffix, code, assignment = False)
 
-    def codegen_body(self):
+    def codegen_body(self, subtile):
         # if not (
         #     self.loads
         #     or self.stores
@@ -807,13 +811,17 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
             async_flag = 1
             line = f"affine.dma_start %Y_buffer[0, 0], %Y[%index2], %tag[0], %c_mvout, %N, %c_set"\
                    f": memref<{options['TILE_M']}x{options['TILE_N']}xf32, 1>,"\
-                   f"memref<{options['M'] * options['N']}xf32>, memref<1xi32> " #FIXME: Using constant index and tag
+                   f"memref<{options['M'] * options['N']}xf32>, memref<1xi32>" #FIXME: Using constant index
             self.cse.generate(self.stores, line, assignment = False)
         self.body.splice(self.codegen_init())
         self.body.splice(self.loads)
         self.body.splice(self.compute)
         if len(self.stores._lines) == 0:
             template_store(self.render_options)
+        if subtile:
+            for i in range(len(self.stores._lines)):
+                if "affine.dma_start" in self.stores._lines[i]:
+                    self.stores._lines[i] += f" {{ subtile_size=[{self.vector_lane}, {self.vector_lane}], async=1 }}"
         self.body.splice(self.stores)
         self.loads.clear()
         self.compute.clear()
@@ -907,6 +915,10 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         return code
 
     def adjust_tile_size(self):
+        if self.is_template_kernel:
+            self.tile_desc.n_row = self.render_options['TILE_M']
+            self.tile_desc.n_col = self.render_options['TILE_N']
+            return
         if self.read_writes is not None:
             read_writes = list(self.read_writes.reads) + list(self.read_writes.writes)
             cv_list = []

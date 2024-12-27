@@ -62,7 +62,7 @@ func.func @{{ KERNEL_NAME }}{{kernel.def_kernel(inputs=[X, W, Bias], outputs=[Y]
         linalg.matmul ins(%X_buffer, %W_buffer : memref<{{ TILE_M }}x{{ TILE_K }}x{{ DATA_STYPE }}, 1>, memref<{{ TILE_K }}x{{ TILE_N }}x{{ DATA_STYPE }}, 1>)
                 outs(%Y_buffer : memref<{{ TILE_M }}x{{ TILE_N }}x{{ DATA_STYPE }}, 1>)
       } { accumulation_loop=true }
-    {{kernel.store_output()}} { subtile_size=[{{ kernel.vector_lane }}, {{ kernel.vector_lane }}], async=1 }
+      {{kernel.store_output(subtile=True)}}
     } { outer_loop=true }
   } { outer_loop=true }
   return

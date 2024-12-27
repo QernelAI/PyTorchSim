@@ -20,7 +20,7 @@ from torch._inductor.virtualized import V
 
 from PyTorchSimFrontend.mlir.mlir_autotune import MLIRBenchmarkRequest
 from PyTorchSimFrontend.mlir.mlir_common import BaseMLIRHardwareInfo
-from PyTorchSimFrontend.mlir.mlir_codegen_backend import MLIRKernel
+from PyTorchSimFrontend.mlir.mlir_codegen_backend import MLIRKernel, MLIRTile
 
 class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
     def __init__(self,
@@ -182,10 +182,9 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
         self.render_hooks["<OUPUT>"] = hook
         return "<OUPUT>"
 
-    def store_output(self):
-
+    def store_output(self, subtile=False):
         def hook():
-            self.codegen_body()
+            self.codegen_body(subtile=subtile)
             return textwrap.indent(self.body.getvalue(), "      ").strip()  #TODO: First line is not indented
 
         assert "<STORE_OUTPUT>" not in self.render_hooks
