@@ -264,13 +264,27 @@ jobs:
             -e TORCHSIM_DUMP_PATH=/dump \
             ghcr.io/psal-postech/torchsim-ci:${GITHUB_SHA} python3 PyTorchSim/tests/test_transpose3D.py
 
+  test_sparsity:
+    name: Run test_sparsity.py
+    runs-on: self-hosted
+    needs: build
+    steps:
+      - name: Run test_sparsity.py
+        run: |
+          echo "Running test_sparsity.py"
+          docker run --rm \
+            -v /tmp/torchsim-ci/${GITHUB_SHA}:/dump \
+            -e TORCHSIM_DUMP_PATH=/dump \
+            ghcr.io/psal-postech/torchsim-ci:${GITHUB_SHA} python3 PyTorchSim/tests/test_sparsity.py
+
   test_cleanup:
     name: Clean test cases
     runs-on: self-hosted
     needs: [test_add, test_batchnorm, test_bmm, test_cnn, test_conv2d,
             test_matmul, test_reduce, test_softmax,
             test_transpose2D, test_view3D_2D, test_layernorm,
-            test_mlp, test_resnet, test_transformer, test_transpose3D]
+            test_mlp, test_resnet, test_transformer, test_transpose3D,
+            test_sparsity]
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
