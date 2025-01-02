@@ -28,7 +28,7 @@ class MLIRKernelCallerCodeGen(LLVMKernelCallerCodeGen):
             if self.is_in_arg(arg_attribute[0]):
                 argv_idx = self.get_argv_idx() if arg_name not in self.load_args else self.load_args[arg_name]
                 self.load_args[arg_name] = argv_idx
-                self.writeline(f'if(load_arg({arg_name}, sizeof({arg_name}), argv[{argv_idx}]) == -1){self.open_bracket}')
+                self.writeline(f'if(load_arg(c_{arg_name}, sizeof(c_{arg_name}), argv[{argv_idx}]) == -1){self.open_bracket}')
                 with self.code.indent():
                     self.writeline(f'return -1{self.ending}')
                 self.writeline(self.closed_bracket)
@@ -37,7 +37,7 @@ class MLIRKernelCallerCodeGen(LLVMKernelCallerCodeGen):
         for arg_name, arg_attribute in self.arg_attributes:
             if self.is_out_arg(arg_attribute[0]):
                 argv_idx = self.get_argv_idx() if not self.is_inout_arg(arg_attribute[0]) else self.load_args[arg_name]
-                self.writeline(f'if(dump_arg({arg_name}, sizeof({arg_name}), argv[{argv_idx}]) == -1){self.open_bracket}')
+                self.writeline(f'if(dump_arg(c_{arg_name}, sizeof(c_{arg_name}), argv[{argv_idx}]) == -1){self.open_bracket}')
                 with self.code.indent():
                     self.writeline(f'return -1{self.ending}')
                 self.writeline(self.closed_bracket)
@@ -53,7 +53,7 @@ class MLIRKernelCallerCodeGen(LLVMKernelCallerCodeGen):
         for arg_name, (_, arg_type, arg_size) in self.arg_attributes:
             if not arg_name in name_set:
                 if self.validation:
-                    self.writeline(f'{DTYPE_TO_C[arg_type]} {arg_name}[{arg_size}]{self.ending}')
+                    self.writeline(f'{DTYPE_TO_C[arg_type]} c_{arg_name}[{arg_size}]{self.ending}')
                 else:
                     if torch.is_floating_point(torch.tensor([], dtype=arg_type)):
                         bits = torch.finfo(arg_type).bits
@@ -61,7 +61,7 @@ class MLIRKernelCallerCodeGen(LLVMKernelCallerCodeGen):
                         bits = 8
                     else:
                         bits = torch.iinfo(arg_type).bits
-                    self.writeline(f'{DTYPE_TO_C[arg_type]}* {arg_name} = malloc({arg_size * bits // 8}){self.ending}')
+                    self.writeline(f'{DTYPE_TO_C[arg_type]}* c_{arg_name} = malloc({arg_size * bits // 8}){self.ending}')
                 name_set.add(arg_name)
         self.writeline(self.newline)
 
@@ -77,7 +77,7 @@ class MLIRKernelCallerCodeGen(LLVMKernelCallerCodeGen):
             else:
                 self.generate_args_define()
 
-            func_arguments = [f"{arg_name}, {arg_name}, 0, {arg_shape}, 1" if arg_type != torch.bool else f"{arg_name}, {arg_name}, 0, {(arg_shape + 7) // 8}, 1" for arg_name, (_, arg_type, arg_shape) in self.arg_attributes]
+            func_arguments = [f"c_{arg_name}, c_{arg_name}, 0, {arg_shape}, 1" if arg_type != torch.bool else f"c_{arg_name}, c_{arg_name}, 0, {(arg_shape + 7) // 8}, 1" for arg_name, (_, arg_type, arg_shape) in self.arg_attributes]
             self.writeline(f"wrapper_{self.kernel_name}({', '.join(func_arguments)}){self.ending}{self.newline}")
 
             if self.validation:
