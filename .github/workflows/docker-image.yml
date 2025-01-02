@@ -316,6 +316,45 @@ jobs:
             -e TORCHSIM_DUMP_PATH=/dump \
             ghcr.io/psal-postech/torchsim-ci:${GITHUB_SHA} python3 PyTorchSim/tests/test_single_perceptron.py
 
+  test_fusion:
+    name: Run test_fusion
+    runs-on: self-hosted
+    needs: build
+    steps:
+      - name: Run test_addmm_residual.py
+        run: |
+          echo "Running test_addmm_residual.py"
+          docker run --rm \
+            -v /tmp/torchsim-ci/${GITHUB_SHA}:/dump \
+            -e TORCHSIM_DUMP_PATH=/dump \
+            ghcr.io/psal-postech/torchsim-ci:${GITHUB_SHA} python3 PyTorchSim/tests/Fusion/test_addmm_residual.py
+      - name: Run test_matmul_activation.py
+        run: |
+          echo "Running test_matmul_activation.py"
+          docker run --rm \
+            -v /tmp/torchsim-ci/${GITHUB_SHA}:/dump \
+            -e TORCHSIM_DUMP_PATH=/dump \
+            ghcr.io/psal-postech/torchsim-ci:${GITHUB_SHA} python3 PyTorchSim/tests/Fusion/test_matmul_activation.py
+      - name: Run test_matmul_scalar.py
+        run: |
+          echo "Running test_matmul_scalar.py"
+          docker run --rm \
+            -v /tmp/torchsim-ci/${GITHUB_SHA}:/dump \
+            -e TORCHSIM_DUMP_PATH=/dump \
+            ghcr.io/psal-postech/torchsim-ci:${GITHUB_SHA} python3 PyTorchSim/tests/Fusion/test_matmul_scalar.py
+
+  test_moe:
+    name: Run test_moe
+    runs-on: self-hosted
+    needs: build
+    steps:
+      - name: Run test_moe.py
+        run: |
+          echo "Running test_moe.py"
+          docker run --rm \
+            -v /tmp/torchsim-ci/${GITHUB_SHA}:/dump \
+            -e TORCHSIM_DUMP_PATH=/dump \
+            ghcr.io/psal-postech/torchsim-ci:${GITHUB_SHA} python3 PyTorchSim/tests/MoE/test_moe.py
 
   test_cleanup:
     name: Clean test cases
@@ -324,7 +363,8 @@ jobs:
             test_matmul, test_reduce, test_softmax,
             test_transpose2D, test_view3D_2D, test_layernorm,
             test_mlp, test_resnet, test_transformer, test_transpose3D,
-            test_sparsity, test_relu, test_pool, test_perceptron]
+            test_sparsity, test_relu, test_pool, test_perceptron,
+            test_fusion, test_moe]
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
