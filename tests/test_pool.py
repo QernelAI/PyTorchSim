@@ -15,7 +15,7 @@ def test_result(name, out, cpu_out, rtol=1e-4, atol=1e-4):
 
 def test_maxpool(device):
     torch.manual_seed(0)
-    model = nn.MaxPool2d(kernel_size=3, stride=2, padding=1).eval()
+    model = torch.nn.MaxPool2d(kernel_size=3, stride=2, padding=1).eval()
     model.to(device=device)
     input = torch.randn(1, 8, 64, 64).to(device=device)
     x1 = input.to(device=device)
@@ -28,7 +28,7 @@ def test_maxpool(device):
 
 def test_avgpool(device):
     def avgpool(a):
-        return nn.AdaptiveAvgPool2d((1, 1))(a)
+        return torch.nn.AdaptiveAvgPool2d((1, 1))(a)
     torch.manual_seed(0)
     input = torch.randn(1, 16, 64, 64).to(device=device) #FIXME: channel 8 does not work (range padding issue)
     x1 = input.to(device=device)
