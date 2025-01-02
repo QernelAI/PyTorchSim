@@ -12,6 +12,7 @@ import torch
 import numpy as np
 
 from PyTorchSimFrontend.llvm.llvm_common import LLVMKernelArgs
+from PyTorchSimFrontend import extension_config
 
 TORCHSIM_DIR = os.environ.get('TORCHSIM_DIR', default='/workspace/PyTorchSim')
 BACKENDSIM_DEBUG_LEVEL = os.environ.get("BACKENDSIM_DEBUG_LEVEL", "")
@@ -147,7 +148,7 @@ class CycleSimulator():
         gem5_cmd = [self.GEM5_PATH, "-d", dir_path, self.GEM5_SCRIPT_PATH, "-c", target_binary, "--vlane", str(vectorlane_size)]
         try:
             # Create progress thread
-            if not int(os.environ.get('BACKENDSIM_DRYRUN', default=0)):
+            if not extension_config.CONFIG_BACKENDSIM_DRYRUN:
                 print("[Gem5Simulator] cmd> ", " ".join(gem5_cmd))
                 finished = False
                 progress_thread = threading.Thread(target=show_progress)
@@ -173,8 +174,6 @@ class CycleSimulator():
 
 class BackendSimulator():
     BACKEND_RESULT_PATH_KEY = "BACKEND_RESULT_PATH"
-    BACKENDSIM_DRYRUN = "BACKENDSIM_DRYRUN"
-    BACKENDSIM_EAGER_MODE = "BACKENDSIM_EAGER_MODE"
     FINISH_STR = "Simulation Finished"
     def __init__(self, backend_path, config_path, vectorlane_size=-1) -> None:
         self.base_dir = backend_path
@@ -218,9 +217,10 @@ class BackendSimulator():
             progress_thread.join()
             print("[BackendSimulator] Command failed with exit code", e.returncode)
             print("[BackendSimulator] Error output:", e.output)
-            assert(0)
-
-        result_path = os.getenv(self.BACKEND_RESULT_PATH_KEY, os.path.join(os.path.dirname(model_path), "backendsim_result"))
+            assert 0
+        result_path = extension_config.CONFIG_BACKEND_RESULT_PATH_KEY
+        if result_path is None:
+            result_path = os.path.join(os.path.dirname(model_path), "backendsim_result")
 
         # Save result to result_path
         os.makedirs(result_path, exist_ok=True)
@@ -255,7 +255,7 @@ class BackendSimulator():
     def send_command(self, command):
         if self.process:
             try:
-                if not int(os.environ.get('BACKENDSIM_DRYRUN', default=0)):
+                if not extension_config.CONFIG_BACKENDSIM_DRYRUN:
                     print(command)
                 self.process.stdin.write(command + '\n')
                 self.process.stdin.flush()

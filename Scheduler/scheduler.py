@@ -151,8 +151,8 @@ class ExecutionEngine:
         self.backend_simulator = backend_simulator
 
         # Dry run for compile and create generator
-        os.environ[BackendSimulator.BACKENDSIM_DRYRUN] = "1"
-        os.environ[BackendSimulator.BACKENDSIM_EAGER_MODE] = "1"
+        os.environ["BACKENDSIM_DRYRUN"] = "1"
+        os.environ["BACKENDSIM_EAGER_MODE"] = "1"
 
     @staticmethod
     def setup_device():

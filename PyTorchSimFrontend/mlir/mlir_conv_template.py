@@ -11,6 +11,7 @@ from torch._inductor.ir import ReinterpretView
 from torch._inductor.codecache import write_atomic
 import extension_codecache
 from torch._inductor.codecache import get_hash
+from PyTorchSimFrontend import extension_config
 
 GEMM_TEMPLATE = r"""
 #map0 = affine_map<(d0, d1) -> (d0 * {{ K }} + d1)>
@@ -224,7 +225,7 @@ class MLIRConvTemplate(MLIRTemplate):
             DILATION_H=self.dilation[0],
             DILATION_W=self.dilation[1],
             VALIDATION_MODE=int(os.environ.get('TORCH_VALIDATION_MODE', default="True") == "True"),
-            BACKENDSIM_EAGER_MODE=bool(os.getenv("BACKENDSIM_EAGER_MODE", False)),
+            BACKENDSIM_EAGER_MODE=extension_config.CONFIG_BACKENDSIM_EAGER_MODE,
             HASH_VALUE=self.hash_value
         )
         code = self._template_from_string(CONV2D_FUNC_TEMPLATE).render(**options)

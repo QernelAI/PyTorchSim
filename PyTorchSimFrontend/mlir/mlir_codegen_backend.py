@@ -17,6 +17,7 @@ from torch._inductor.scheduler import BaseScheduling
 from torch._inductor.virtualized import V, _ops as ops
 from torch._inductor.codecache import write_atomic, write
 from Simulator.simulator import BackendSimulator
+from PyTorchSimFrontend import extension_config
 from torch._inductor.utils import (
     IndentedBuffer,
     is_welford_reduction,
@@ -1094,7 +1095,7 @@ class MLIRScheduling(BaseScheduling):
         ex_kernel.call_kernel(kernel_name)
         _, args, _, _ = ex_kernel.args.mlir_argdefs()
         args = ", ".join(args)
-        if (bool(os.getenv(BackendSimulator.BACKENDSIM_EAGER_MODE, False))):
+        if (extension_config.CONFIG_BACKENDSIM_EAGER_MODE):
             V.graph.wrapper_code.writeline(
                 f"yield ({kernel_name}, ({args}))"
             )
@@ -1179,7 +1180,7 @@ class MLIRScheduling(BaseScheduling):
         V.graph.removed_buffers |= kernel.removed_buffers
         _, args, _, _ = kernel.args.mlir_argdefs()
         args = ", ".join(args)
-        if (bool(os.getenv(BackendSimulator.BACKENDSIM_EAGER_MODE, False))):
+        if (extension_config.CONFIG_BACKENDSIM_EAGER_MODE):
             target_kernel_name = kernel_name if kernel.outer_func_name is None else kernel.outer_func_name
             V.graph.wrapper_code.writeline(
                 f"yield ({target_kernel_name}, ({args}))"

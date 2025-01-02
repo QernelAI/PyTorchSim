@@ -13,6 +13,7 @@ from AsmParser.tog_generator import tog_generator
 from AsmParser.riscv_parser import riscv_parser
 from PyTorchSimFrontend.llvm.llvm_caller_codegen import LLVMKernelCallerCodeGen
 from PyTorchSimFrontend.mlir.mlir_caller_codegen import MLIRKernelCallerCodeGen
+from PyTorchSimFrontend import extension_config
 from Simulator.simulator import FunctionalSimulator, CycleSimulator, BackendSimulator
 
 LOCK_TIMEOUT = 600
@@ -26,11 +27,9 @@ TORCHSIM_CUSTOM_PASS_PATH = os.environ.get('TORCHSIM_CUSTOM_PASS_PATH',
                                            default=f"{TORCHSIM_DIR}/GemminiLowerPass/build")
 TORCHSIM_BACKEND_CONFIG = os.environ.get('TORCHSIM_CONFIG',
                                         default=f'{TORCHSIM_DIR}/PyTorchSimBackend/configs/systolic_ws_128x128_c2_simple_noc_tpuv2.json')
-GEM5_PATH = os.environ.get('GEM5_PATH',
-                           default = f"/workspace/gem5/build/RISCV/gem5.opt")
+GEM5_PATH = os.environ.get('GEM5_PATH', default="/workspace/gem5/build/RISCV/gem5.opt")
 GEM5_SCRIPT_PATH = os.environ.get('GEM5_SCRIPT_PATH',
-                                  default = f"{TORCHSIM_DIR}/gem5_script/script_systolic.py")
-BACKENDSIM_DRYRUN = "BACKENDSIM_DRYRUN"
+                                  default=f"{TORCHSIM_DIR}/gem5_script/script_systolic.py")
 BACKENDSIM_SPIKE_ONLY = bool(os.environ.get("BACKENDSIM_SPIKE_ONLY", False))
 
 def hash_prefix(hash_value):
@@ -341,7 +340,7 @@ class CustomAsyncCompile(AsyncCompile):
         def dryrun_simulator(*args, **kwargs):
             key = future.result()
 
-        is_dryrun = int(os.getenv(BackendSimulator.BACKENDSIM_DRYRUN, 0))
+        is_dryrun = extension_config.CONFIG_BACKENDSIM_DRYRUN
         target_simulator = dryrun_simulator if is_dryrun else dummy_simulator
         target_simulator.arg_attributes = arg_attributes
         target_simulator.future = future

@@ -12,7 +12,6 @@ import sympy
 
 import torch.fx
 from torch.utils._sympy.value_ranges import ValueRanges
-
 from torch._inductor.utils import (
     free_symbol_startswith,
     get_sympy_Expr_dtype,
@@ -21,7 +20,7 @@ from torch._inductor.utils import (
     sympy_symbol,
     unique,
 )
-
+from PyTorchSimFrontend import extension_config
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 
 DTYPE_TO_MLIR = {
@@ -167,8 +166,12 @@ class BaseMLIRKernel(common.Kernel, BaseMLIRHardwareInfo):
         self.vector_compute = IndentedBuffer()
         self.reductions_suffix = IndentedBuffer()
         self.cse = common.CSE(self.newvar_prefix, self.suffix)
-        self.tile_row = int(os.getenv("TORCHSIM_TILE_ROW", self.vlen * self.vector_lane))
-        self.tile_col = int(os.getenv("TORCHSIM_TILE_COL", 8)) # FIXME: tile_col is not always vector_lane * vlen
+        self.tile_row = extension_config.CONFIG_TILE_ROW
+        if self.tile_row == -1:
+            self.tile_row = self.vlen * self.vector_lane
+        self.tile_col = extension_config.CONFIG_TILE_COL
+        if self.tile_col == -1:
+            self.tile_col = 8 # FIXME: tile_col is not always vector_lane * vlen
         self.tile_info = {}
 
     def load(self, name: str, index: sympy.Expr):
