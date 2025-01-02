@@ -82,7 +82,7 @@ jobs:
             -e TORCHSIM_DUMP_PATH=/dump \
             ghcr.io/psal-postech/torchsim-ci:${GITHUB_SHA} python3 PyTorchSim/tests/test_add.py
 
-  test_add:
+  test_relu:
     name: Run test_relu.py
     runs-on: self-hosted
     needs: build
