@@ -1,7 +1,11 @@
-from Scheduler.scheduler import Scheduler, SchedulerDNNModel, Request
-from torchvision.models import resnet18 as model1
-from test_extension_backend import DecoderBlock as model2
+import os
+import sys
 import torch
+from torchvision.models import resnet18 as model1
+
+sys.path.append(os.path.abspath("/workspace/PyTorchSim"))
+from Scheduler.scheduler import Scheduler, SchedulerDNNModel, Request
+from test_extension_backend import DecoderBlock as model2
 
 target_model1 = model1().eval()
 target_model2 = model2(768, 12).eval()

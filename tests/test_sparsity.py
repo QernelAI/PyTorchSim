@@ -2,51 +2,13 @@
 import os
 import shutil
 import sys
-import time
-import contextlib
-import unittest
 import copy
-import numpy as np
-import matplotlib.pyplot as plt
 import argparse
-
 import torch
-import torch.nn as nn
-from torchvision import datasets, transforms
-from torch.utils.data import DataLoader, Subset
 import torch._dynamo
 import torch.utils.cpp_extension
-from torch._inductor import config
-
-try:
-    from PyTorchSimFrontend.mlir.mlir_codegen_backend import (
-        MLIRScheduling,
-        ExtensionWrapperCodegen,
-    )
-except ImportError:
-    from .PyTorchSimFrontend.mlir.mlir_codegen_backend import (
-        MLIRScheduling,
-        ExtensionWrapperCodegen,
-    )
-
-from torch._C import FileCheck
-from torch._inductor import metrics
-from torch._inductor.codegen.common import (
-    get_scheduling_for_device,
-    get_wrapper_codegen_for_device,
-    register_backend_for_device,
-)
-from torch.testing._internal.common_utils import IS_MACOS
-from torch.testing._internal.common_utils import TestCase as TorchTestCase
+sys.path.append(os.path.abspath("/workspace/PyTorchSim"))
 from test_extension_backend import DecoderBlock, MLP, test_result
-
-def remove_build_path():
-    if sys.platform == "win32":
-        # Not wiping extensions build folder because Windows
-        return
-    default_build_root = torch.utils.cpp_extension.get_default_build_root()
-    if os.path.exists(default_build_root):
-        shutil.rmtree(default_build_root, ignore_errors=True)
 
 def apply_random_zero(tensor, zero_prob, block_size=8):
     if not 0 <= zero_prob <= 1:
@@ -120,6 +82,7 @@ def test_mlp_inf(device, batch_size=64, input_size=64, hidden_size=32, output_si
     test_result("MLP Forward", y, cpu_y)
 
 if __name__ == "__main__":
+
     parser = argparse.ArgumentParser(description="Count zeros in tensors from command-line arguments.")
     parser.add_argument(
         "--sparsity",

@@ -338,7 +338,7 @@ class Scheduler:
             self.request_queue.append([])
         self.finish_queue : List[Request] = []
 
-        backend_path = os.path.join(TORCHSIM_DIR, "PyTorchSimBackend")
+        backend_path = os.path.join(extension_config.CONFIG_TORCHSIM_DIR, "PyTorchSimBackend")
         self.backend_simulator = BackendSimulator(backend_path, extension_config.CONFIG_TORCHSIM_BACKEND_CONFIG)
         self.backend_simulator.interactive_simulation()
         if engine_select == Scheduler.FIFO_ENGINE:
