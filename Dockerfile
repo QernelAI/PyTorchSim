@@ -29,7 +29,7 @@ FROM ghcr.io/psal-postech/torchsim_base:latest
 ARG GIT_ACCESS_TOKEN
 ARG GEM5_ASSET_ID
 ARG LLVM_ASSET_ID
-ARG GITHUB_REF_NAME
+ARG TORCHSIM_SHA
 ENV PATH $PATH:/root/.local/bin
 ENV LD_LIBRARY_PATH /usr/lib/x86_64-linux-gnu:/opt/conda/lib:/usr/local/nvidia/lib:/usr/local/nvidia/lib64:$LD_LIBRARY_PATH
 
@@ -61,7 +61,7 @@ RUN git clone https://github.com/riscv-software-src/riscv-pk.git && \
     ../configure --prefix=$RISCV --host=riscv64-unknown-elf && make -j && make install
 
 # Prepare ONNXim project
-RUN git clone https://${GIT_ACCESS_TOKEN}@github.com/PSAL-POSTECH/PyTorchSim.git && cd PyTorchSim && git checkout ${GITHUB_REF_NAME}
+RUN git clone https://${GIT_ACCESS_TOKEN}@github.com/PSAL-POSTECH/PyTorchSim.git && cd PyTorchSim && git checkout ${TORCHSIM_SHA}
 RUN cd PyTorchSim/PyTorchSimBackend && \
     git submodule update --recursive --init && \
     mkdir -p build && \
