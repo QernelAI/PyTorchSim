@@ -310,8 +310,6 @@ bool Core::can_issue_compute(std::shared_ptr<Instruction>& inst) {
 
 void Core::print_stats() {
   update_stats();
-  if (_core_cycle == 0)
-    _core_cycle = 1;
   spdlog::info(
       "Core [{}] : MatMul active cycle {} Vector active cycle {} ",
       _id, _stat_tot_compute_cycle[SYSTOLIC_ARRAY], _stat_tot_compute_cycle[VECTOR_UNIT]);

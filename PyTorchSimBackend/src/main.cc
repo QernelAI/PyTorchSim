@@ -95,6 +95,8 @@ void interactive_mode(Simulator* simulator) {
     if (isDryRun)
       std::cout << "[" << simulator->get_core_cycle() << "] BackendSim> ";
   }
+  if (simulator->get_core_cycle()==0)
+    simulator->until(0);
   simulator->print_core_stat();
 }
 
@@ -148,6 +150,8 @@ int main(int argc, char** argv) {
     /* launch kernels */
     launchKernel(simulator, onnx_path, attribute_path);
     simulator->run_simulator();
+    if (simulator->get_core_cycle()==0)
+      simulator->until(1);
     simulator->print_core_stat();
   } else if (execution_mode.compare("interactive") == 0) {
     /* Get onnx_path, attribute from user input, request_time */
