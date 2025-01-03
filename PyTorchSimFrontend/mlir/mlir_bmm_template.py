@@ -23,8 +23,8 @@ func.func @{{ KERNEL_NAME }}{{kernel.def_kernel(inputs=[X, W, Bias], outputs=[Y]
   %c_mvin3 = arith.constant 14 : index{% endif %}
   %c_mvout = arith.constant 3 : index
   %c_set = arith.constant 2 : index
-  %c{{ TILE_K * 2 + 0}} = arith.constant {{ TILE_K * 2 + 0}} : index{% if Bias_rank == 1 %}
-  %c0 = arith.constant 0 : index{% endif %}{% if X_transposed %}
+  %c{{ TILE_K * 2 + 0}} = arith.constant {{ TILE_K * 2 + 0}} : index
+  %c0 = arith.constant 0 : index{% if X_transposed %}
   %x_chunk = arith.constant {{ kernel.vector_lane * 2 + 0 }} : index{% endif %}{% if W_transposed %}
   %w_chunk = arith.constant {{ TILE_K * 2 + 0 }} : index{% endif %}
   %M = arith.constant {{ M }} : index
