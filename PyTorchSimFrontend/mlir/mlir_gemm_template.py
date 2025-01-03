@@ -33,8 +33,8 @@ func.func @{{ KERNEL_NAME }}{{kernel.def_kernel(inputs=[X, W, Bias], outputs=[Y]
   %W_buffer = memref.get_global @W_spad : memref<{{ TILE_K }}x{{ TILE_N }}xf32, 1>
   %Y_buffer = memref.get_global @Y_spad : memref<{{ TILE_M }}x{{ TILE_N }}xf32, 1>
   %tag = memref.alloc() : memref<1xi32>{% if not Bias %}
-  %v0 = arith.constant dense<0.0> : vector<{{ TILE_M * TILE_N // kernel.vector_lane }}xf32>{% else %}
-  %c0 = arith.constant 0 : index{% endif %}
+  %v0 = arith.constant dense<0.0> : vector<{{ TILE_M * TILE_N // kernel.vector_lane }}xf32>{% endif %}
+  %c0 = arith.constant 0 : index
 
   affine.for %t_m = 0 to {{ M }} step {{ TILE_M }} {
     affine.for %t_n = 0 to {{ N }} step {{ TILE_N }} {
@@ -42,7 +42,7 @@ func.func @{{ KERNEL_NAME }}{{kernel.def_kernel(inputs=[X, W, Bias], outputs=[Y]
       {% if Bias -%}
       affine.dma_start %Bias[
         {%- if Bias_rank == 2 -%} %index2 {%- else -%} %t_n {%- endif -%}
-        ], %Y_buffer[0, 0], %tag[0], %c_mvin3, %
+        ], %Y_buffer[%c0, %c0], %tag[0], %c_mvin3, %
         {%- if Bias_rank == 2 -%} N {%- else -%} c0 {%- endif -%}
         , %c_set : memref<
         {%- if Bias_rank == 2 -%}  {{ M * N }} {%- else -%} {{ N }} {%- endif -%}
@@ -53,10 +53,10 @@ func.func @{{ KERNEL_NAME }}{{kernel.def_kernel(inputs=[X, W, Bias], outputs=[Y]
       affine.for %t_k = 0 to {{ K }} step {{ TILE_K }} {
         %index0 = affine.apply #map0(%t_m, %t_k)
         %index1 = affine.apply #map1(%t_k, %t_n)
-        affine.dma_start %X[%index0], %X_buffer[0, 0], %tag[0], %c_mvin,
+        affine.dma_start %X[%index0], %X_buffer[%c0, %c0], %tag[0], %c_mvin,
         {%- if X_transposed -%} %M, %x_chunk {%- else -%} %K, %x_chunk {%- endif -%}
            : memref<{{ M * K }}xf32>, memref<{{ TILE_M }}x{{ TILE_K }}xf32, 1>, memref<1xi32> { subtile_size=[{{ kernel.vector_lane }}, {{ TILE_K }}], async=1{% if X_transposed %}, transpose=1{% endif %} }
-        affine.dma_start %W[%index1], %W_buffer[0, 0], %tag[0], %c_mvin2,
+        affine.dma_start %W[%index1], %W_buffer[%c0, %c0], %tag[0], %c_mvin2,
         {%- if W_transposed -%} %K, %w_chunk {%- else -%} %N, %w_chunk {%- endif -%}
            : memref<{{ K * N }}xf32>, memref<{{ TILE_K }}x{{ TILE_N }}xf32, 1>, memref<1xi32> { subtile_size=[{{ TILE_K }}, {{ kernel.vector_lane }}], async=1{% if W_transposed %}, transpose=1{% endif %} }
         linalg.matmul ins(%X_buffer, %W_buffer : memref<{{ TILE_M }}x{{ TILE_K }}x{{ DATA_STYPE }}, 1>, memref<{{ TILE_K }}x{{ TILE_N }}x{{ DATA_STYPE }}, 1>)

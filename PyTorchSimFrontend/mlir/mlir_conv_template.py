@@ -27,6 +27,7 @@ func.func @{{ KERNEL_NAME }}({{ KERNEL_DEF }}) {
   %c_mvin3 = arith.constant 14 : index
   %c_mvout = arith.constant 3 : index
   %c_set = arith.constant 2 : index
+  %c0 = arith.constant 0 : index
 
   %N = arith.constant {{ N }} : index
   %K = arith.constant {{ K }} : index
@@ -38,16 +39,16 @@ func.func @{{ KERNEL_NAME }}({{ KERNEL_DEF }}) {
   affine.for %t_m = 0 to {{ M }} step {{ TILE_M }} {
     affine.for %t_n = 0 to {{ N }} step {{ TILE_N }} {
         %index2 = affine.apply #map1(%t_m, %t_n)
-        affine.dma_start %B[%index2], %Y_buffer[0, 0], %tag[0], %c_mvin3, %N, %c_set : memref<{{ M * N }}xf32>, memref<{{ TILE_M }}x{{ TILE_N }}xf32, 1>, memref<1xi32> { subtile_size=[{{ kernel.vector_lane }}, {{ kernel.vector_lane }}], async=1 }
+        affine.dma_start %B[%index2], %Y_buffer[%c0, %c0], %tag[0], %c_mvin3, %N, %c_set : memref<{{ M * N }}xf32>, memref<{{ TILE_M }}x{{ TILE_N }}xf32, 1>, memref<1xi32> { subtile_size=[{{ kernel.vector_lane }}, {{ kernel.vector_lane }}], async=1 }
         affine.for %t_k = 0 to {{ K }} step {{ TILE_K }} {
             %index0 = affine.apply #map0(%t_m, %t_k)
             %index1 = affine.apply #map1(%t_k, %t_n)
-            affine.dma_start %X[%index0], %X_buffer[0, 0], %tag[0], %c_mvin, %K, %c_set : memref<{{ M * K }}xf32>, memref<{{ TILE_M }}x{{ TILE_K }}xf32, 1>, memref<1xi32> { subtile_size=[{{ kernel.vector_lane }}, {{ TILE_K }}], async=1 }
-            affine.dma_start %W[%index1], %W_buffer[0, 0], %tag[0], %c_mvin2, %N, %c_set : memref<{{ K * N }}xf32>, memref<{{ TILE_K }}x{{ TILE_N }}xf32, 1>, memref<1xi32> { subtile_size=[{{ TILE_K }}, {{ kernel.vector_lane }}], async=1 }
+            affine.dma_start %X[%index0], %X_buffer[%c0, %c0], %tag[0], %c_mvin, %K, %c_set : memref<{{ M * K }}xf32>, memref<{{ TILE_M }}x{{ TILE_K }}xf32, 1>, memref<1xi32> { subtile_size=[{{ kernel.vector_lane }}, {{ TILE_K }}], async=1 }
+            affine.dma_start %W[%index1], %W_buffer[%c0, %c0], %tag[0], %c_mvin2, %N, %c_set : memref<{{ K * N }}xf32>, memref<{{ TILE_K }}x{{ TILE_N }}xf32, 1>, memref<1xi32> { subtile_size=[{{ TILE_K }}, {{ kernel.vector_lane }}], async=1 }
             linalg.matmul ins(%X_buffer, %W_buffer : memref<{{ TILE_M }}x{{ TILE_K }}x{{ DATA_STYPE }}, 1>, memref<{{ TILE_K }}x{{ TILE_N }}x{{ DATA_STYPE }}, 1>)
                     outs(%Y_buffer : memref<{{ TILE_M }}x{{ TILE_N }}x{{ DATA_STYPE }}, 1>)
         } { accumulation_loop=true }
-        affine.dma_start %Y_buffer[0, 0], %Y[%index2], %tag[0], %c_mvout, %N, %c_set : memref<{{ TILE_M }}x{{ TILE_N }}xf32, 1>, memref<{{ M * N }}xf32>, memref<1xi32>  { subtile_size=[{{ kernel.vector_lane }}, {{ kernel.vector_lane }}], async=1 }
+        affine.dma_start %Y_buffer[%c0, %c0], %Y[%index2], %tag[0], %c_mvout, %N, %c_set : memref<{{ TILE_M }}x{{ TILE_N }}xf32, 1>, memref<{{ M * N }}xf32>, memref<1xi32>  { subtile_size=[{{ kernel.vector_lane }}, {{ kernel.vector_lane }}], async=1 }
     } { outer_loop=true }
   } { outer_loop=true }
   return

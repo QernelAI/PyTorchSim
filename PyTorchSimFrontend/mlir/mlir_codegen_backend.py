@@ -485,7 +485,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
 
     def parse_indices(self, expr):
         if len(expr.args) == 0:
-            return expr, expr
+            return expr
 
         # Extract index var
         expr_str = str(expr)
@@ -509,7 +509,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         map_var = self.map_cse.generate(self.global_vars, f"affine_map<({args}) -> ({expr_str})>")
         args = ", ".join([f"%{i}" for i in indices])
         index = self.cse.generate(self.loads, f"affine.apply #{map_var}({args})")
-        return index, expr
+        return index
 
     def codegen_nodes(self, nodes, kernel_name):
         _, (group, reduction_group) = max(
@@ -551,10 +551,11 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         else:
             mvin3 = 14
             self.consts.add(mvin3)
+            self.consts.add(0)
             dram_tile_shape = f"{self.render_options['TILE_M']}x{self.render_options['TILE_N']}"
             buffer, indices = self.get_scratchpad_buffer(dtype, name, self.render_options['TILE_M'], self.render_options['TILE_N'], dram_tile_shape, self.loads, index)
             self.buffer_names[name] = buffer
-            line = f"affine.dma_start %{var}[%index2], %{buffer}[0, 0], %tag[0], %c{mvin3}, %N, %c_set : memref<{self.buffer_types[name][1]}x{type_name}>, memref<{dram_tile_shape}x{type_name}, 1>, memref<1xi32>"
+            line = f"affine.dma_start %{var}[%index2], %{buffer}[%c0, %c0], %tag[0], %c{mvin3}, %N, %c_set : memref<{self.buffer_types[name][1]}x{type_name}>, memref<{dram_tile_shape}x{type_name}, 1>, memref<1xi32>"
             self.cse.generate(self.loads, line, assignment = False)
 
         tile_size_per_lane = self.render_options['TILE_M'] * self.render_options['TILE_N'] // self.vector_lane
@@ -569,8 +570,11 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         if self.is_template_kernel:
             return self.load_epilogue(name, index)
         index = self.rename_indexing(index)
-        indices, index = self.parse_indices(index)
-        prefix = "" if index.is_number else "%"
+        indices = self.parse_indices(index)
+        prefix = self.newvar_prefix
+        if index.is_number:
+            prefix = prefix + "c"
+            self.consts.add(int(index))
         var = self.args.input(name)
         dtype = V.graph.get_dtype(name)
         type_name = mlir_common.DTYPE_TO_MLIR[dtype]
@@ -592,7 +596,8 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
             self.consts.add(chunk)
             self.dma_cache[dma_key] = dmaType, stride, chunk
         self.tags.add(f"{name}_tag")
-        code = f"affine.dma_start %{var}[{prefix}{indices}], %{buffer}[0, 0], %{name}_tag[0], %c{dmaType}, %c{stride}, %c{chunk} : memref<{self.buffer_types[name][1]}x{type_name}>, memref<{dram_tile_shape}x{type_name}, 1>, memref<1xi32>"
+        self.consts.add(0)
+        code = f"affine.dma_start %{var}[{prefix}{indices}], %{buffer}[%c0, %c0], %{name}_tag[0], %c{dmaType}, %c{stride}, %c{chunk} : memref<{self.buffer_types[name][1]}x{type_name}>, memref<{dram_tile_shape}x{type_name}, 1>, memref<1xi32>"
         self.cse.generate(self.loads, code, assignment = False) # FIXME: assignment = False does not support caching
 
         operation = "affine.vector_load" if tile_size_per_lane > 1 else "affine.load"
@@ -603,8 +608,11 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         return out
 
     def store_epilogue(self, name: str, index: sympy.Expr, value, *args, **kwargs):
-        indices, index = self.parse_indices(index)
-        prefix = "" if index.is_number else "%"
+        indices = self.parse_indices(index)
+        prefix = self.newvar_prefix
+        if index.is_number:
+            prefix = prefix + "c"
+            self.consts.add(int(index))
         var = self.args.output(name)
         dtype = V.graph.get_dtype(name)
         type_name = mlir_common.DTYPE_TO_MLIR[dtype]
@@ -627,15 +635,19 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         self.cse.generate(self.stores, line, assignment = False)
 
         self.tags.add(f"{name}_tag")
-        code = f"affine.dma_start %{buffer}[0, 0], %{var}[%index2], %tag[0], %c_mvout, %N, %c{chunk} : memref<{self.render_options['TILE_M']}x{self.render_options['TILE_N']}x{type_name}, 1>, memref<{self.render_options['M'] * self.render_options['N']}x{type_name}>, memref<1xi32>" #FIXME: Using constant index and tag
+        self.consts.add(0)
+        code = f"affine.dma_start %{buffer}[%c0, %c0], %{var}[%index2], %tag[0], %c_mvout, %N, %c{chunk} : memref<{self.render_options['TILE_M']}x{self.render_options['TILE_N']}x{type_name}, 1>, memref<{self.render_options['M'] * self.render_options['N']}x{type_name}>, memref<1xi32>" #FIXME: Using constant index and tag
         self.cse.generate(self.stores, code, assignment = False)
 
     def store(self, name: str, index: sympy.Expr, value, *args, **kwargs):
         if self.is_template_kernel:
             return self.store_epilogue(name, index, value, args, kwargs)
         index = self.rename_indexing(index)
-        indices, index = self.parse_indices(index)
-        prefix = "" if index.is_number else "%"
+        indices = self.parse_indices(index)
+        prefix = self.newvar_prefix
+        if index.is_number:
+            prefix = prefix + "c"
+            self.consts.add(int(index))
         var = self.args.output(name)
         dtype = V.graph.get_dtype(name)
         type_name = mlir_common.DTYPE_TO_MLIR[dtype]
@@ -657,8 +669,9 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
 
         line = f"{operation} %{value}, %{buffer}[0, 0] : memref<{dram_tile_shape}x{type_name}, 1>{shape}"
         self.cse.generate(self.stores, line, assignment = False)
+        self.consts.add(0)
         self.tags.add(f"{name}_tag")
-        code = f"affine.dma_start %{buffer}[0, 0], %{var}[{prefix}{indices}], %{name}_tag[0], %c{dmaType}, %c{stride}, %c{chunk} : memref<{dram_tile_shape}x{type_name}, 1>, memref<{self.buffer_types[name][1]}x{type_name}>, memref<1xi32>"
+        code = f"affine.dma_start %{buffer}[%c0, %c0], %{var}[{prefix}{indices}], %{name}_tag[0], %c{dmaType}, %c{stride}, %c{chunk} : memref<{dram_tile_shape}x{type_name}, 1>, memref<{self.buffer_types[name][1]}x{type_name}>, memref<1xi32>"
         self.cse.generate(self.stores, code, assignment = False)
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
@@ -739,9 +752,11 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         dtype = V.graph.get_dtype(name)
         type_name = mlir_common.DTYPE_TO_MLIR[dtype]
         index = self.rename_indexing(index)
-        indices, index = self.parse_indices(index)
-        prefix = "" if index.is_number else "%"
-
+        indices = self.parse_indices(index)
+        prefix = self.newvar_prefix
+        if index.is_number:
+            prefix = prefix + "c"
+            self.consts.add(int(index))
         # Tile is always reuduced in inner loop
         tile_col = self.tile_desc.n_row
         tile_row = 1
@@ -796,7 +811,8 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         self.consts.add(chunk)
         self.tags.add(f"{name}_tag")
         # Change row, col
-        code = f"affine.dma_start %{buffer}[0, 0], %{var}[{prefix}{indices}], %{name}_tag[0], %c{dmaType}, %c{mm_stride}, %c{chunk} : memref<{tile_row}x{tile_col}x{type_name}, 1>, memref<{self.buffer_types[name][1]}x{type_name}>, memref<1xi32>"
+        self.consts.add(0)
+        code = f"affine.dma_start %{buffer}[%c0, %c0], %{var}[{prefix}{indices}], %{name}_tag[0], %c{dmaType}, %c{mm_stride}, %c{chunk} : memref<{tile_row}x{tile_col}x{type_name}, 1>, memref<{self.buffer_types[name][1]}x{type_name}>, memref<1xi32>"
         self.cse.generate(self.reductions_suffix, code, assignment = False)
 
     def codegen_body(self, subtile):
@@ -809,7 +825,8 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         def template_store(options):
             subtile_size = [self.vector_lane, self.vector_lane]
             async_flag = 1
-            line = f"affine.dma_start %Y_buffer[0, 0], %Y[%index2], %tag[0], %c_mvout, %N, %c_set"\
+            self.consts.add(0)
+            line = f"affine.dma_start %Y_buffer[%c0, %c0], %Y[%index2], %tag[0], %c_mvout, %N, %c_set"\
                    f": memref<{options['TILE_M']}x{options['TILE_N']}xf32, 1>,"\
                    f"memref<{options['M'] * options['N']}xf32>, memref<1xi32>" #FIXME: Using constant index
             self.cse.generate(self.stores, line, assignment = False)
@@ -848,6 +865,8 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         loops = [LoopLevel(var, size, idx-len(self.itervars), tile_row=tile_row, tile_col=tile_col) for idx, (var, size) in enumerate(zip(self.itervars, self.ranges))]
         loops, reductions = [LoopNest(loops[: self.reduction_depth]),
                              LoopNest(loops[self.reduction_depth :])]
+        if (self.reduction_depth==0):
+            loops = LoopNest([LoopLevel("dummy", 1, 1, 0)])
         reductions.mark_reduction(self.reduction_vars)
         if len(self.affine_yield) > 0:
             vars = ', '.join([f"%{name}" for name, _ in self.affine_yield.items()])

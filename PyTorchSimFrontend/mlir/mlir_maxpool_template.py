@@ -23,11 +23,12 @@ func.func @{{ KERNEL_NAME }} {{kernel.def_kernel(inputs=[X], outputs=[Y], names_
   %X_buffer = memref.get_global @X_spad : memref<{{ in_tile }}x{{ in_tile }}xf32, 1>
   %Y_buffer = memref.get_global @Y_spad : memref<{{ out_tile }}x{{ out_tile }}xf32, 1>
   %tag = memref.alloc() : memref<1xi32>
+  %c0 = arith.constant 0 : index
   affine.for %i = 0 to {{ BCH }} step {{ out_tile }} {
     affine.for %j = 0 to {{ W }} step {{ out_tile }} {
       %index0 = affine.apply #map0(%i, %j)
-      affine.dma_start %X[%index0], %X_buffer[0, 0], %tag[0], %c_mvin, %dummy, %in_chunk : memref<{{ IN }}xf32>, memref<{{ in_tile }}x{{ in_tile }}xf32, 1>, memref<1xi32>
-      affine.dma_start %Y_buffer[0, 0], %Y[%index0], %tag[0], %c_mvout, %dummy, %out_chunk : memref<{{ out_tile }}x{{ out_tile }}xf32, 1>, memref<{{ OUT }}xf32>, memref<1xi32>
+      affine.dma_start %X[%index0], %X_buffer[%c0, %c0], %tag[0], %c_mvin, %dummy, %in_chunk : memref<{{ IN }}xf32>, memref<{{ in_tile }}x{{ in_tile }}xf32, 1>, memref<1xi32>
+      affine.dma_start %Y_buffer[%c0, %c0], %Y[%index0], %tag[0], %c_mvout, %dummy, %out_chunk : memref<{{ out_tile }}x{{ out_tile }}xf32, 1>, memref<{{ OUT }}xf32>, memref<1xi32>
     } { outer_loop=true }
   } { outer_loop=true }
   return
