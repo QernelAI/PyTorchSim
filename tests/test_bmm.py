@@ -13,12 +13,12 @@ def test_result(name, out, cpu_out, rtol=1e-4, atol=1e-4):
         print("cpu out: ", cpu_out)
         exit(1)
 
-def test_BMM(device):
+def test_BMM(device, batch_size=1, m=32, n=16, k=64):
     def bmm(a, b):
         return torch.bmm(a, b.transpose(1, 2))
     torch.manual_seed(0)
-    a = torch.randn(1, 32, 64).to(device=device)
-    b = torch.randn(1, 16, 64).to(device=device)
+    a = torch.randn(batch_size, m, k).to(device=device)
+    b = torch.randn(batch_size, n, k).to(device=device)
     opt_fn = torch.compile(dynamic=False)(bmm)
     res = opt_fn(a, b)
     out = bmm(a.cpu(), b.cpu())
@@ -33,3 +33,4 @@ if __name__ == "__main__":
     module = ExecutionEngine.setup_device()
     device = module.custom_device()
     test_BMM(device)
+    test_BMM(device, 2, 512, 512, 512)
