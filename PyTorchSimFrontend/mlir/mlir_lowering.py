@@ -145,4 +145,3 @@ lowerings.update({getattr(aten.mm, overload): tuned_mm for overload in aten.mm.o
 lowerings.update({getattr(aten.addmm, overload): tuned_addmm for overload in aten.addmm.overloads()})
 lowerings.update({getattr(aten.convolution, overload): convolution for overload in aten.convolution.overloads()})
 lowerings.update({getattr(aten.bmm, overload): tuned_bmm for overload in aten.bmm.overloads()})
-lowerings.update({getattr(aten.max_pool2d_with_indices, overload): custom_maxpool for overload in aten.max_pool2d_with_indices.overloads()})
