@@ -172,7 +172,7 @@ class BaseMLIRKernel(common.Kernel, BaseMLIRHardwareInfo):
         self.tile_col = extension_config.CONFIG_TILE_COL
         if self.tile_col == -1:
             self.tile_col = 8 # FIXME: tile_col is not always vector_lane * vlen
-        self.tile_info = {}
+        self.var_info = {}
 
     def load(self, name: str, index: sympy.Expr):
         raise NotImplementedError()
@@ -193,32 +193,8 @@ class BaseMLIRKernel(common.Kernel, BaseMLIRHardwareInfo):
                 dtype = arg
         return dtype
 
-    def expand(self, args, buf_bounds):
-        cse_args = [arg for arg in args if isinstance(arg, common.CSEVariable)]
-        if len(cse_args) == 0:
-            return args, 1, self.check_dtype_in_args(args)
-        elif len(cse_args) == 1:
-            if not cse_args[0] in self.tile_info:
-                return args, 1, self.check_dtype_in_args(cse_args)
-            info = self.tile_info[cse_args[0]]
-            return args, info[0], info[1]
-        lhs_idx = args.index(cse_args[-2])
-        rhs_idx = args.index(cse_args[-1])
-        if not args[lhs_idx] in self.tile_info or not args[rhs_idx] in self.tile_info:
-            return args, 1, self.check_dtype_in_args(args)
-        lhs_tile_size, lhs_dtype = self.tile_info[args[lhs_idx]]
-        rhs_tile_size, rhs_dtype = self.tile_info[args[rhs_idx]]
-        lhs_shape = f"vector<{lhs_tile_size}x{DTYPE_TO_MLIR[lhs_dtype]}>" if lhs_tile_size > 1 else DTYPE_TO_MLIR[lhs_dtype]
-        rhs_shape = f"vector<{rhs_tile_size}x{DTYPE_TO_MLIR[rhs_dtype]}>" if rhs_tile_size > 1 else DTYPE_TO_MLIR[rhs_dtype]
-        temp = list(args)
-        if lhs_tile_size > rhs_tile_size:
-            expand = f"vector.broadcast %{args[rhs_idx]} : {rhs_shape} to {lhs_shape}"
-            temp[rhs_idx] = self.cse.generate(self.compute, expand, bounds=buf_bounds)
-        elif lhs_tile_size < rhs_tile_size:
-            expand = f"vector.broadcast %{args[lhs_idx]} : {lhs_shape} to {rhs_shape}"
-            temp[lhs_idx] = self.cse.generate(self.compute, expand, bounds=buf_bounds)
-        args = tuple(temp)
-        return args, max(lhs_tile_size, rhs_tile_size), lhs_dtype
+    def register_var_info(self, var, var_info):
+        self.var_info[var] = var_info
 
     def __enter__(self):
         class CSEProxy:
@@ -235,13 +211,13 @@ class BaseMLIRKernel(common.Kernel, BaseMLIRHardwareInfo):
                         buf_bounds = self.node_to_bounds.get(
                             fx_node, ValueRanges.unknown()
                         )
-                    args, tile_size, dtype = self.expand(args, buf_bounds)
+                    code, ret_info = getattr(parent_handler, name)(*args, var_info=self.var_info)
                     csevar = self.cse.generate(
                         self.compute,
-                        getattr(parent_handler, name)(*args, tile_size=tile_size, dtype=DTYPE_TO_MLIR[dtype], **kwargs),  # type: ignore[has-type]
+                        code,
                         bounds=buf_bounds,
                     )
-                    self.tile_info[csevar] = tile_size, dtype
+                    self.register_var_info(csevar, ret_info)
                     csevar.update_on_args(name, args, kwargs)
                     return csevar
 

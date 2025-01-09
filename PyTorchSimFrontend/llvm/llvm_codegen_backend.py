@@ -212,7 +212,7 @@ class MatrixOverrides(ExtensionOverrides):
 
     @staticmethod
     def relu(x, tile_size=4):
-        return ops.maximum(x, ops.constant(0.0, torch.int32))
+        return ops.maximum(x, ops.constant(0.0, "f32"))
 
 SYMPY_TO_LLVM = {
     sympy.core.mul.Mul: "mul",
