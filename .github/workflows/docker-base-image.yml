@@ -3,6 +3,8 @@ name: Docker Base Image CI
 on:
   push:
     branches: [ "base" ]
+  repository_dispatch:
+    types: [ build_base ]
 
 jobs:
   build:
