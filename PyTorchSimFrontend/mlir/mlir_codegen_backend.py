@@ -109,6 +109,15 @@ class ExtensionWrapperCodegen(wrapper.WrapperCodeGen):
 class ExtensionOverrides(common.OpOverrides):
     # Binary element wise operations
     @staticmethod
+    def custom_cast(operand, target_type, *args, var_info=None):
+        dtype = var_info[operand][1]
+        if dtype == "index":
+            ret = ops.index_cast(operand, target_type, var_info=var_info)
+        else:
+            ret = ops.to_dtype(operand, target_type, var_info=var_info)
+        return ret, var_info[ret]
+
+    @staticmethod
     def binary_elementwise_common(operand1, operand2, var_info):
         op_type1 = var_info[operand1]
         op_type2 = var_info[operand2]
@@ -533,8 +542,12 @@ class ExtensionOverrides(common.OpOverrides):
     def where(condition, operand1, operand2, *args, var_info=None):
         tile_size, ret_type, operand1, operand2 = ExtensionOverrides.binary_elementwise_common(operand1, operand2, var_info)
         cond_type = var_info[condition]
-        if cond_type[0] != tile_size:
+        if cond_type[0] < tile_size:
             condition = ops.broadcast(condition, operand1, var_info=var_info)
+        elif cond_type[0] > tile_size:
+            operand1 = ops.broadcast(operand1, condition, var_info=var_info)
+            operand2 = ops.broadcast(operand2, condition, var_info=var_info)
+        tile_size, ret_type = var_info[operand1]
 
         shape = f"vector<{tile_size}x{ret_type}>" if tile_size > 1 else ret_type
         cond_shape = f"vector<{tile_size}xi1>," if tile_size > 1 else ""
@@ -550,7 +563,7 @@ class ExtensionOverrides(common.OpOverrides):
 
     @staticmethod
     def _index_expr(operand, *args, var_info=None, **kwargs):
-        symbols = sorted(operand.free_symbols)
+        symbols = sorted([str(i) for i in operand.free_symbols])
         renamed_symbols = {symbol: sympy.Symbol(f"d{i}") for i, symbol in enumerate(symbols)}
 
         renamed_expression = operand.subs(renamed_symbols)
@@ -569,7 +582,11 @@ class ExtensionOverrides(common.OpOverrides):
 
     @staticmethod
     def index_cast(operand, target_type, *args, var_info=None, **kwrags):
-        return f"arith.index_cast %{operand} : index to {target_type}", [1, target_type]
+        op_type = var_info[operand]
+        src_shape = f"vector<{op_type[0]}x{op_type[1]}>" if op_type[0] > 1 else op_type[1]
+        des_shape = f"vector<{op_type[0]}x{target_type}>" if op_type[0] > 1 else target_type
+        return f"arith.index_cast %{operand} : {src_shape} to {des_shape}", [op_type[0], target_type]
+
 
     @staticmethod
     def broadcast(operand1, operand2, *args, var_info=None):
@@ -578,7 +595,7 @@ class ExtensionOverrides(common.OpOverrides):
         src_shape = f"vector<{op_type1[0]}x{op_type1[1]}>" if op_type1[0] > 1 else op_type1[1]
         des_shape = f"vector<{op_type2[0]}x{op_type1[1]}>" if op_type2[0] > 1 else op_type1[1] # Use tile size only
         expand = f"vector.broadcast %{operand1} : {src_shape} to {des_shape}"
-        return expand, op_type2
+        return expand, [op_type2[0], op_type1[1]]
 
 RTYPE_TO_MLIR = {
     "sum": "add",
@@ -1000,9 +1017,11 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         self.consts.add(stride)
         self.consts.add(chunk)
 
-        store_size = self.var_info[value][0]
+        store_size, operand_type = self.var_info[value]
         operation = "affine.vector_store" if tile_size_per_lane > 1 and store_size > 1 else "affine.store"
         shape = f", vector<{tile_size_per_lane}x{type_name}>" if tile_size_per_lane > 1 and store_size > 1 else ""
+        if type_name != operand_type:
+            value = ops.custom_cast(value, type_name, var_info=self.var_info)
 
         line = f"{operation} %{value}, %{buffer}[0, 0] : memref<{dram_tile_shape}x{type_name}, 1>{shape}"
         self.cse.generate(self.stores, line, assignment = False)
