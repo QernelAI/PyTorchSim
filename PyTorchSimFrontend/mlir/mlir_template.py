@@ -3,6 +3,8 @@ import itertools
 import textwrap
 import re
 import math
+import sympy
+
 from typing import List, Optional
 from unittest.mock import patch
 
@@ -21,6 +23,8 @@ from torch._inductor.virtualized import V
 from PyTorchSimFrontend.mlir.mlir_autotune import MLIRBenchmarkRequest
 from PyTorchSimFrontend.mlir.mlir_common import BaseMLIRHardwareInfo
 from PyTorchSimFrontend.mlir.mlir_codegen_backend import MLIRKernel, MLIRTile
+
+from . import mlir_common
 
 class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
     def __init__(self,
@@ -46,6 +50,11 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
         self.render_options = dict()
         self.tile_size = []
         self.loop_size = None
+        self.is_template_kernel = True
+
+        # Overwrite ops
+        self.load = self.load_epilogue
+        self.store = self.store_epilogue
 
     def add_loop_info(self, mat_size, tile_size):
         for idx, (loop_size, stride) in enumerate(zip(mat_size, tile_size)):
@@ -239,6 +248,71 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
             template.render(**kwargs),
             self.render_hooks,
         )
+
+    def adjust_tile_size(self):
+        self.tile_desc.n_row = self.render_options['TILE_M']
+        self.tile_desc.n_col = self.render_options['TILE_N']
+        return
+
+    def load_epilogue(self, name: str, index: sympy.Expr):
+        index = self.rename_indexing(index)
+        var = self.args.input(name)
+        dtype = V.graph.get_dtype(name)
+        type_name = mlir_common.DTYPE_TO_MLIR[dtype]
+
+        if name in self.buffer_names:
+            buffer = self.buffer_names[name]
+        else:
+            dram_mlir_shape = mlir_common.MLIRKernelArgs.get_mlir_shape(self.buffer_types[name])
+            mvin3 = 14
+            self.consts.add(mvin3)
+            self.consts.add(0)
+            dram_tile_shape = f"{self.render_options['TILE_M']}x{self.render_options['TILE_N']}"
+            buffer, indices = self.get_scratchpad_buffer(dtype, name, self.render_options['TILE_M'], self.render_options['TILE_N'], dram_tile_shape, self.loads, index)
+            self.buffer_names[name] = buffer
+            line = f"affine.dma_start %{var}[%index2], %{buffer}[%c0, %c0], %tag[0], %c{mvin3}, %N, %c_set : {dram_mlir_shape}, memref<{dram_tile_shape}x{type_name}, 1>, memref<1xi32>"
+            self.cse.generate(self.loads, line, assignment = False)
+
+        tile_size_per_lane = self.render_options['TILE_M'] * self.render_options['TILE_N'] // self.vector_lane
+        operation = "affine.vector_load" if tile_size_per_lane > 1 else "affine.load"
+        shape = f", vector<{tile_size_per_lane}x{type_name}>" if tile_size_per_lane > 1 else ""
+        line = f"{operation} %{buffer}[0, 0] : memref<{self.render_options['TILE_M']}x{self.render_options['TILE_N']}x{type_name}, 1>{shape}"
+        out = self.cse.generate(self.loads, line)
+        var_info = [tile_size_per_lane, mlir_common.DTYPE_TO_MLIR[dtype]]
+        self.register_var_info(out, var_info)
+        return out
+
+    def store_epilogue(self, name: str, index: sympy.Expr, value, *args, **kwargs):
+        indices = self.parse_indices(index)
+        prefix = self.newvar_prefix
+        if index.is_number:
+            prefix = prefix + "c"
+            self.consts.add(int(index))
+        var = self.args.output(name)
+        dtype = V.graph.get_dtype(name)
+        type_name = mlir_common.DTYPE_TO_MLIR[dtype]
+
+        chunk_size = self.tile_desc.get_chunk_size()
+        chunk = chunk_size << 1 | (self.tile_desc.tile_per_lane_layout == MLIRTile.TILE_PER_LANE_COL_WISE)
+        self.consts.add(chunk)
+
+        if name in self.buffer_names:
+            buffer = self.buffer_names[name]
+        else:
+            dram_tile_shape = f"{self.render_options['TILE_M']}x{self.render_options['TILE_N']}"
+            buffer, indices = self.get_scratchpad_buffer(dtype, name, self.render_options['TILE_M'], self.render_options['TILE_N'], dram_tile_shape, self.stores, indices, index)
+            self.buffer_names[name] = buffer
+
+        tile_size_per_lane = self.render_options['TILE_M'] * self.render_options['TILE_N'] // self.vector_lane
+        operation = "affine.vector_store" if tile_size_per_lane > 1 else "affine.store"
+        shape = f", vector<{tile_size_per_lane}x{type_name}>" if tile_size_per_lane > 1 else ""
+        line = f"{operation} %{value}, %{buffer}[0, 0] : memref<{self.render_options['TILE_M']}x{self.render_options['TILE_N']}x{type_name}, 1>{shape}"
+        self.cse.generate(self.stores, line, assignment = False)
+
+        self.tags.add(f"{name}_tag")
+        self.consts.add(0)
+        code = f"affine.dma_start %{buffer}[%c0, %c0], %{var}[%index2], %tag[0], %c_mvout, %N, %c{chunk} : memref<{self.render_options['TILE_M']}x{self.render_options['TILE_N']}x{type_name}, 1>, memref<{self.render_options['M'] * self.render_options['N']}x{type_name}>, memref<1xi32>" #FIXME: Using constant index and tag
+        self.cse.generate(self.stores, code, assignment = False)
 
 class MLIRTemplateCaller(CUDATemplateCaller):
     def __str__(self):
