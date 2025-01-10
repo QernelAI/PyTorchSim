@@ -163,6 +163,8 @@ class BaseMLIRKernel(common.Kernel, BaseMLIRHardwareInfo):
 
     def __init__(self, args=None):
         super().__init__(args)
+        self.itervars = None
+
         self.vector_compute = IndentedBuffer()
         self.reductions_suffix = IndentedBuffer()
         self.cse = common.CSE(self.newvar_prefix, self.suffix)
@@ -192,6 +194,40 @@ class BaseMLIRKernel(common.Kernel, BaseMLIRHardwareInfo):
             if arg in list(DTYPE_TO_MLIR.keys()):
                 dtype = arg
         return dtype
+
+    def get_constant_vector(self, expr):
+        constant_vector = [[int(expr.coeff(var)),None] for var in self.itervars]
+        return constant_vector
+
+    def get_constant_vector2(self, expr):
+        # Case 0. symbol ex) index 0
+        # Case 1. inner product form ex) 16 * index0 + 1 * index1
+        # Case 2. Complicated form ex) 16 * index0 + 8 * (index//4) + (index % 4)
+        constant_vector = []
+        if expr.is_symbol:
+            constant_vector.append(tuple([1, expr]))
+            return constant_vector
+
+        for arg in expr.args:
+            if arg.is_symbol:
+                constant_vector.append(tuple([1,arg]))
+                continue
+            if len(arg.args) == 0: #TODO: check this
+                continue
+            if arg.args[0].is_number:
+                constant_vector.append(arg.args)
+            else:
+                constant_vector.append([1, arg])
+
+        return constant_vector
+
+    def find_node_by_name(self, name):
+        if name in V.graph.graph_inputs:
+            return V.graph.graph_inputs[name]
+        else:
+            for output_node in V.graph.graph_outputs:
+                if output_node.data.name == name:
+                    return output_node
 
     def register_var_info(self, var, var_info):
         self.var_info[var] = var_info

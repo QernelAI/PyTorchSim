@@ -662,7 +662,6 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         self.kernel_group = None
         self.call_ranges = None
         self.ranges = None
-        self.itervars = None
         self.reduction_depth = None
         self.reduction_prefix = IndentedBuffer()
         self.reduction_suffix = IndentedBuffer()
@@ -687,40 +686,6 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         self.welford_reduce_out = None
         self.reduce_iterator = {}
         self.is_template_kernel = False
-
-    def get_constant_vector(self, expr):
-        constant_vector = [[int(expr.coeff(var)),None] for var in self.itervars]
-        return constant_vector
-
-    def get_constant_vector2(self, expr):
-        # Case 0. symbol ex) index 0
-        # Case 1. inner product form ex) 16 * index0 + 1 * index1
-        # Case 2. Complicated form ex) 16 * index0 + 8 * (index//4) + (index % 4)
-        constant_vector = []
-        if expr.is_symbol:
-            constant_vector.append(tuple([1, expr]))
-            return constant_vector
-
-        for arg in expr.args:
-            if arg.is_symbol:
-                constant_vector.append(tuple([1,arg]))
-                continue
-            if len(arg.args) == 0: #TODO: check this
-                continue
-            if arg.args[0].is_number:
-                constant_vector.append(arg.args)
-            else:
-                constant_vector.append([1, arg])
-
-        return constant_vector
-
-    def find_node_by_name(self, name):
-        if name in V.graph.graph_inputs:
-            return V.graph.graph_inputs[name]
-        else:
-            for output_node in V.graph.graph_outputs:
-                if output_node.data.name == name:
-                    return output_node
 
     def get_dma_info(self, name, index, dtype):
         current_tile = MLIRTile(self.tile_desc.n_row, self.tile_desc.n_col, self.tile_desc.vector_lane, self.tile_desc.used_vector_lane)
