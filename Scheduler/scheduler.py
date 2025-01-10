@@ -179,8 +179,10 @@ class ExecutionEngine:
             register_backend_for_device,
         )
         from PyTorchSimFrontend.mlir.mlir_codegen_backend import (
-            MLIRScheduling,
             ExtensionWrapperCodegen,
+        )
+        from PyTorchSimFrontend.mlir.mlir_scheduling import (
+            MLIRScheduling
         )
         register_backend_for_device(
             "extension_device", MLIRScheduling, ExtensionWrapperCodegen

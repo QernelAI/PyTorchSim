@@ -1,6 +1,7 @@
 import os
 import torch
 from torch._inductor.codegen import common
+from torch._inductor.codegen import cpp
 from torch._inductor.virtualized import V
 from torch._inductor.ir import MultiOutputLayout
 import sympy
@@ -141,6 +142,61 @@ class MLIRKernelArgs(common.KernelArgs):
             set_info(outer, inner, self.MLIR_ARGS_VAR)
         return arg_defs, call_args, arg_attributes, buffer_types
 
+
+class MLIRTile():
+    TILE_ROW_WISE = 0
+    TILE_COL_WISE = 1
+    TILE_PER_LANE_ROW_WISE = 2
+    TILE_PER_LANE_COL_WISE = 3
+    def __init__(self, n_row, n_col, vector_lane, used_vector_lane=None) -> None:
+        self.n_row = n_row
+        self.n_col = n_col
+        self.vector_lane = vector_lane
+        if used_vector_lane is None:
+            self.used_vector_lane = self.vector_lane
+        else:
+            self.used_vector_lane = used_vector_lane
+        self.tile_per_lane_layout = self.TILE_PER_LANE_ROW_WISE # How a given tile per lane is stored
+        self.tile_layout = self.TILE_ROW_WISE # How a given tile is stored per lane
+        self.vector_lane_axis = (self.n_col//self.used_vector_lane) > 0 #(0: Col major, 1: Row major)
+
+    def get_tile_size(self):
+        return self.n_row * self.n_col
+
+    def get_rows_per_lane(self):
+        if self.n_row % self.used_vector_lane != 0 and self.n_row > 1:
+            print(f"[Warning] n_row({self.n_row}) % vector_lane({self.used_vector_lane}) != 0")
+        return self.div_round_up(self.n_row, self.used_vector_lane)
+
+    def get_cols_per_lane(self):
+        if self.n_col % self.used_vector_lane != 0 and self.n_col > 1:
+            print(f"[Warning] n_col({self.n_col}) % vector_lane({self.used_vector_lane}) != 0")
+        return self.div_round_up(self.n_col, self.used_vector_lane)
+
+    def get_tile_size_per_lane(self):
+        if self.get_tile_size() % self.used_vector_lane != 0:
+            print(f"[Warning] n_col({self.n_col}) % vector_lane({self.used_vector_lane}) != 0")
+        return self.div_round_up(self.get_tile_size(), self.used_vector_lane)
+
+    def get_tile_shape(self):
+        return f"{self.n_row}x{self.n_col}"
+
+    def get_chunk_size(self):
+        if self.tile_layout == self.TILE_ROW_WISE:
+            chunk_size = self.get_tile_size_per_lane()
+        else:
+            chunk_size = self.get_cols_per_lane()
+        return chunk_size
+
+    @staticmethod
+    def div_round_up(size, round_val):
+        return (size + round_val - 1) // round_val
+
+class MLIRWrapperKenrelGroup(cpp.KernelGroup):
+    def __init__(self):
+        super().__init__()
+        self.args = MLIRKernelArgs()
+
 class BaseMLIRHardwareInfo():
     def __init__(self):
         # Default HW setting
@@ -163,16 +219,45 @@ class BaseMLIRKernel(common.Kernel, BaseMLIRHardwareInfo):
 
     def __init__(self, args=None):
         super().__init__(args)
+        self.kernel_group : MLIRWrapperKenrelGroup = None
+        # Kernel iteration range info
+        self.call_ranges = None
+        self.ranges = None
+        self.reduction_depth = None
+        self.itervars = None
+        # Code buffer
         self.vector_compute = IndentedBuffer()
         self.reductions_suffix = IndentedBuffer()
         self.cse = common.CSE(self.newvar_prefix, self.suffix)
-        self.tile_row = extension_config.CONFIG_TILE_ROW
-        if self.tile_row == -1:
-            self.tile_row = self.vlen * self.vector_lane
-        self.tile_col = extension_config.CONFIG_TILE_COL
-        if self.tile_col == -1:
-            self.tile_col = 8 # FIXME: tile_col is not always vector_lane * vlen
-        self.var_info = {}
+        # Tile size setting
+        tile_row = extension_config.CONFIG_TILE_ROW
+        if tile_row == -1:
+            tile_row = self.vlen * self.vector_lane
+        tile_col = extension_config.CONFIG_TILE_COL
+        if tile_col == -1:
+            tile_col = 8 # FIXME: tile_col is not always vector_lane * vlen
+        self.tile_desc = MLIRTile(tile_row, tile_col, self.vector_lane)
+        self.var_info = {} # MLIR variable info
+        self.buffer_types : dict = None
+        self.read_writes = None
+
+    def set_ranges(self, lengths, reduction_lengths, read_writes):
+        self.read_writes = read_writes
+        if self.call_ranges:
+            assert self.call_ranges == tuple(lengths) + tuple(
+                reduction_lengths
+            ), f"{self.call_ranges} == {tuple(lengths)} + {tuple(reduction_lengths)}"
+            assert self.reduction_depth == len(lengths)
+        else:
+            self.call_ranges = tuple(lengths) + tuple(reduction_lengths)
+            self.ranges = [self.rename_indexing(x) for x in self.call_ranges]
+            self.itervars = [sympy.Symbol(f"index{n}") for n in range(len(self.ranges))]
+            self.reduction_depth = len(lengths)
+
+        return (
+            self.itervars[: self.reduction_depth],
+            self.itervars[self.reduction_depth :],
+        )
 
     def load(self, name: str, index: sympy.Expr):
         raise NotImplementedError()
@@ -186,15 +271,123 @@ class BaseMLIRKernel(common.Kernel, BaseMLIRHardwareInfo):
     def reduction(self, dtype, src_dtype, reduction_type, value):
         raise NotImplementedError()
 
-    def check_dtype_in_args(self, args):
-        dtype = torch.float32 # default dtype
-        for arg in args:
-            if arg in list(DTYPE_TO_MLIR.keys()):
-                dtype = arg
-        return dtype
+    def codegen_global_init(self):
+        raise NotImplementedError()
+
+    def codegen_loops(self):
+        raise NotImplementedError()
+
+    def codegen_init(self):
+        raise NotImplementedError()
+
+    def call_kernel(self, kernel_name):
+        wrapper = V.graph.wrapper_code
+        _, call_args, _, _ = self.kernel_group.args.mlir_argdefs()
+       # generate the code to call this
+        wrapper.generate_kernel_call(kernel_name, call_args, cuda=False)
+
+    def codegen_nodes(self, nodes, kernel_name):
+        _, (group, reduction_group) = max(
+            nodes, key=lambda x: int(x.is_reduction())
+        ).group
+
+        self.set_ranges(group, reduction_group, None)
+        with self as kernel:
+            kernel.args = kernel.kernel_group.args
+            for node in nodes:
+                vars, reduction_vars = kernel.set_ranges(group, reduction_group, node.read_writes)
+                kernel.args.tile_row = kernel.tile_desc.n_row
+                kernel.args.tile_col = kernel.tile_desc.n_col
+                _, _, _, kernel.buffer_types = kernel.args.mlir_argdefs()
+                node.run(vars, reduction_vars)
+        src_code = self.codegen_kernel(kernel_name=kernel_name)
+        self.meta_kernel()
+        return src_code
+
+    def codegen_kernel(self, kernel_name):
+        arg_defs, _, _, _ = self.kernel_group.args.mlir_argdefs()
+        code = self._codegen_kernel(arg_defs, kernel_name)
+        return code.getvalue()
+
+    def _codegen_kernel(self, arg_defs, kernel_name):
+        arg_defs = ",\n".ljust(25).join(arg_defs)
+        code = common.BracesBuffer()
+
+        #TODO:. kernel name custom
+        kernel_decl_name = kernel_name if V.graph.cpp_wrapper else "kernel"
+
+        code.splice(self.codegen_global_init())
+        code.writeline(f'func.func @{kernel_decl_name}({arg_defs})')
+        with code.indent():
+            for old, new in self.kernel_group.args.aliases():
+                code.writeline(f"auto {old} = {new};")
+            # Loop body part
+            code.splice(self.codegen_init())
+            code.splice(self.codegen_loops())
+        return code
+
+    def meta_kernel(self):
+        wrapper = V.graph.wrapper_code
+        _, _, arg_attributes, _ = self.kernel_group.args.mlir_argdefs()
+        wrapper.add_import_once('\nprint(f\'Wrapper Codegen Path = {__file__}\')')
+        wrapper.add_import_once(f'\nfrom PyTorchSimFrontend.extension_codecache import CustomAsyncCompile')
+        wrapper.add_import_once(f'\ncustom_async_compile = CustomAsyncCompile()')
+        # Dump loop and load/store information
+        wrapper.add_import_once(f"arg_attributes = {arg_attributes}")
+
+    def get_constant_vector(self, expr):
+        constant_vector = [[int(expr.coeff(var)),None] for var in self.itervars]
+        return constant_vector
+
+    def get_constant_vector2(self, expr):
+        # Case 0. symbol ex) index 0
+        # Case 1. inner product form ex) 16 * index0 + 1 * index1
+        # Case 2. Complicated form ex) 16 * index0 + 8 * (index//4) + (index % 4)
+        constant_vector = []
+        if expr.is_symbol:
+            constant_vector.append(tuple([1, expr]))
+            return constant_vector
+
+        for arg in expr.args:
+            if arg.is_symbol:
+                constant_vector.append(tuple([1,arg]))
+                continue
+            if len(arg.args) == 0: #TODO: check this
+                continue
+            if arg.args[0].is_number:
+                constant_vector.append(arg.args)
+            else:
+                constant_vector.append([1, arg])
+
+        return constant_vector
+
+    def find_node_by_name(self, name):
+        if name in V.graph.graph_inputs:
+            return V.graph.graph_inputs[name]
+        else:
+            for output_node in V.graph.graph_outputs:
+                if output_node.data.name == name:
+                    return output_node
+
+    def roundup_vectorlane(self, size, amp=1):
+        return ((size + self.vector_lane - 1) // self.vector_lane) * self.vector_lane * amp
 
     def register_var_info(self, var, var_info):
         self.var_info[var] = var_info
+
+    def rename_indexing(self, index) -> sympy.Expr:
+        # adds the necessary kernel args for index expressions
+        # and renames variables in index expressions to kernel arg names
+        if isinstance(index, (list, tuple)):
+            return [self.rename_indexing(x) for x in index]
+        index = V.graph.sizevars.simplify(index)
+        sorted_symbols = sorted(index.free_symbols, key=lambda s: s.name)
+        replacements = {
+            x: self.args.size(x)
+            for x in sorted_symbols
+            if x.name.startswith("s") or x.name.startswith("ps")
+        }
+        return sympy_subs(index, replacements)
 
     def __enter__(self):
         class CSEProxy:
@@ -300,16 +493,4 @@ class BaseMLIRKernel(common.Kernel, BaseMLIRHardwareInfo):
         self.exit_stack.enter_context(V.set_kernel_handler(self))
         return self
 
-    def rename_indexing(self, index) -> sympy.Expr:
-        # adds the necessary kernel args for index expressions
-        # and renames variables in index expressions to kernel arg names
-        if isinstance(index, (list, tuple)):
-            return [self.rename_indexing(x) for x in index]
-        index = V.graph.sizevars.simplify(index)
-        sorted_symbols = sorted(index.free_symbols, key=lambda s: s.name)
-        replacements = {
-            x: self.args.size(x)
-            for x in sorted_symbols
-            if x.name.startswith("s") or x.name.startswith("ps")
-        }
-        return sympy_subs(index, replacements)
+
