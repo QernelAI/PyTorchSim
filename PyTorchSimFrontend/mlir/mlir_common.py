@@ -101,26 +101,24 @@ class MLIRKernelArgs(common.KernelArgs):
 
     @staticmethod
     def get_mlir_shape(info):
-        tensor_shape = "x".join([str(i) for i in info[1]])
         tensor_type = DTYPE_TO_MLIR[info[0]]
-        return f"memref<{tensor_shape}x{tensor_type}, strided<{info[2]}>>"
+        return f"memref<{info[1]}x{tensor_type}>"
 
     def mlir_argdefs(self, extra_node=dict()):
         buffer_types = {}
         for x in V.graph.buffers:
             if not isinstance(x.layout, MultiOutputLayout): # FIXME: MultiOutputLayout should be handled
-                buffer_types[x.get_name()] = [x.get_dtype(), x.get_size(), x.get_stride()]
+                buffer_types[x.get_name()] = [x.get_dtype(), x.get_numel()]
         for name, val in V.graph.graph_inputs.items():
             if isinstance(val, sympy.Expr):
                 buffer_types[name] = [get_sympy_Expr_dtype(val), 1]
-                buffer_types[name] = [get_sympy_Expr_dtype(val), [1], [1]]
             else:
-                buffer_types[name] = [val.get_dtype(), val.get_size(), val.get_stride()]
+                buffer_types[name] = [val.get_dtype(), val.get_numel()]
         buffer_types.update(
             {name: val.dtype for name, val in V.graph.constants.items()}
         )
         buffer_types.update(
-            {name: [val.get_dtype(), val.get_size(), val.get_stride()] for name, val in extra_node.items()}
+            {name: [val.get_dtype(), val.get_numel()] for name, val in extra_node.items()}
         )
 
         call_args = []
@@ -149,6 +147,41 @@ class MLIRKernelArgs(common.KernelArgs):
         for outer, inner in self.sizevars.items():
             set_info(outer, inner, self.MLIR_ARGS_VAR)
         return arg_defs, call_args, arg_attributes, buffer_types
+
+class MLIRMultiDimTile():
+    def __init__(self, tile_size, vector_lane, vlane_split_axis=None, vlane_stride=None):
+        self.tile_size = list(tile_size)
+        self.tile_order = list(range(len(self.tile_size)))[::-1]
+
+        # Vector lane mapping config
+        self.vector_lane = vector_lane
+        self.vlane_split_axis = vlane_split_axis
+        self.vlane_stride = vlane_stride
+
+    def get_tile_size(self):
+        """
+        Return size of multi-dimensional tile
+        """
+        size = 1
+        for dim_size in self.tile_size:
+            size *= dim_size
+        return size
+
+    def dim_size(self):
+        """
+        Return number of dimensions
+        """
+        return len(self.tile_size)
+
+    def get_used_vlane(self):
+        """
+        Return number of used vector lane
+        """
+        return self.div_round_up(self.tile_size[self.vlane_split_axis], self.vlane_stride)
+
+    @staticmethod
+    def div_round_up(size, round_val):
+        return (size + round_val - 1) // round_val
 
 class MLIRTile():
     TILE_ROW_WISE = 0
