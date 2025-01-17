@@ -143,7 +143,7 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
         wrapper = V.graph.wrapper_code
         arg_attributes = self.kernel_arg_attributes
         if arg_attributes is None:
-            _, _, arg_attributes, _ = self.args.mlir_argdefs()
+            _, _, arg_attributes, _ = self.kernel_group.args.mlir_argdefs()
         wrapper.add_import_once('\nprint(f\'Wrapper Codegen Path = {__file__}\')')
         wrapper.add_import_once(f'\nfrom PyTorchSimFrontend.extension_codecache import CustomAsyncCompile')
         wrapper.add_import_once(f'\ncustom_async_compile = CustomAsyncCompile()')
@@ -155,7 +155,7 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
 
     def call_kernel(self, kernel_name):
         wrapper = V.graph.wrapper_code
-        _, call_args, _, _ = self.args.mlir_argdefs()
+        _, call_args, _, _ = self.kernel_group.args.mlir_argdefs()
         # generate the code to call this
         wrapper.generate_kernel_call(
             kernel_name if self.outer_func_name is None else self.outer_func_name,
@@ -167,7 +167,6 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
             dram_var = "Y"
             index_var = "index2"
             tag_var = "tag"
-            stride = options['N']
             vlane_split_axis = 0
             vlane_stride = 1
             mlir_dtype = "f32"
@@ -207,19 +206,19 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
             node = inputs[idx]
             if node is not None:
                 self.named_nodes[name] = node
-                self.args.input_buffers[node.get_name()] = name
+                self.kernel_group.args.input_buffers[node.get_name()] = name
 
         extra_node = {}
         for name, node in zip(names[len(inputs) : len(inputs) + len(outputs)], outputs):
             if node is not None:
                 self.named_nodes[name] = node
-                self.args.output_buffers[node.get_name()] = name
+                self.kernel_group.args.output_buffers[node.get_name()] = name
                 self.store_buffer_names.add(node.get_name())    #TODO: Is this enough not calling store() in mlir_common.py?
                 extra_node[node.get_name()] = node
                 self.buffer_names[node.name] = 'Y_buffer'   #TODO: Buffer name fixed
 
         def hook():
-            arg_defs, *_ = self.args.mlir_argdefs(extra_node=extra_node)
+            arg_defs, *_ = self.kernel_group.args.mlir_argdefs(extra_node=extra_node)
             return f"({', '.join(arg_defs)})"
 
         assert "<DEF_KERNEL>" not in self.render_hooks
@@ -229,7 +228,7 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
     def output_name(self):
         # Cannot know the output name from the template, so we need to hook it
         def hook():
-            arg_defs, *_ = self.args.mlir_argdefs()
+            arg_defs, *_ = self.kernel_group.args.mlir_argdefs()
             output = arg_defs[3]    #FIXME: Constant index used
             pattern = r"%(\w+):"
             output = re.search(pattern, output).group(1)
@@ -248,7 +247,7 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
         return "<STORE_OUTPUT>"
 
     def def_function(self):
-        _, call_args, _ = self.args.python_argdefs()
+        _, call_args, _ = self.kernel_group.args.python_argdefs()
         if self.outer_func_render is not None:
             return self.outer_func_render(input_args=call_args)
         else:
@@ -295,10 +294,11 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
         return
 
     def load_epilogue(self, name: str, index: sympy.Expr):
+        raise NotImplementedError("Not implemented!")
         #index_var = self.parse_indices(index)
         index_var = "index2"
         index = self.rename_indexing(index)
-        dram_var = self.args.input(name)
+        dram_var = self.kernel_group.args.input(name)
         dtype = V.graph.get_dtype(name)
         mlir_dtype = mlir_common.DTYPE_TO_MLIR[dtype]
         if name not in self.buffer_names:
@@ -327,9 +327,10 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
         return out
 
     def store_epilogue(self, name: str, index: sympy.Expr, value, *args, **kwargs):
+        raise NotImplementedError("Not implemented!")
         #index_var = self.parse_indices(index)
         index_var = "index2"
-        dram_var = self.args.output(name)
+        dram_var = self.kernel_group.args.output(name)
         dtype = V.graph.get_dtype(name)
         mlir_dtype = mlir_common.DTYPE_TO_MLIR[dtype]
 
@@ -356,8 +357,8 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
         code = self.get_dma_code("MVOUT", vlane_split_axis, vlane_stride, mlir_dtype, dram_var, index_var, sram_var, f"{name}_tag", dram_shape, tile_shape)
         self.cse.generate(self.stores, code, assignment = False)
 
-    def get_scratchpad_buffer(self, dtype, name, tile_row, tile_col, dram_tile_shape, code_buffer, index_var, raw_index):
-        return super().get_scratchpad_buffer(dtype, name, tile_row, tile_col, dram_tile_shape, code_buffer, index_var, raw_index, True)
+    def get_scratchpad_buffer(self, dtype, name, tile_size_per_lane, dram_tile_shape, code_buffer, index_var, raw_index):
+        return super().get_scratchpad_buffer(dtype, name, tile_size_per_lane, dram_tile_shape, code_buffer, index_var, raw_index, True)
 
 class MLIRTemplateCaller(CUDATemplateCaller):
     def __str__(self):

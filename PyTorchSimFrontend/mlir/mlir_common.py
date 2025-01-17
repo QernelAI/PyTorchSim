@@ -150,57 +150,80 @@ class MLIRKernelArgs(common.KernelArgs):
 
 class MLIRMultiDimTile():
     def __init__(self, tile_size, vector_lane, vlane_split_axis=None, vlane_stride=None):
-        self.tile_size = list(tile_size)
-        self.tile_stride = None # Todo.
+        self._tile_size = list(tile_size)
+        self.tile_axis_order = range(len(tile_size))
 
         # Vector lane mapping config
         self.vector_lane = vector_lane
         self.vlane_split_axis = vlane_split_axis
         self.vlane_stride = vlane_stride
 
+    def set_tile_size(self, tile_size, tile_axis_order=None):
+        self._tile_size = tile_size
+        if tile_axis_order is None:
+            self.tile_axis_order = range(len(tile_size))
+        else:
+            self.tile_axis_order = tile_axis_order
+
     def get_tile_size(self):
+        return self._tile_size
+
+    def get_numel(self):
         """
         Return size of multi-dimensional tile
         """
         size = 1
-        for dim_size in self.tile_size:
+        for dim_size in self._tile_size:
             size *= dim_size
         return size
 
     def get_tile_size_per_lane(self):
-        tile_size_per_lane = list(self.tile_size)
-        tile_size_per_lane[self.vlane_split_axis] = self.vlane_stride
+        tile_size_per_lane = list(self._tile_size)
+        used_vlane = self.get_used_vlane()
+        tile_size_per_lane[self.vlane_split_axis] = \
+            self.div_round_up(tile_size_per_lane[self.vlane_split_axis], used_vlane)
         size = 1
         for dim_size in tile_size_per_lane:
             size *= dim_size
         return size
 
     def get_tile_stride(self):
-        return self.tile_stride
+        strides = [1] * len(self._tile_size)
+        init = 1
+
+        original_indices = list(range(len(self.tile_axis_order)))
+        sorted_pairs = sorted(
+            zip(self.tile_axis_order, self._tile_size, original_indices),
+            key=lambda x: x[0], reverse=True
+        )
+        for _, size, original_indices in sorted_pairs:
+            strides[original_indices] = init
+            init *= size
+        return strides
 
     def get_nr_dim(self):
         """
         Return number of dimensions
         """
-        return len(self.tile_size)
+        return len(self._tile_size)
 
     def get_dim_size(self, index):
         if isinstance(index, int):
-            return self.tile_size[index]
+            return self._tile_size[index]
         elif "index" in str(index):
-            return self.tile_size[int(str(index)[5:])]
+            return self._tile_size[int(str(index)[5:])]
         raise NotImplementedError("Unsupported format of index")
 
     def get_mlir_shape(self, dtype):
-        str_tile_size = [str(dim) for dim in self.tile_size]
+        str_tile_size = [str(dim) for dim in self._tile_size]
         shape = "x".join(str_tile_size)
-        return f"memref<{shape}x{dtype}, 1>"
+        return f"memref<{shape}x{dtype}, strided<{self.get_tile_stride()}>, 1>"
 
     def get_used_vlane(self):
         """
         Return number of used vector lane
         """
-        return min(self.div_round_up(self.tile_size[self.vlane_split_axis], self.vlane_stride), self.vector_lane)
+        return min(self.div_round_up(self._tile_size[self.vlane_split_axis], self.vlane_stride), self.vector_lane)
 
     def get_vlane_stride(self):
         return self.vlane_stride
@@ -366,7 +389,6 @@ class BaseMLIRKernel(common.Kernel, BaseMLIRHardwareInfo):
         _, _, _, self.buffer_types = self.kernel_group.args.mlir_argdefs()
 
         with self as kernel:
-            kernel.args = kernel.kernel_group.args
             for node in nodes:
                 node.run(vars, reduction_vars)
         src_code = self.codegen_kernel(kernel_name=kernel_name)
@@ -450,7 +472,7 @@ class BaseMLIRKernel(common.Kernel, BaseMLIRHardwareInfo):
         index = V.graph.sizevars.simplify(index)
         sorted_symbols = sorted(index.free_symbols, key=lambda s: s.name)
         replacements = {
-            x: self.args.size(x)
+            x: self.kernel_group.args.size(x)
             for x in sorted_symbols
             if x.name.startswith("s") or x.name.startswith("ps")
         }

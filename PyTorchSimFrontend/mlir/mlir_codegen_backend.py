@@ -697,7 +697,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         index = self.rename_indexing(index)
         padding = self.get_padding_type()
         index_var = self.parse_indices(index)
-        dram_var = self.args.input(name)
+        dram_var = self.kernel_group.args.input(name)
         dtype = V.graph.get_dtype(name)
         mlir_dtype = mlir_common.DTYPE_TO_MLIR[dtype]
         local_tile_desc = self.get_dma_info(name, index)
@@ -727,7 +727,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
     def store(self, name: str, index: sympy.Expr, value, *args, **kwargs):
         index = self.rename_indexing(index)
         index_var = self.parse_indices(index)
-        dram_var = self.args.output(name)
+        dram_var = self.kernel_group.args.output(name)
         dtype = V.graph.get_dtype(name)
         mlir_dtype = mlir_common.DTYPE_TO_MLIR[dtype]
 
@@ -833,7 +833,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         return acc
 
     def store_reduction(self, name, index, value):
-        dram_var = self.args.output(name)
+        dram_var = self.kernel_group.args.output(name)
         dtype = V.graph.get_dtype(name)
         mlir_dtype = mlir_common.DTYPE_TO_MLIR[dtype]
         index = self.rename_indexing(index)
@@ -901,7 +901,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
     def codegen_loops(self):
         code = mlir_common.ParallelLoopBuffer()
         # Loop body part
-        tile_size = self.kernel_group.tile_desc.tile_size
+        tile_size = self.kernel_group.tile_desc.get_tile_size()
         # Apply paddings
         loops = [LoopLevel(var, size, idx-len(self.itervars), tile_size=tile_size) for idx, (var, size) in enumerate(zip(self.itervars, self.ranges))]
         loops, reductions = [LoopNest(loops[: self.reduction_depth]),
@@ -1082,33 +1082,30 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
 
         # Case 0. Tile is 0-D scalar
         if len(dims) == 0:
-            local_tile_desc.tile_size = [1]         # Broadcast needed?
-            local_tile_desc.tile_stride = [1]
+            local_tile_desc.set_tile_size([1])         # Broadcast needed?
             local_tile_desc.vlane_split_axis = 0    # last axis
             local_tile_desc.vlane_stride = 1
         # Case 1. Tile is 1-D vector type
         elif len(dims) == 1 and len(dims) <= self.reduction_depth:
-            local_tile_desc.tile_size = [kg_tile_desc.get_dim_size(dims[0])]
-            local_tile_desc.tile_stride = [1]
+            local_tile_desc.set_tile_size([kg_tile_desc.get_dim_size(dims[0])])
             local_tile_desc.vlane_split_axis = 0    # last axis
-            local_tile_desc.vlane_stride = 1        # Need to choice best...
+            local_tile_desc.vlane_stride = 1        # Need to choose best...
         # Case 2. Tile is 1-D vector type with reduction
         elif len(dims) == 1 and len(dims) == self.reduction_depth + 1:
-            local_tile_desc.tile_size = [1, kg_tile_desc.get_dim_size(dims[0])]
-            local_tile_desc.tile_stride = [0, 1]
+            local_tile_desc.set_tile_size([1, kg_tile_desc.get_dim_size(dims[0])])
             local_tile_desc.vlane_split_axis = 0
             local_tile_desc.vlane_stride = 1
         # Case 3. Tile is 2-D tile
         elif len(dims) == 2:
             is_reduction = self.reduction_depth == 1
-            local_tile_desc.tile_size = [kg_tile_desc.get_dim_size(dim) for dim in dims]
             if is_reduction:
+                local_tile_desc.set_tile_size([kg_tile_desc.get_dim_size(dim) for dim in dims], [1, 0])
                 local_tile_desc.vlane_split_axis = 0
-                local_tile_desc.vlane_stride = 8
+                local_tile_desc.vlane_stride = 2
             else:
-                local_tile_desc.vlane_split_axis= 1
+                local_tile_desc.set_tile_size([kg_tile_desc.get_dim_size(dim) for dim in dims])
+                local_tile_desc.vlane_split_axis = local_tile_desc.get_tile_size().index(max(local_tile_desc.get_tile_size()))
                 local_tile_desc.vlane_stride = 1
-
         else:
             raise NotImplementedError("Currently not implemented... ;)")
 
