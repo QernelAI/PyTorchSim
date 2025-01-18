@@ -51,11 +51,11 @@ def mlir_compile_command(filename, vectorlane_size, tile_size, vlen=256):
             -test-loop-padding \
             -dma-fine-grained='systolic-array-size={vectorlane_size} tile-size={tile_size[0]},{tile_size[1]},{tile_size[2]}' \
             -test-pytorchsim-to-vcix='systolic-array-size={vectorlane_size} vlen={vlen}' \
+            -test-memref-to-gemmini="vectorlane={vectorlane_size}" \
             -lower-affine \
+            -finalize-memref-to-llvm \
             -lower-vector-multi-reduction \
             -convert-vector-to-llvm \
-            -test-memref-to-gemmini="vectorlane={vectorlane_size}" \
-            -finalize-memref-to-llvm \
             -convert-arith-to-llvm \
             -convert-math-to-llvm \
             -convert-scf-to-cf \

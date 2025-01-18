@@ -382,7 +382,7 @@ class BaseMLIRKernel(common.Kernel, BaseMLIRHardwareInfo):
             tile_size[-1] = 128
             tile_size[-2] = 128
         elif len(tile_size) == 1:
-            tile_size[0] = 256
+            tile_size[0] = 512
         else:
             raise NotImplementedError("dummy tile size fail!")
 
