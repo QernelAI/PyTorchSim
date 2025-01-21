@@ -1080,7 +1080,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         # Extract dimension of index(e.g, index0, index1)
         dims = [int(str(i)[5:]) for i in index.free_symbols if "index" in str(i)]
         local_tile_desc = mlir_common.MLIRMultiDimTile([1], self.vector_lane)
-
+        dims.sort() # Assume that smaller index is placed in the outer loop
         if kg_tile_desc.vlane_split_axis in dims:
             local_vlane_split_axis = dims.index(kg_tile_desc.vlane_split_axis)
         else:

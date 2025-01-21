@@ -188,7 +188,7 @@ class MLIRMultiDimTile():
         strides = [1] * len(self._tile_size)
         init = 1
 
-        original_indices = list(range(len(self.tile_axis_order)-1))
+        original_indices = list(range(len(self.tile_axis_order)))
         sorted_pairs = sorted(
             zip(self.tile_axis_order, self._tile_size, original_indices),
             key=lambda x: x[0], reverse=True
