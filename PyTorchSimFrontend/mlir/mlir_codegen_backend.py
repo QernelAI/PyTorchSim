@@ -1112,6 +1112,18 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
                 local_tile_desc.set_tile_size([kg_tile_desc.get_dim_size(dim) for dim in dims])
                 local_tile_desc.vlane_split_axis = local_vlane_split_axis
                 local_tile_desc.vlane_stride = kg_tile_desc.vlane_stride
+        # Case 3. Tile is 3-D tile
+        elif len(dims) == 3:
+            is_reduction = self.reduction_depth < 3
+            if is_reduction:
+                #local_tile_desc.set_tile_size([kg_tile_desc.get_dim_size(dim) for dim in dims], [1, 0])
+                #local_tile_desc.vlane_split_axis = local_vlane_split_axis
+                #local_tile_desc.vlane_stride = kg_tile_desc.vlane_stride
+                raise NotImplementedError("Currently not implemented... ;)")
+            else:
+                local_tile_desc.set_tile_size([kg_tile_desc.get_dim_size(dim) for dim in dims])
+                local_tile_desc.vlane_split_axis = local_vlane_split_axis
+                local_tile_desc.vlane_stride = kg_tile_desc.vlane_stride
         else:
             raise NotImplementedError("Currently not implemented... ;)")
 

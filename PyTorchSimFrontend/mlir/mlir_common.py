@@ -151,7 +151,7 @@ class MLIRKernelArgs(common.KernelArgs):
 class MLIRMultiDimTile():
     def __init__(self, tile_size, vector_lane, vlane_split_axis=None, vlane_stride=None):
         self._tile_size = list(tile_size)
-        self.tile_axis_order = list(range(len(tile_size)-1))
+        self.tile_axis_order = list(range(len(tile_size)))
 
         # Vector lane mapping config
         self.vector_lane = vector_lane
@@ -161,7 +161,7 @@ class MLIRMultiDimTile():
     def set_tile_size(self, tile_size, tile_axis_order=None):
         self._tile_size = tile_size
         if tile_axis_order is None:
-            self.tile_axis_order = list(range(len(tile_size)-1))
+            self.tile_axis_order = list(range(len(tile_size)))
         else:
             self.tile_axis_order = tile_axis_order
 
@@ -378,11 +378,15 @@ class BaseMLIRKernel(common.Kernel, BaseMLIRHardwareInfo):
 
         # Dummy tile size
         tile_size = [1] * (len(vars) + len(reduction_vars))
-        if len(tile_size) >= 2:
+        if len(tile_size) == 2:
             tile_size[-1] = 128
             tile_size[-2] = 128
         elif len(tile_size) == 1:
             tile_size[0] = 512
+        elif len(tile_size) == 3:
+            tile_size[-1] = 128
+            tile_size[-2] = 128
+            tile_size[-2] = 128
         else:
             raise NotImplementedError("dummy tile size fail!")
 
