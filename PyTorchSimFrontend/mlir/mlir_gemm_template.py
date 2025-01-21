@@ -24,11 +24,8 @@ func.func @{{ KERNEL_NAME }}{{kernel.def_kernel(inputs=[X, W, Bias], outputs=[Y]
   %c_mvin3 = arith.constant 14 : index{% endif %}
   %c_mvout = arith.constant 3 : index
   %c_set = arith.constant 2 : index
-  %x_chunk = arith.constant {% if X_transposed %} {{ kernel.vector_lane * 2 + 0 }} {% else %} {{ 2 }} {% endif %} : index
-  %w_chunk = arith.constant {% if W_transposed %} {{ TILE_K * 2 + 0 }} {% else %} {{ 2 }} {% endif %} : index
-  %M = arith.constant {{ M }} : index
-  %N = arith.constant {{ N }} : index
-  %K = arith.constant {{ K }} : index
+  %vstride = arith.constant 1 : index
+  %axis = arith.constant 1 : index
   %X_buffer = memref.get_global @X_spad : memref<{{ TILE_M }}x{{ TILE_K }}xf32, 1>
   %W_buffer = memref.get_global @W_spad : memref<{{ TILE_K }}x{{ TILE_N }}xf32, 1>
   %Y_buffer = memref.get_global @Y_spad : memref<{{ TILE_M }}x{{ TILE_N }}xf32, 1>
@@ -41,25 +38,23 @@ func.func @{{ KERNEL_NAME }}{{kernel.def_kernel(inputs=[X, W, Bias], outputs=[Y]
     affine.for %t_n = 0 to {{ N }} step {{ TILE_N }} {
       %index2 = affine.apply #map2(%t_m, %t_n)
       {% if Bias -%}
-      affine.dma_start %Bias[
+      memref.dma_start %Bias[
         {%- if Bias_rank == 2 -%} %index2 {%- else -%} %t_n {%- endif -%}
-        ], %Y_buffer[%c0, %c0], %tag[0], %c_mvin3, %
-        {%- if Bias_rank == 2 -%} N {%- else -%} c0 {%- endif -%}
-        , %c_set : memref<
+        ], %Y_buffer[%c0, %c0], %c_mvin3, %tag[%c0], %
+        {%- if Bias_rank == 2 -%} axis {%- else -%} c0 {%- endif -%}
+        , %vstride : memref<
         {%- if Bias_rank == 2 -%}  {{ M * N }} {%- else -%} {{ N }} {%- endif -%}
-        xf32>, memref<{{ TILE_M }}x{{ TILE_N }}xf32, 1>, memref<1xi32>  { subtile_size=[{{ kernel.vector_lane }}, {{ kernel.vector_lane }}], async=1 }
+        xf32>, memref<{{ TILE_M }}x{{ TILE_N }}xf32, 1>, memref<1xi32>  { subtile_size=[{{ kernel.vector_lane }}, {{ kernel.vector_lane }}], async=1, sram_stride=[{{ TILE_N }}, 1] }
       {%- else -%}
       affine.vector_store %v0, %Y_buffer[0, 0] : memref<{{ TILE_M }}x{{ TILE_N }}xf32, 1>, vector<{{ TILE_M * TILE_N // kernel.vector_lane }}xf32>
       {%- endif %}
       affine.for %t_k = 0 to {{ K }} step {{ TILE_K }} {
         %index0 = affine.apply #map0(%t_m, %t_k)
         %index1 = affine.apply #map1(%t_k, %t_n)
-        affine.dma_start %X[%index0], %X_buffer[%c0, %c0], %tag[0], %c_mvin,
-        {%- if X_transposed -%} %M, %x_chunk {%- else -%} %K, %x_chunk {%- endif -%}
-           : memref<{{ M * K }}xf32>, memref<{{ TILE_M }}x{{ TILE_K }}xf32, 1>, memref<1xi32> { subtile_size=[{{ kernel.vector_lane }}, {{ TILE_K }}], async=1{% if X_transposed %}, transpose=1{% endif %} }
-        affine.dma_start %W[%index1], %W_buffer[%c0, %c0], %tag[0], %c_mvin2,
-        {%- if W_transposed -%} %K, %w_chunk {%- else -%} %N, %w_chunk {%- endif -%}
-           : memref<{{ K * N }}xf32>, memref<{{ TILE_K }}x{{ TILE_N }}xf32, 1>, memref<1xi32> { subtile_size=[{{ TILE_K }}, {{ kernel.vector_lane }}], async=1{% if W_transposed %}, transpose=1{% endif %} }
+        memref.dma_start %X[%index0], %X_buffer[%c0, %c0], %c_mvin, %tag[%c0], %axis, %vstride
+           : memref<{{ M * K }}xf32>, memref<{{ TILE_M }}x{{ TILE_K }}xf32, 1>, memref<1xi32> { subtile_size=[{{ kernel.vector_lane }}, {{ TILE_K }}], async=1, sram_stride=[{{ TILE_K }}, 1]}
+        memref.dma_start %W[%index1], %W_buffer[%c0, %c0], %c_mvin2, %tag[%c0], %axis, %vstride
+           : memref<{{ K * N }}xf32>, memref<{{ TILE_K }}x{{ TILE_N }}xf32, 1>, memref<1xi32> { subtile_size=[{{ TILE_K }}, {{ kernel.vector_lane }}], async=1, sram_stride=[{{ TILE_N }}, 1]}
         linalg.matmul ins(%X_buffer, %W_buffer : memref<{{ TILE_M }}x{{ TILE_K }}x{{ DATA_STYPE }}, 1>, memref<{{ TILE_K }}x{{ TILE_N }}x{{ DATA_STYPE }}, 1>)
                 outs(%Y_buffer : memref<{{ TILE_M }}x{{ TILE_N }}x{{ DATA_STYPE }}, 1>)
       } { accumulation_loop=true }
