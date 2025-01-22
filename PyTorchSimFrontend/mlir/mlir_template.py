@@ -174,7 +174,7 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
             tile_shape = f"memref<{options['TILE_M']}x{options['TILE_N']}x{mlir_dtype}, 1>"
             zero_cse = self.get_const_cse(0)
             sram_index_var = ",".join([f"%{zero_cse}"] * 2)
-            tile_stride = [options['TILE_N'], 1]
+            tile_stride = [1, options['TILE_N']]
             code = self.get_dma_code("MVOUT", vlane_split_axis, vlane_stride, mlir_dtype, dram_var, index_var, sram_var, sram_index_var,
                                  tag_var, dram_shape, tile_shape, tile_stride)
             self.cse.generate(self.stores, code, assignment = False)
