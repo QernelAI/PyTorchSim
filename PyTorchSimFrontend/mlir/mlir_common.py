@@ -386,9 +386,13 @@ class BaseMLIRKernel(common.Kernel, BaseMLIRHardwareInfo):
         elif len(tile_size) == 3:
             tile_size[-1] = 128
             tile_size[-2] = 128
-            tile_size[-3] = 128
+            tile_size[-3] = 2
         else:
             raise NotImplementedError("dummy tile size fail!")
+
+        for i in range(1, len(tile_size)+1):
+            if tile_size[-i] > self.ranges[-i]:
+                tile_size[-i] = self.ranges[-i]
 
         # Select tile info.
         # Note: Kernel Group have to share same tile desc for fusion

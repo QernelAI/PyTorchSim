@@ -678,7 +678,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
     def parse_indices(self, expr) -> common.CSEVariable:
         # Constant case
         if expr.is_number:
-            map_var = self.map_cse.generate(self.global_vars, f"affine_map<(d0) -> ({str(expr)}*d0)>")
+            map_var = self.map_cse.generate(self.global_vars, f"affine_map<(d0) -> ({str(expr)}*d0 + 0)>")
             fake_dim = self.get_const_cse(1)
             return self.cse.generate(self.loads, f"affine.apply #{map_var}(%{fake_dim})")
 
@@ -924,7 +924,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         # Loop body part
         tile_size = self.kernel_group.tile_desc.get_tile_size()
         # Apply paddings
-        loops = [LoopLevel(var, size, idx-len(self.itervars), tile_size=tile_size) for idx, (var, size) in enumerate(zip(self.itervars, self.ranges))]
+        loops = [LoopLevel(var, size, step=step) for idx, (var, size, step) in enumerate(zip(self.itervars, self.ranges, tile_size))]
         loops, reductions = [LoopNest(loops[: self.reduction_depth]),
                              LoopNest(loops[self.reduction_depth :])]
         if (self.reduction_depth==0):
@@ -1104,11 +1104,11 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         if kg_tile_desc.vlane_split_axis in dims:
             local_vlane_split_axis = dims.index(kg_tile_desc.vlane_split_axis)
         else:
-            local_vlane_split_axis = len(dims) - 1
+            local_vlane_split_axis = max(len(dims) - 1, 0)
 
         # Case 0. Tile is 0-D scalar
         if len(dims) == 0:
-            local_tile_desc.set_tile_size([2])         # Force it to use vector instruction.
+            local_tile_desc.set_tile_size([kg_tile_desc.get_used_vlane() * kg_tile_desc.vlane_stride])         # Force it to use vector instruction.
             local_tile_desc.vlane_split_axis = local_vlane_split_axis    # last axis
             local_tile_desc.vlane_stride = kg_tile_desc.vlane_stride
         # Case 1. Tile is 1-D vector type
@@ -1287,22 +1287,18 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
 class LoopLevel:
     var: sympy.Expr
     size: sympy.Expr
-    idx: int
     start: int = 0
-    tile_size : List = None
+    step: int = 1
     reduction_vars: Dict[str, str] = None
-    loop_nr : int = 0
 
     def lines(self):
-        step = self.tile_size[self.loop_nr]
-        self.loop_nr += 1
         if self.reduction_vars:
             acc = ', '.join([f"%{acc.name}" for acc in self.reduction_vars.keys()])
             args = ', '.join([f"%{iter.name} = %{init.name}" for (_, iter, init, _) in self.reduction_vars.values()])
             dtype = ', '.join([f"{dtype}" for (_, _, _, dtype) in self.reduction_vars.values()])
-            line = f"{acc} = affine.for %{self.var} = {self.start} to {self.size} step {step} iter_args({args}) -> ({dtype})"
+            line = f"{acc} = affine.for %{self.var} = {self.start} to {self.size} step {self.step} iter_args({args}) -> ({dtype})"
         else:
-            line = f"affine.for %{self.var} = {self.start} to {self.size} step {step}"
+            line = f"affine.for %{self.var} = {self.start} to {self.size} step {self.step}"
 
         return [line]
 
