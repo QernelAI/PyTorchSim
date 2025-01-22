@@ -592,14 +592,32 @@ class ExtensionOverrides(common.OpOverrides):
         des_shape = f"vector<{op_type[0]}x{target_type}>" if op_type[0] > 1 else target_type
         return f"arith.index_cast %{operand} : {src_shape} to {des_shape}", [op_type[0], target_type]
 
+    @staticmethod
+    def broadcast_unflat(operand1, operand2, *args, var_info=None):
+        op_type1 = var_info[operand1]
+        op_type2 = var_info[operand2]
+        src_shape = f"vector<{op_type1[0]}x{op_type1[1]}>"# if op_type1[0] > 1 else op_type1[1]
+        des_shape = f"vector<{op_type2[0]//op_type1[0]}x{op_type1[0]}x{op_type1[1]}>"# if op_type2[0] > 1 else op_type1[1] # Use tile size only
+
+        expand = f"vector.broadcast %{operand1} : {src_shape} to {des_shape}"
+        return expand, [op_type2[0], op_type1[1]]
 
     @staticmethod
     def broadcast(operand1, operand2, *args, var_info=None):
         op_type1 = var_info[operand1]
         op_type2 = var_info[operand2]
-        src_shape = f"vector<{op_type1[0]}x{op_type1[1]}>" if op_type1[0] > 1 else op_type1[1]
-        des_shape = f"vector<{op_type2[0]}x{op_type1[1]}>" if op_type2[0] > 1 else op_type1[1] # Use tile size only
-        expand = f"vector.broadcast %{operand1} : {src_shape} to {des_shape}"
+        src_shape = f"vector<{op_type1[0]}x{op_type1[1]}>"# if op_type1[0] > 1 else op_type1[1]
+        des_shape = f"vector<{op_type2[0]}x{op_type1[1]}>"# if op_type2[0] > 1 else op_type1[1] # Use tile size only
+
+        # Special case for length 2 vector. We used this vector to avoid scalar operations...
+        if op_type1[0] != 1 and op_type2[0] % op_type1[0] == 0:
+            unflat_operand = ops.broadcast_unflat(operand1, operand2)
+            unflat_shape = f"vector<{op_type2[0]//op_type1[0]}x{op_type1[0]}x{op_type1[1]}>"
+            expand = f"vector.shape_cast %{unflat_operand} : {unflat_shape} to {des_shape}"
+        elif op_type1[0] == 1:
+            expand = f"vector.broadcast %{operand1} : {src_shape} to {des_shape}"
+        else:
+            raise NotImplementedError("Not supporting broadcast type...")
         return expand, [op_type2[0], op_type1[1]]
 
 RTYPE_TO_MLIR = {
@@ -1088,7 +1106,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
 
         # Case 0. Tile is 0-D scalar
         if len(dims) == 0:
-            local_tile_desc.set_tile_size([1])         # Broadcast needed?
+            local_tile_desc.set_tile_size([2])         # Force it to use vector instruction.
             local_tile_desc.vlane_split_axis = local_vlane_split_axis    # last axis
             local_tile_desc.vlane_stride = kg_tile_desc.vlane_stride
         # Case 1. Tile is 1-D vector type
@@ -1247,10 +1265,16 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
 
         return buffer, indices, sram_index_var
 
-    def get_const_cse(self, value) -> common.CSEVariable:
+    def get_const_cse(self, value, dtype="index") -> common.CSEVariable:
+        # Type convert
+        if dtype[0] == "f":
+            value = float(value)
+        else:
+            value = int(value)
+
         if value not in self.consts:
-            self.consts[value] = self.const_cse.generate(self.const_buffer, f"arith.constant {value} : index")
-        return self.consts[value]
+            self.consts[str(value)+dtype] = self.const_cse.generate(self.const_buffer, f"arith.constant {value} : {dtype}")
+        return self.consts[str(value)+dtype]
 
     def get_tag_cse(self, value, shape="memref<1xi32>"):
         if value not in self.tags:

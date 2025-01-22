@@ -386,14 +386,14 @@ class BaseMLIRKernel(common.Kernel, BaseMLIRHardwareInfo):
         elif len(tile_size) == 3:
             tile_size[-1] = 128
             tile_size[-2] = 128
-            tile_size[-2] = 128
+            tile_size[-3] = 128
         else:
             raise NotImplementedError("dummy tile size fail!")
 
         # Select tile info.
         # Note: Kernel Group have to share same tile desc for fusion
         tile_desc = MLIRMultiDimTile(tile_size, self.vector_lane)
-        tile_desc.vlane_split_axis = len(vars) - 1
+        tile_desc.vlane_split_axis = len(vars) - 1 # Set split_axis as a last normal loop not reduction loop
         tile_desc.vlane_stride = 2
         self.kernel_group.set_tile_info(tile_desc)
 
