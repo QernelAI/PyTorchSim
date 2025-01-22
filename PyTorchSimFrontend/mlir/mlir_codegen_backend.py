@@ -678,7 +678,9 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
     def parse_indices(self, expr) -> common.CSEVariable:
         # Constant case
         if expr.is_number:
-            return self.get_const_cse(int(expr))
+            map_var = self.map_cse.generate(self.global_vars, f"affine_map<(d0) -> ({str(expr)}*d0)>")
+            fake_dim = self.get_const_cse(1)
+            return self.cse.generate(self.loads, f"affine.apply #{map_var}(%{fake_dim})")
 
         # Identity case
         if len(expr.args) == 0:
