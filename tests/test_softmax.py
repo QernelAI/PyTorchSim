@@ -55,5 +55,7 @@ if __name__ == "__main__":
     module = ExecutionEngine.setup_device()
     device = module.custom_device()
     test_softmax(device, size=(64, 128))
+    test_softmax(device, size=(64, 128), dim=0)
     test_softmax(device, size=(256, 128))
+    test_softmax(device, size=(256, 128), dim=0)
     test_softmax(device, size=(1, 16))

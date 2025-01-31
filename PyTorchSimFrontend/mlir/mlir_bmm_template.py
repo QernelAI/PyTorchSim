@@ -42,7 +42,7 @@ func.func @{{ KERNEL_NAME }}{{kernel.def_kernel(inputs=[X, W, Bias], outputs=[Y]
         {%- if Bias_rank == 2 -%} axis {%- else -%} c0 {%- endif -%}
           , %vstride : memref<
         {%- if Bias_rank == 2 -%} {{ M * N }} {%- else -%} {{ N }} {%- endif -%}
-          xf32>, memref<{{ TILE_M }}x{{ TILE_N }}xf32, 1>, memref<1xi32> { subtile_size=[{{ kernel.vector_lane }}, {{ kernel.vector_lane }}], async=1, sram_stride=[{{ TILE_N }}, 1] }
+          xf32>, memref<{{ TILE_M }}x{{ TILE_N }}xf32, 1>, memref<1xi32> { subtile_size=[{{ kernel.vector_lane }}, {{ kernel.vector_lane }}], async=1, sram_stride=[{{ kernel.vector_lane }}, 1] }
         {%- else -%}
         affine.vector_store %v0, %Y_buffer[0, 0] : memref<{{ TILE_M }}x{{ TILE_N }}xf32, 1>, vector<{{ TILE_M * TILE_N // kernel.vector_lane }}xf32>{% endif %}
         affine.for %t_k = 0 to {{ K }} step {{ TILE_K }} {
