@@ -814,7 +814,10 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
             if len(self.ranges) == 1: # 1-D vector to scalar
                 axis = "0"
                 acc_var = init
-                shape = f"vector<{self.var_info[value][0]*self.vector_lane}x{type_name}>" # use single vector lane
+                vec_len = self.kernel_group.tile_desc.get_vlane_stride()
+                shape = f"vector<{self.var_info[value][0]}x{type_name}>"
+                var_info = [vec_len, mlir_common.DTYPE_TO_MLIR[dtype]]
+                self.register_var_info(acc, var_info)
             elif len(self.ranges) == 2:
                 vec_len = self.kernel_group.tile_desc.get_vlane_stride()
                 flattened_size = f"vector<{self.var_info[value][0]}x{type_name}>"
@@ -926,7 +929,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         loops, reductions = [LoopNest(loops[: self.reduction_depth]),
                              LoopNest(loops[self.reduction_depth :])]
         if (self.reduction_depth==0):
-            loops = LoopNest([LoopLevel("dummy", 1, 1, 0)])
+            loops = LoopNest([LoopLevel("dummy", 1)])
         reductions.mark_reduction(self.reduction_vars)
         if len(self.affine_yield) > 0:
             vars = ', '.join([f"%{name}" for name, _ in self.affine_yield.items()])
@@ -1130,9 +1133,9 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
             local_tile_desc.vlane_stride = kg_tile_desc.vlane_stride
         # Case 2. Tile is 1-D vector type with reduction
         elif len(local_dims) == 1 and len(local_dims) == self.reduction_depth + 1:
-            local_tile_desc.set_tile_size([1, kg_tile_desc.get_dim_size(local_dims[0])])
-            local_tile_desc.vlane_split_axis = local_vlane_split_axis
-            local_tile_desc.vlane_stride = kg_tile_desc.vlane_stride
+            local_tile_desc.set_tile_size([kg_tile_desc.get_dim_size(local_dims[0])])
+            local_tile_desc.vlane_split_axis = 0
+            local_tile_desc.vlane_stride = kg_tile_desc.get_dim_size(local_dims[0])
         # Case 3. Tile is 2-D tile
         elif len(local_dims) == 2:
             is_reduction = self.reduction_depth == 1

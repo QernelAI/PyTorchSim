@@ -338,7 +338,6 @@ class BaseMLIRKernel(common.Kernel, BaseMLIRHardwareInfo):
             self.ranges = [self.rename_indexing(x) for x in self.call_ranges]
             self.itervars = [sympy.Symbol(f"index{n}") for n in range(len(self.ranges))]
             self.reduction_depth = len(lengths)
-
         return (
             self.itervars[: self.reduction_depth],
             self.itervars[self.reduction_depth :],
@@ -390,15 +389,20 @@ class BaseMLIRKernel(common.Kernel, BaseMLIRHardwareInfo):
         else:
             raise NotImplementedError("dummy tile size fail!")
 
+        vlane_stride = 2
+        # Adjust tile size to avoid too much paddings
         for i in range(1, len(tile_size)+1):
             if tile_size[-i] > self.ranges[-i]:
+                remains = (self.ranges[-i] % vlane_stride)
                 tile_size[-i] = self.ranges[-i]
+                if remains:
+                    tile_size[-i] += vlane_stride - remains
 
         # Select tile info.
         # Note: Kernel Group have to share same tile desc for fusion
         tile_desc = MLIRMultiDimTile(tile_size, self.vector_lane)
         tile_desc.vlane_split_axis = len(vars) - 1 # Set split_axis as a last normal loop not reduction loop
-        tile_desc.vlane_stride = 2
+        tile_desc.vlane_stride = vlane_stride
         self.kernel_group.set_tile_info(tile_desc)
 
         _, _, _, self.buffer_types = self.kernel_group.args.mlir_argdefs()
