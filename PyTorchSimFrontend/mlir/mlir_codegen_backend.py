@@ -336,7 +336,7 @@ class ExtensionOverrides(common.OpOverrides):
         return f'math.log %{operand} : {shape}', [tile_size, dtype]
 
     @staticmethod
-    def reciprocal(operand, *args, var_info):
+    def reciprocal(operand, *args, var_info=None, **kwargs):
         op_type = var_info[operand]
         tile_size = op_type[0]
         dtype = op_type[1]
