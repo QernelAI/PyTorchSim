@@ -272,6 +272,7 @@ std::vector<std::shared_ptr<Tile>> TileLoopNode::get_tiles_from_iter(TileGraphPa
       addr_type base_addr = tog_parser->lookup(base_addr_name);
       std::vector<int> iter_list;
       std::vector<int> tag_list;
+      std::vector<int> accum_tag_list;
       std::vector<int> loop_size_list;
       std::vector<uint32_t> outer_loop_idx;
       std::vector<uint32_t> outer_loop_size;
@@ -284,15 +285,15 @@ std::vector<std::shared_ptr<Tile>> TileLoopNode::get_tiles_from_iter(TileGraphPa
         if (tog_parser->get_loop_type(loop_idx)==LoopType::INNER_LOOP)
           nr_inner_loop++;
       }
-      /* Add accumulation loop info to tag list */
-      //for (auto loop_idx = loop_idx_list.begin();
-      //      loop_idx != loop_idx_list.end() - nr_inner_loop; ++loop_idx) {
-      //  // Check loop type and process
-      //  if (tog_parser->get_loop_type(*loop_idx)==LoopType::ACCUMULATION_LOOP) {
-      //    auto iter_value = getLoopIndexValue(iter, *loop_idx);
-      //    tag_list.push_back(iter_value);
-      //  }
-      //}
+      /* Add accumulation loop info to accum_tag list */
+      for (auto loop_idx = loop_idx_list.begin();
+            loop_idx != loop_idx_list.end() - nr_inner_loop; ++loop_idx) {
+        // Check loop type and process
+        if (tog_parser->get_loop_type(*loop_idx)==LoopType::ACCUMULATION_LOOP) {
+          auto iter_value = getLoopIndexValue(iter, *loop_idx);
+          accum_tag_list.push_back(iter_value);
+        }
+      }
 
       for (auto loop_idx = loop_idx_list.begin();
             loop_idx != loop_idx_list.end(); ++loop_idx) {
@@ -327,7 +328,7 @@ std::vector<std::shared_ptr<Tile>> TileLoopNode::get_tiles_from_iter(TileGraphPa
         Opcode::MOVIN, 0,
         0, base_addr,
         mem_node->get_tile_size(), mem_node->get_precision(), iter_list,
-        mem_node->get_stride_list(), tag_list, tag_stride_list, loop_size_list
+        mem_node->get_stride_list(), tag_list, tag_stride_list, accum_tag_list, loop_size_list
       );
       inst->set_addr_name(base_addr_name);
       inst->set_nr_inner_loop(nr_inner_loop);
@@ -342,6 +343,7 @@ std::vector<std::shared_ptr<Tile>> TileLoopNode::get_tiles_from_iter(TileGraphPa
       /* Lookup given name's address */
       addr_type base_addr = tog_parser->lookup(base_addr_name);
       std::vector<int>& tag_stride_list = mem_node->get_tag_stride_list();
+      std::vector<int> accum_tag_list;
       std::vector<int> iter_list;
       std::vector<int> loop_size_list;
       std::vector<uint32_t> outer_loop_idx;
@@ -376,7 +378,7 @@ std::vector<std::shared_ptr<Tile>> TileLoopNode::get_tiles_from_iter(TileGraphPa
         Opcode::MOVOUT, 0,
         0, base_addr,
         mem_node->get_tile_size(), mem_node->get_precision(), iter_list,
-        mem_node->get_stride_list(), std::vector<int>(1), tag_stride_list, loop_size_list
+        mem_node->get_stride_list(), std::vector<int>(1), tag_stride_list, accum_tag_list, loop_size_list
       );
       inst->set_addr_name(base_addr_name);
       inst->set_nr_inner_loop(nr_inner_loop);
@@ -394,30 +396,36 @@ std::vector<std::shared_ptr<Tile>> TileLoopNode::get_tiles_from_iter(TileGraphPa
       std::vector<int> iter_list;
       std::vector<int> tag_list;
       std::vector<int>& tag_stride_list = wait_node->get_tag_stride_list();
+      std::vector<int> new_tag_stride_list;
+      std::vector<int> accum_tag_list;
       auto& wait_tag_list = wait_node->get_tag_idx_list();
-      int inner_step = std::stoi(tog_parser->getMetaByName("systolic_size"));
-      /* Add accumulation loop info to tag list */
-      for (auto loop_idx = iter.begin(); loop_idx != iter.end(); ++loop_idx) {
-        /* FIXME. Used heuristic that wait_tag_size has 2d dim */
-        if (tog_parser->get_loop_type(loop_idx->first)==LoopType::ACCUMULATION_LOOP && wait_tag_list.size() != 2) {
-          tag_list.push_back(loop_idx->second);
+
+      for (auto loop_idx: wait_tag_list) {
+        if (iter.find(loop_idx) == iter.end()) {
+          tag_list.push_back(0);
+          continue;
+        }
+
+        if (tog_parser->get_loop_type(loop_idx)==LoopType::ACCUMULATION_LOOP) {
+          auto iter_value = getLoopIndexValue(iter, loop_idx);
+          accum_tag_list.push_back(iter_value);
+        } else {
+          auto iter_value = getLoopIndexValue(iter, loop_idx);
+          tag_list.push_back(iter_value);
         }
       }
 
-      for (auto loop_idx: wait_tag_list) {
-        if (iter.find(loop_idx) == iter.end())
-          tag_list.push_back(0);
-        else {
-          auto iter_value = getLoopIndexValue(iter, loop_idx) * inner_step;
-          tag_list.push_back(iter_value);
-        }
+      /* Skip accum stride */
+      for (auto i : tag_stride_list) {
+        if (i!=-1)
+          new_tag_stride_list.push_back(i);
       }
 
       std::shared_ptr<Instruction> inst = std::make_shared<Instruction>(
         Opcode::BAR, 0,
         0, base_addr,
         std::vector<size_t>(), 0, iter_list,
-        iter_list, tag_list, tag_stride_list, std::vector<int>()
+        iter_list, tag_list, new_tag_stride_list, accum_tag_list, std::vector<int>()
       );
       inst->set_addr_name(base_addr_name);
       link_map[tile_node] = inst;
@@ -428,11 +436,12 @@ std::vector<std::shared_ptr<Tile>> TileLoopNode::get_tiles_from_iter(TileGraphPa
       std::vector<int> iter_list;
       std::vector<int> tag_list = {0};
       std::vector<int> tag_stride_list = {1};
+      std::vector<int> accum_tag_list;
       std::shared_ptr<Instruction> inst = std::make_shared<Instruction>(
         Opcode::COMP, compute_node->get_cycle(),
         0, 0,
         std::vector<size_t>(), 0, iter_list, iter_list,
-        tag_list, tag_stride_list, std::vector<int>()
+        tag_list, tag_stride_list, accum_tag_list, std::vector<int>()
       );
       inst->set_overlapping_cycle(compute_node->get_overlapping_cycle());
       inst->set_compute_type(compute_node->get_compute_type());

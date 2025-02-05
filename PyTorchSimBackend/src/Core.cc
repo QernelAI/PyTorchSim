@@ -82,7 +82,7 @@ void Core::dma_cycle() {
                     _id, _core_cycle, opcode_to_string(instruction->get_opcode()),
                     _used_sram_size, instruction->get_free_sram_size(),
                     instruction->subgraph_id, instruction->get_addr_name(),
-                    instruction->get_tag_id(),
+                    fmt::format("[{}]", fmt::join(instruction->get_tag_id(), ", ")),
                     fmt::format("[{}]", fmt::join(instruction->get_tag_idx_list(), ", ")),
                     fmt::format("[{}]", fmt::join(instruction->get_tag_stride_list(), ", ")));
       for (auto & wait_inst : _tma.get_tag_waiter(instruction->subgraph_id, key)) {
@@ -113,7 +113,7 @@ void Core::dma_cycle() {
       } else if (finished_inst->get_opcode() == Opcode::BAR) {
         spdlog::trace("[Core {}][{}] {} FINISHED, addr_name: {} tag_id: {} tag_idx_list: {} tag_stride_list: {}", _id, _core_cycle,
                       opcode_to_string(finished_inst->get_opcode()), finished_inst->get_addr_name(),
-                      finished_inst->get_tag_id(),
+                      fmt::format("[{}]", fmt::join(finished_inst->get_tag_id(), ", ")),
                       fmt::format("[{}]", fmt::join(finished_inst->get_tag_idx_list(), ", ")),
                       fmt::format("[{}]", fmt::join(finished_inst->get_tag_stride_list(), ", ")));
       }
@@ -181,7 +181,7 @@ void Core::cycle() {
               spdlog::trace("[Core {}][{}] {} SKIPPED, free_sram_size: {} addr_name: {} tag_id: {} tag_idx_list: {} tag_stride_list: {}", _id, _core_cycle,
                             opcode_to_string(inst->get_opcode()), inst->get_free_sram_size(),
                             inst->get_addr_name(),
-                            inst->get_tag_id(),
+                            fmt::format("[{}]", fmt::join(inst->get_tag_id(), ", ")),
                             fmt::format("[{}]", fmt::join(inst->get_tag_idx_list(), ", ")),
                             fmt::format("[{}]", fmt::join(inst->get_tag_stride_list(), ", ")));
               issued = true;
@@ -190,7 +190,7 @@ void Core::cycle() {
               spdlog::trace("[Core {}][{}] {} ISSUED, free_sram_size: {} addr_name: {} tag_id: {} tag_idx_list: {} tag_stride_list: {}", _id, _core_cycle,
                             opcode_to_string(inst->get_opcode()), inst->get_free_sram_size(),
                             inst->get_addr_name(),
-                            inst->get_tag_id(),
+                            fmt::format("[{}]", fmt::join(inst->get_tag_id(), ", ")),
                             fmt::format("[{}]", fmt::join(inst->get_tag_idx_list(), ", ")),
                             fmt::format("[{}]", fmt::join(inst->get_tag_stride_list(), ", ")));
               _ld_inst_queue.push(inst);

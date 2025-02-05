@@ -23,7 +23,7 @@ class Instruction {
   Instruction(Opcode opcode, cycle_type compute_cycle, size_t num_parents, addr_type dram_addr,
               std::vector<size_t> tile_size, size_t precision, std::vector<int> &idx_list,
               std::vector<int> &stride_list,  std::vector<int> tag_idx_list, std::vector<int> tag_stride_list,
-              std::vector<int> loop_size_list);
+              std::vector<int> accum_tag_idx_list, std::vector<int> loop_size_list);
   void finish_instruction();
   void add_child(std::shared_ptr<Instruction> child);
   bool check_ready() { return ready_counter == 0; }
@@ -90,13 +90,7 @@ class Instruction {
   std::vector<int>& get_idx_list() { return _idx_list; }
   std::vector<int>& get_tag_idx_list() { return _tag_idx_list; }
   std::vector<int>& get_tag_stride_list() { return _tag_stride_list; }
-  int get_tag_id() {
-    assert(_tag_idx_list.size()==_tag_stride_list.size());
-    int ret = 0;
-    for (int i=0; i<_tag_idx_list.size(); i++)
-      ret += _tag_idx_list.at(i) * _tag_stride_list.at(i);
-    return ret;
-  }
+  std::vector<int>& get_tag_id() { return _tag_key; }
   void set_addr_name(std::string name) { _addr_name = name; }
   std::string get_addr_name() { return _addr_name; }
   void set_nr_inner_loop(int nr) { _nr_inner_loop = nr; }
@@ -128,6 +122,8 @@ class Instruction {
   std::vector<int> _stride_list;
   std::vector<int> _tag_idx_list;
   std::vector<int> _tag_stride_list;
+  std::vector<int> _tag_key;
+  std::vector<int> _accum_tag_idx_list;
   std::vector<int> _loop_size_list;
   std::string _addr_name;
   int _nr_inner_loop = 0;
