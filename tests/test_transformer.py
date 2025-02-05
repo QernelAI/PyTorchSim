@@ -112,6 +112,18 @@ def test_Attention(device):
     cpu_res, cpu_p_attn = attention(query.cpu(), key.cpu(), value.cpu())
     test_result("Attention Forward", res, cpu_res)
 
+def test_MHA(device, num_heads=12, embed_dim=768):
+    MHA = my_MultiheadAttention(num_heads, embed_dim)
+    cpu_query = torch.randn(512, 768)
+    cpu_res = MHA(cpu_query, cpu_query, cpu_query)
+
+    query = cpu_query.clone().to(device=device)
+    MHA.to(device=device)
+    opt_fn = torch.compile(dynamic=False)(MHA)
+    res = opt_fn(query, query, query)
+
+    test_result("MHA Forward", res, cpu_res)
+
 if __name__ == "__main__":
     import os
     import sys
