@@ -272,6 +272,28 @@ class ExtensionOverrides(common.OpOverrides):
         return f'math.exp %{operand} : {shape}', [tile_size, dtype]
 
     @staticmethod
+    def erf(x, *args, var_info=None, **kwargs):
+        op_type = var_info[x]
+        tile_size = op_type[0]
+        dtype = op_type[1]
+        shape = f"vector<{tile_size}x{dtype}>" if tile_size > 1 else dtype
+        return f'math.erf %{x} : {shape}', [tile_size, dtype] # TODO: erf lowering pass is not implemented
+
+    @staticmethod
+    def tanh(operand, *args, var_info=None, **kwargs):
+        op_type = var_info[operand]
+        tile_size = op_type[0]
+        dtype = op_type[1]
+
+        # Type check & auto cast
+        if dtype[0] != "f":
+            operand, dtype = ops.to_dtype(operand, "f32", var_info=var_info)
+            var_info[operand] = dtype
+
+        shape = f"vector<{tile_size}x{dtype}>" if tile_size > 1 else dtype
+        return f'math.tanh %{operand} : {shape}', [tile_size, dtype]
+
+    @staticmethod
     def sqrt(operand, *args, var_info=None, **kwargs):
         op_type = var_info[operand]
         tile_size = op_type[0]
