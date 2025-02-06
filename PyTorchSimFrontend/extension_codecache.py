@@ -49,10 +49,12 @@ def mlir_compile_command(filename, vectorlane_size, vlen=256):
         f"""
             {extension_config.CONFIG_TORCHSIM_LLVM_PATH}/mlir-opt \
             -test-loop-padding \
+            -expand-realloc \
             -dma-fine-grained='systolic-array-size={vectorlane_size}' \
             -test-pytorchsim-to-vcix='systolic-array-size={vectorlane_size} vlen={vlen}' \
             -test-memref-to-gemmini="vectorlane={vectorlane_size}" \
             -lower-affine \
+            -expand-strided-metadata \
             -finalize-memref-to-llvm \
             -lower-vector-multi-reduction \
             -convert-vector-to-llvm \
@@ -82,11 +84,13 @@ def mlir_gem5_compile_command(filename, sample_filename, tog_file, vectorlane_si
         f"""
             {extension_config.CONFIG_TORCHSIM_LLVM_PATH}/mlir-opt \
             -test-loop-padding='timing_mode=1' \
+            -expand-realloc \
             -dma-fine-grained='systolic-array-size={vectorlane_size}' \
             -test-pytorchsim-to-vcix='systolic-array-size={vectorlane_size} vlen={vlen}' \
             -test-tile-operation-graph='vectorlane={vectorlane_size}' \
             -test-memref-to-gemmini="vectorlane={vectorlane_size} timing=1" \
             -lower-affine \
+            -expand-strided-metadata \
             -finalize-memref-to-llvm \
             -lower-vector-multi-reduction \
             -convert-vector-to-llvm \
