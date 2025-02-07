@@ -46,7 +46,7 @@ func.func @{{ KERNEL_NAME }}{{kernel.def_kernel(inputs=[X, W, Bias], outputs=[Y]
         {%- if Bias_rank == 2 -%} axis {%- else -%} c0 {%- endif -%}
         , %vstride : memref<
         {%- if Bias_rank == 2 -%}  {{ M * N }} {%- else -%} {{ N }} {%- endif -%}
-        xf32>, memref<{{ TILE_M }}x{{ TILE_N }}xf32, 1>, memref<1xi32>  { subtile_size=[{{ kernel.vector_lane }}, {{ kernel.vector_lane }}], async=1, sram_stride=[{{ kernel.vector_lane }}, 1] }
+        xf32>, memref<{{ TILE_M }}x{{ TILE_N }}xf32, 1>, memref<1xi32>  { subtile_size=[{{ SUB_TILE_M }}, {{ SUB_TILE_N }}], async=1, sram_stride=[1, {{ TILE_M }}] }
       {%- else %}
       affine.vector_store %v0, %Y_buffer[0, 0] : memref<{{ TILE_M }}x{{ TILE_N }}xf32, 1>, vector<{{ TILE_M * TILE_N // kernel.vector_lane }}xf32>
       {%- endif %}
@@ -54,9 +54,9 @@ func.func @{{ KERNEL_NAME }}{{kernel.def_kernel(inputs=[X, W, Bias], outputs=[Y]
         %index0 = affine.apply #map0(%t_m, %t_k)
         %index1 = affine.apply #map1(%t_k, %t_n)
         memref.dma_start %X[%index0], %X_buffer[%c0, %c0], %c_mvin, %tag1[%c0], %axis, %vstride
-           : memref<{{ M * K }}xf32>, memref<{{ TILE_M }}x{{ TILE_K }}xf32, 1>, memref<1xi32> { subtile_size=[{{ kernel.vector_lane }}, {{ TILE_K }}], async=1, sram_stride=[1, {{ TILE_M }}]}
+           : memref<{{ M * K }}xf32>, memref<{{ TILE_M }}x{{ TILE_K }}xf32, 1>, memref<1xi32> { subtile_size=[{{ SUB_TILE_M }}, {{ TILE_K }}], async=1, sram_stride=[1, {{ TILE_M }}]}
         memref.dma_start %W[%index1], %W_buffer[%c0, %c0], %c_mvin2, %tag2[%c0], %axis, %vstride
-           : memref<{{ K * N }}xf32>, memref<{{ TILE_K }}x{{ TILE_N }}xf32, 1>, memref<1xi32> { subtile_size=[{{ TILE_K }}, {{ kernel.vector_lane }}], async=1, sram_stride=[1, {{ TILE_K }}]}
+           : memref<{{ K * N }}xf32>, memref<{{ TILE_K }}x{{ TILE_N }}xf32, 1>, memref<1xi32> { subtile_size=[{{ TILE_K }}, {{ SUB_TILE_N }}], async=1, sram_stride=[1, {{ TILE_K }}]}
         linalg.matmul ins(%X_buffer, %W_buffer : memref<{{ TILE_M }}x{{ TILE_K }}x{{ DATA_STYPE }}, 1>, memref<{{ TILE_K }}x{{ TILE_N }}x{{ DATA_STYPE }}, 1>)
                 outs(%Y_buffer : memref<{{ TILE_M }}x{{ TILE_N }}x{{ DATA_STYPE }}, 1>)
       } { accumulation_loop=true }
@@ -111,6 +111,8 @@ class MLIRGemmTemplate(MLIRTemplate):
             TILE_M, TILE_N, TILE_K = kernel.gemm_combination_mapping(M, N, K)
             template = GEMM_TEMPLATE
         kernel.loop_size =[M, N, K]
+        SUB_TILE_M = TILE_M if TILE_M < kernel.vector_lane else kernel.vector_lane
+        SUB_TILE_N = TILE_N if TILE_N < kernel.vector_lane else kernel.vector_lane
 
         W_transposed = self.is_transposed(W)
         X_transposed = self.is_transposed(X)
@@ -124,6 +126,8 @@ class MLIRGemmTemplate(MLIRTemplate):
             TILE_M=TILE_M,
             TILE_N=TILE_N,
             TILE_K=TILE_K,
+            SUB_TILE_M=SUB_TILE_M,
+            SUB_TILE_N=SUB_TILE_N,
             DATA_STYPE="f32",
             DATA_SIZE=4,
             X = X,
@@ -139,9 +143,9 @@ class MLIRGemmTemplate(MLIRTemplate):
         )
         code = self._template_from_string(template).render(**kernel.render_options)
 
-        self.header = f"float X_spad[{TILE_M * TILE_K // kernel.vector_lane}] __attribute__ ((section(\".spad\")));\n"
-        self.header += f"float W_spad[{TILE_K * TILE_N // kernel.vector_lane}] __attribute__ ((section(\".spad\")));\n"
-        self.header += f"float Y_spad[{TILE_M * TILE_N // kernel.vector_lane}] __attribute__ ((section(\".spad\")));\n"
+        self.header = f"float X_spad[{TILE_M * ((TILE_K + kernel.vector_lane - 1) // kernel.vector_lane)}] __attribute__ ((section(\".spad\")));\n"
+        self.header += f"float W_spad[{TILE_K * ((TILE_N + kernel.vector_lane - 1) // kernel.vector_lane)}] __attribute__ ((section(\".spad\")));\n"
+        self.header += f"float Y_spad[{TILE_M * ((TILE_N + kernel.vector_lane - 1) // kernel.vector_lane)}] __attribute__ ((section(\".spad\")));\n"
         self.gem5_header = f"float X_spad[{TILE_M * TILE_K}] __attribute__ ((section(\".spad\")));\n"
         self.gem5_header += f"float W_spad[{TILE_K * TILE_N}] __attribute__ ((section(\".spad\")));\n"
         self.gem5_header += f"float Y_spad[{TILE_M * TILE_N}] __attribute__ ((section(\".spad\")));\n"

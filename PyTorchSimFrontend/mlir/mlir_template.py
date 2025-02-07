@@ -118,9 +118,9 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
     def gemm_combination_mapping(self, M, N, K):
         spad_size = self.spad_info["spad_size"] * self.vector_lane
         max_spad_size = spad_size // 2 # double buffer
-        M_padded = ((M + self.vector_lane - 1) // self.vector_lane) * self.vector_lane
-        N_padded = ((N + self.vector_lane - 1) // self.vector_lane) * self.vector_lane
-        K_padded = ((K + self.vector_lane - 1) // self.vector_lane) * self.vector_lane
+        M_padded = ((M + self.vector_lane - 1) // self.vector_lane) * self.vector_lane if M > self.vector_lane else M
+        N_padded = ((N + self.vector_lane - 1) // self.vector_lane) * self.vector_lane if N > self.vector_lane else N
+        K_padded = ((K + self.vector_lane - 1) // self.vector_lane) * self.vector_lane if K > self.vector_lane else K
 
         max_used_spad_size = 0
         mapping = (self.vector_lane, self.vector_lane, self.vector_lane)
