@@ -63,6 +63,10 @@ func.func @{{ KERNEL_NAME }}({{ KERNEL_DEF }}) {
   %W_buffer = memref.get_global @W_spad : memref<{{ TILE_K }}x{{ TILE_N }}xf32, 1>
   %Y_buffer = memref.get_global @Y_spad : memref<{{ TILE_M }}x{{ TILE_N }}xf32, 1>
   %tag = memref.alloc() : memref<1xi32>
+  %tag0 = memref.alloc() : memref<1xi32>
+  %tag1 = memref.alloc() : memref<1xi32>
+  %tag2 = memref.alloc() : memref<1xi32>
+  %tag3 = memref.alloc() : memref<1xi32>
   %v0 = arith.constant dense<0.0> : vector<{{ TILE_N }}xf32>
   %c0 = arith.constant 0 : index
   %c1 = arith.constant 1 : index
@@ -78,8 +82,8 @@ func.func @{{ KERNEL_NAME }}({{ KERNEL_DEF }}) {
           %index0 = affine.apply #map0(%o_h, %o_w, %tile_m, %tile_n)
           // Initialize output
           {%- if BIAS %}
-          memref.dma_start %Bias[%tile_n], %Y_buffer[%c0, %c0], %c_mvin, %tag[%c0], %c0, %vstride
-              : memref<{{ O_C }}xf32>, memref<{{ TILE_M }}x{{ TILE_N }}xf32, 1>, memref<1xi32> { async=1, sram_stride=[1, {{ TILE_M }}]}
+          memref.dma_start %Bias[%tile_n], %Y_buffer[%c0, %c0], %c_mvin, %tag0[%c0], %c0, %vstride
+              : memref<{{ O_C }}xf32>, memref<{{ TILE_M }}x{{ TILE_N }}xf32, 1>, memref<1xi32> { subtile_size=[{{ TILE_M }}, {{ TILE_N }}], async=1, sram_stride=[1, {{ TILE_M }}]}
           {%- else %}
           affine.vector_store %v0, %Y_buffer[%c0, %c0] : memref<{{ TILE_M }}x{{ TILE_N }}xf32, 1>, vector<{{ TILE_N }}xf32>
           {%- endif %}
@@ -92,10 +96,10 @@ func.func @{{ KERNEL_NAME }}({{ KERNEL_DEF }}) {
                 %index_k_hw = affine.apply #map_K_HW(%k_h, %k_w)
                 %index2 = affine.apply #map2(%index_k_hw, %tile_k, %tile_n) // weight index
                 // Load input matrix
-                memref.dma_start %X[%index1], %X_buffer[%c0, %c0], %c_mvin, %tag[%c0], %input_axis, %vstride
+                memref.dma_start %X[%index1], %X_buffer[%c0, %c0], %c_mvin, %tag1[%c0], %input_axis, %vstride
                     : memref<{{ BATCH * I_C * (I_H + 2 * PADDING_H) * (I_W + 2 * PADDING_W) }}xf32>, memref<{{ TILE_M }}x{{ TILE_K }}xf32, 1>, memref<1xi32> { subtile_size=[{{ kernel.vector_lane }}, {{ TILE_K }}], async=1, sram_stride=[1, {{ TILE_M }}]}
                 // Load kernel matrix
-                memref.dma_start %W[%index2], %W_buffer[%c0, %c0], %c_mvin, %tag[%c0], %weight_axis, %vstride
+                memref.dma_start %W[%index2], %W_buffer[%c0, %c0], %c_mvin, %tag2[%c0], %weight_axis, %vstride
                     : memref<{{ O_C * I_C * K_H * K_W }}xf32>, memref<{{ TILE_K }}x{{ TILE_N }}xf32, 1>, memref<1xi32> { subtile_size=[{{ TILE_K }}, {{ kernel.vector_lane }}], async=1, sram_stride=[1, 1]}
                 // matmul
                 linalg.matmul ins(%X_buffer, %W_buffer : memref<{{ TILE_M }}x{{ TILE_K }}xf32, 1>, memref<{{ TILE_K }}x{{ TILE_N }}xf32, 1>)
@@ -104,7 +108,7 @@ func.func @{{ KERNEL_NAME }}({{ KERNEL_DEF }}) {
             } { accumulation_loop=true }
           } { accumulation_loop=true }
           // Store output matrix
-          memref.dma_start %Y_buffer[%c0, %c0], %Y[%index0], %c_mvout, %tag[%c0], %input_axis, %vstride
+          memref.dma_start %Y_buffer[%c0, %c0], %Y[%index0], %c_mvout, %tag3[%c0], %input_axis, %vstride
               : memref<{{ TILE_M }}x{{ TILE_N }}xf32, 1>, memref<{{ BATCH * O_C * O_H * O_W }}xf32>, memref<1xi32> {padding=0, sram_stride=[1, {{ TILE_M }}]}
         } { outer_loop=true }
       } { outer_loop=true }
