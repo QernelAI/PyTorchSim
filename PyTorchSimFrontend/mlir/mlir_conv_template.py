@@ -71,30 +71,20 @@ func.func @{{ KERNEL_NAME }}({{ KERNEL_DEF }}) {
   %stride_h = arith.constant {{ STRIDE_H }} : index
   %stride_w = arith.constant {{ STRIDE_W }} : index
 
-  // 1x1 convolution loop
-  affine.for %k_h = 0 to {{ K_H }} {
-    affine.for %k_w = 0 to {{ K_W }} {
-      // 1x1 convolution tiling loop
-      affine.for %o_h = 0 to {{ O_H }} {
-        affine.for %o_w = 0 to {{ O_W }} {
-          affine.for %tile_m = 0 to {{ BATCH }} step {{ TILE_M }} {
-            affine.for %tile_n = 0 to {{ O_C }} step {{ TILE_N }} {
-              // Init output matrix
-              %index0 = affine.apply #map0(%o_h, %o_w, %tile_m, %tile_n)
-              %cond_h = arith.cmpi eq, %k_h, %c0 : index
-              %cond_w = arith.cmpi eq, %k_w, %c0 : index
-              %cond_hw = arith.andi %cond_h, %cond_w : i1
-              scf.if %cond_hw {
-                {%- if BIAS %}
-                memref.dma_start %Bias[%tile_n], %Y_buffer[%c0, %c0], %c_mvin, %tag[%c0], %c0, %vstride
-                    : memref<{{ O_C }}xf32>, memref<{{ TILE_M }}x{{ TILE_N }}xf32, 1>, memref<1xi32> { async=1, sram_stride=[1, {{ TILE_M }}]}
-                {%- else %}
-                affine.vector_store %v0, %Y_buffer[%c0, %c0] : memref<{{ TILE_M }}x{{ TILE_N }}xf32, 1>, vector<{{ TILE_N }}xf32>
-                {%- endif %}
-              } else {
-                memref.dma_start %Y[%index0], %Y_buffer[%c0, %c0], %c_mvin, %tag[%c0], %input_axis, %vstride
-                    : memref<{{ BATCH * O_C * O_H * O_W }}xf32>, memref<{{ TILE_M }}x{{ TILE_N }}xf32, 1>, memref<1xi32> { padding=0, sram_stride=[1, {{ TILE_M }}]}
-              }
+  affine.for %o_h = 0 to {{ O_H }} {
+    affine.for %o_w = 0 to {{ O_W }} {
+      affine.for %tile_m = 0 to {{ BATCH }} step {{ TILE_M }} {
+        affine.for %tile_n = 0 to {{ O_C }} step {{ TILE_N }} {
+          %index0 = affine.apply #map0(%o_h, %o_w, %tile_m, %tile_n)
+          // Initialize output
+          {%- if BIAS %}
+          memref.dma_start %Bias[%tile_n], %Y_buffer[%c0, %c0], %c_mvin, %tag[%c0], %c0, %vstride
+              : memref<{{ O_C }}xf32>, memref<{{ TILE_M }}x{{ TILE_N }}xf32, 1>, memref<1xi32> { async=1, sram_stride=[1, {{ TILE_M }}]}
+          {%- else %}
+          affine.vector_store %v0, %Y_buffer[%c0, %c0] : memref<{{ TILE_M }}x{{ TILE_N }}xf32, 1>, vector<{{ TILE_N }}xf32>
+          {%- endif %}
+          affine.for %k_h = 0 to {{ K_H }} {
+            affine.for %k_w = 0 to {{ K_W }} {
               affine.for %tile_k = 0 to {{ I_C }} step {{ TILE_K }} {
                 %index_i_h = affine.apply #map_I_H(%o_h, %k_h)
                 %index_i_w = affine.apply #map_I_W(%o_w, %k_w)
@@ -111,11 +101,11 @@ func.func @{{ KERNEL_NAME }}({{ KERNEL_DEF }}) {
                 linalg.matmul ins(%X_buffer, %W_buffer : memref<{{ TILE_M }}x{{ TILE_K }}xf32, 1>, memref<{{ TILE_K }}x{{ TILE_N }}xf32, 1>)
                       outs(%Y_buffer : memref<{{ TILE_M }}x{{ TILE_N }}xf32, 1>)
               } { accumulation_loop=true }
-              // Store output matrix
-              memref.dma_start %Y_buffer[%c0, %c0], %Y[%index0], %c_mvout, %tag[%c0], %input_axis, %vstride
-                  : memref<{{ TILE_M }}x{{ TILE_N }}xf32, 1>, memref<{{ BATCH * O_C * O_H * O_W }}xf32>, memref<1xi32> {padding=0, sram_stride=[1, {{ TILE_M }}]}
-            } { outer_loop=true }
-          } { outer_loop=true }
+            } { accumulation_loop=true }
+          } { accumulation_loop=true }
+          // Store output matrix
+          memref.dma_start %Y_buffer[%c0, %c0], %Y[%index0], %c_mvout, %tag[%c0], %input_axis, %vstride
+              : memref<{{ TILE_M }}x{{ TILE_N }}xf32, 1>, memref<{{ BATCH * O_C * O_H * O_W }}xf32>, memref<1xi32> {padding=0, sram_stride=[1, {{ TILE_M }}]}
         } { outer_loop=true }
       } { outer_loop=true }
     } { outer_loop=true }
@@ -207,9 +197,9 @@ class MLIRConvTemplate(MLIRTemplate):
                **kwargs):
         if template_buffer_node is not None:
             self.output_node = template_buffer_node
-        if epilogue_nodes is not None and len(epilogue_nodes) > 0:
-            self.output_node = cast(Buffer, epilogue_nodes[-1])
-            self.function_name += f"_fused_{epilogue_nodes[0].node.origin_node.name}"
+        # if epilogue_nodes is not None and len(epilogue_nodes) > 0:
+        #     self.output_node = cast(Buffer, epilogue_nodes[-1])
+        #     self.function_name += f"_fused_{epilogue_nodes[0].node.origin_node.name}"
 
         X, W = self.input_nodes[0], self.input_nodes[1]
         Y = self.output_node
@@ -220,8 +210,8 @@ class MLIRConvTemplate(MLIRTemplate):
         O_C = W.layout.size[0]
         K_H = W.layout.size[2]
         K_W = W.layout.size[3]
-        O_H = Y.layout.size[2]
-        O_W = Y.layout.size[3]
+        O_H = Y.layout.size[2] if template_buffer_node is None else template_buffer_node.layout.size[2]
+        O_W = Y.layout.size[3] if template_buffer_node is None else template_buffer_node.layout.size[3]
 
         # FIXME: fixed tile size
         TILE_M = kernel.vector_lane
@@ -235,7 +225,7 @@ class MLIRConvTemplate(MLIRTemplate):
         # W_transposed = self.is_transposed(W)
         # X_transposed = self.is_transposed(X)
 
-        options = dict(
+        kernel.render_options = dict(
             KERNEL_NAME=self.name,
             KERNEL_DEF=self.def_kernel(),
             kernel=kernel,
@@ -261,7 +251,7 @@ class MLIRConvTemplate(MLIRTemplate):
             DATA_SIZE=4,
             BIAS=Bias
         )
-        code = self._template_from_string(CONV_TEMPLATE).render(**options)
+        code = self._template_from_string(CONV_TEMPLATE).render(**kernel.render_options)
 
         self.header = f"float X_spad[{TILE_M * TILE_K // kernel.vector_lane}] __attribute__ ((section(\".spad\")));\n"
         self.header += f"float W_spad[{TILE_K * TILE_N // kernel.vector_lane}] __attribute__ ((section(\".spad\")));\n"
@@ -270,7 +260,7 @@ class MLIRConvTemplate(MLIRTemplate):
         self.gem5_header += f"float W_spad[{TILE_K * TILE_N}] __attribute__ ((section(\".spad\")));\n"
         self.gem5_header += f"float Y_spad[{TILE_M * TILE_N}] __attribute__ ((section(\".spad\")));\n"
 
-        kernel.add_loop_info([options["K_H"], options["K_W"], options["O_H"], options["O_W"], options["BATCH"], options["O_C"], options["I_C"]], [options["TILE_M"], options["TILE_N"], options["TILE_K"]])
+        kernel.add_loop_info([kernel.render_options["K_H"], kernel.render_options["K_W"], kernel.render_options["O_H"], kernel.render_options["O_W"], kernel.render_options["BATCH"], kernel.render_options["O_C"], kernel.render_options["I_C"]], [kernel.render_options["TILE_M"], kernel.render_options["TILE_N"], kernel.render_options["TILE_K"]])
         kernel.def_kernel(inputs=[X, W, Bias], outputs=[Y], names_str="X, W, Bias, Y", input_reorder=self.input_reorder)
 
         return code
