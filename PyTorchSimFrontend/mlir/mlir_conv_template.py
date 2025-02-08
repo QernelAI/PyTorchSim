@@ -83,7 +83,7 @@ func.func @{{ KERNEL_NAME }}({{ KERNEL_DEF }}) {
           // Initialize output
           {%- if BIAS %}
           memref.dma_start %Bias[%tile_n], %Y_buffer[%c0, %c0], %c_mvin, %tag0[%c0], %c0, %vstride
-              : memref<{{ O_C }}xf32>, memref<{{ TILE_M }}x{{ TILE_N }}xf32, 1>, memref<1xi32> { subtile_size=[{{ TILE_M }}, {{ TILE_N }}], async=1, sram_stride=[1, {{ TILE_M }}]}
+              : memref<{{ O_C }}xf32>, memref<{{ TILE_M }}x{{ TILE_N }}xf32, 1>, memref<1xi32> { subtile_size=[{{ SUB_TILE_M }}, {{ SUB_TILE_N }}], async=1, sram_stride=[1, {{ TILE_M }}]}
           {%- else %}
           affine.vector_store %v0, %Y_buffer[%c0, %c0] : memref<{{ TILE_M }}x{{ TILE_N }}xf32, 1>, vector<{{ kernel.get_spad_size_per_lane(TILE_M, TILE_N) }}xf32>
           {%- endif %}
@@ -217,10 +217,7 @@ class MLIRConvTemplate(MLIRTemplate):
         O_H = Y.layout.size[2] if template_buffer_node is None else template_buffer_node.layout.size[2]
         O_W = Y.layout.size[3] if template_buffer_node is None else template_buffer_node.layout.size[3]
 
-        # FIXME: fixed tile size
-        TILE_M = kernel.vector_lane if kernel.vector_lane < BATCH else BATCH
-        TILE_N = kernel.vector_lane if kernel.vector_lane < O_C else O_C
-        TILE_K = kernel.vector_lane if kernel.vector_lane < I_C else I_C
+        TILE_M, TILE_N, TILE_K = kernel.gemm_combination_mapping(BATCH, O_C, I_C)
         SUB_TILE_M = TILE_M if TILE_M < kernel.vector_lane else kernel.vector_lane
         SUB_TILE_N = TILE_N if TILE_N < kernel.vector_lane else kernel.vector_lane
 

@@ -118,15 +118,19 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
     def gemm_combination_mapping(self, M, N, K):
         spad_size = self.spad_info["spad_size"] * self.vector_lane
         max_spad_size = spad_size // 2 # double buffer
-        M_padded = ((M + self.vector_lane - 1) // self.vector_lane) * self.vector_lane if M > self.vector_lane else M
-        N_padded = ((N + self.vector_lane - 1) // self.vector_lane) * self.vector_lane if N > self.vector_lane else N
-        K_padded = ((K + self.vector_lane - 1) // self.vector_lane) * self.vector_lane if K > self.vector_lane else K
+        M_padded = ((M + self.vector_lane - 1) // self.vector_lane) * self.vector_lane
+        N_padded = ((N + self.vector_lane - 1) // self.vector_lane) * self.vector_lane
+        K_padded = ((K + self.vector_lane - 1) // self.vector_lane) * self.vector_lane
+        M = max(M, 2)
 
         max_used_spad_size = 0
         mapping = (self.vector_lane, self.vector_lane, self.vector_lane)
-        for tile_M in range(self.vector_lane, M_padded + 1, self.vector_lane):
-            for tile_N in range(self.vector_lane, N_padded + 1, self.vector_lane):
-                for tile_K in range(self.vector_lane, K_padded + 1, self.vector_lane):
+        tile_M_range = range(self.vector_lane, M_padded + 1, self.vector_lane) if M > self.vector_lane else [M]
+        tile_N_range = range(self.vector_lane, N_padded + 1, self.vector_lane) if N > self.vector_lane else [N]
+        tile_K_range = range(self.vector_lane, K_padded + 1, self.vector_lane) if K > self.vector_lane else [K]
+        for tile_M in tile_M_range:
+            for tile_N in tile_N_range:
+                for tile_K in tile_K_range:
                     used_spad_size = (tile_M * tile_K + tile_K * tile_N + tile_M * tile_N) * self.precision
                     if used_spad_size < max_spad_size and max_used_spad_size < used_spad_size:
                         max_used_spad_size = used_spad_size
@@ -292,8 +296,7 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
 
     def get_spad_size_per_lane(self, tile_m, tile_n):
         size = tile_m * ((tile_n + self.vector_lane - 1) // self.vector_lane)
-        size = 2 if size == 1 else size # vector load/store
-        return size
+        return max(size, 2) # vector load/store
 
     def adjust_tile_size(self):
         # Fixed tile size for template kernel
