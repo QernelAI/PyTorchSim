@@ -1,6 +1,6 @@
 #ifndef MEM_FETCH_H
 #define MEM_FETCH_H
-
+#include <spdlog/spdlog.h>
 #include "Cache_defs.h"
 
 typedef unsigned long long new_addr_type;
@@ -18,22 +18,18 @@ static const char* mem_access_type_str[] = {
     "L2_CACHE_WA", "L2_CACHE_WB"};
 enum mf_type { READ_REQUEST = 0, WRITE_REQUEST, READ_REPLY, WRITE_ACK };
 
+static unsigned long long unique_uid = 0;
+
 class mem_fetch {
  public:
   mem_fetch(new_addr_type addr, mem_access_type acc_type, mf_type type,
-            unsigned data_size, unsigned request_id, unsigned numa_id=-1,
+            unsigned data_size, unsigned numa_id=-1,
             void* custom_data=NULL) :
             m_addr(addr), m_mem_access_type(acc_type),
             m_type(type), m_data_size(data_size),
-            m_request_id(request_id), m_numa_id(numa_id),
-            m_custom_data(custom_data) {}
-  mem_fetch(new_addr_type addr, mem_access_type acc_type, mf_type type,
-            unsigned data_size) : m_addr(addr), m_mem_access_type(acc_type),
-            m_type(type), m_data_size(data_size) {}
-  mem_fetch(new_addr_type addr, mem_access_type acc_type, mf_type type,
-            unsigned data_size, SectorMask sector_mask) :
-            m_addr(addr), m_mem_access_type(acc_type), m_type(type), m_data_size(data_size),
-            m_sector_mask(sector_mask) {}
+            m_numa_id(numa_id), m_custom_data(custom_data) {
+    m_request_id = unique_uid++;
+  }
   mem_fetch(std::deque<mem_fetch*> mfs);  // for wrapping multiple mfs into one
   /* Src & Des */
   void set_core_id(int core_id) {m_core_id = core_id;}
@@ -56,11 +52,21 @@ class mem_fetch {
   bool is_write() { return m_type == mf_type::WRITE_REQUEST || m_type == mf_type::WRITE_ACK; }
   void set_request_id(unsigned id) { m_request_id = id; }
   unsigned get_request_id() { return m_request_id; }
+  void set_access_sector_mask(uint32_t line_size, uint32_t sector_size) { m_sector_mask.set((m_addr % line_size) / sector_size); }
   SectorMask get_access_sector_mask() { return m_sector_mask; }
   void set_dirty_mask(SectorMask dirty_mask) { m_dirty_mask = dirty_mask; }
   SectorMask get_dirty_mask() { return m_dirty_mask; }
   mem_fetch* get_original_mf() { return m_original_mf; }
   bool is_atomic() { return false; }
+  bool is_request() { return m_type == mf_type::READ_REQUEST || m_type == mf_type::WRITE_REQUEST; }
+  void set_reply() {
+    if (m_type == mf_type::READ_REQUEST)
+      m_type = mf_type::READ_REPLY;
+    else if(m_type == mf_type::WRITE_REQUEST)
+      m_type = mf_type::WRITE_ACK;
+    else
+      spdlog::error("Unexpected mf_type in the set_reply");
+  }
   void set_custom_data(void* custom_data) { m_custom_data = custom_data; }
   void* get_custom_data() { return m_custom_data; }
   /* Stat */

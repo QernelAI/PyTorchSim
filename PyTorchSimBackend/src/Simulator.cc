@@ -30,7 +30,7 @@ Simulator::Simulator(SimulationConfig config)
                                        .string();
     spdlog::info("Ramulator2 config: {}", ramulator_config);
     config.dram_config_path = ramulator_config;
-    _dram = std::make_unique<DramRamulator2>(config);
+    _dram = std::make_unique<DramRamulator2>(config, &_core_cycles);
   } else {
     spdlog::error("[Configuration] Invalid DRAM type...!");
     exit(EXIT_FAILURE);
@@ -84,6 +84,7 @@ void Simulator::core_cycle() {
     }
     _cores[core_id]->cycle();
   }
+  _dram->cache_cycle();
   _core_cycles++;
 }
 

@@ -46,6 +46,12 @@ SimulationConfig initialize_config(json config) {
   if (config.contains("dram_num_partitions"))
     parsed_config.dram_num_partitions = config["dram_num_partitions"];
 
+   /* L2D config */
+  if (config.contains("l2d_config"))
+    parsed_config.l2d_config_str = config["l2d_config"];
+  if (config.contains("l2d_hit_latency"))
+    parsed_config.l2d_config_str = config["l2d_hit_latency"];
+
   /* Icnt config */
   if ((std::string)config["icnt_type"] == "simple")
     parsed_config.icnt_type = IcntType::SIMPLE;

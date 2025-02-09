@@ -26,6 +26,10 @@ struct SimulationConfig {
   uint32_t dram_print_interval;
   std::string dram_config_path;
 
+  /* L2 Cache config */
+  std::string l2d_config_str = "S:64:128:16,32,L:R:m:L:L,A:192:4,32:0,32";
+  uint32_t l2d_hit_latency = 1;
+
   /* ICNT config */
   IcntType icnt_type;
   uint32_t icnt_node_per_core = 1;

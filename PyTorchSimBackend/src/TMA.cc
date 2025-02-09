@@ -28,8 +28,7 @@ std::vector<mem_fetch*> TMA::get_memory_access() {
   for (auto addr: addr_set) {
     mem_access_type acc_type = _current_inst->is_dma_write() ? mem_access_type::GLOBAL_ACC_W : mem_access_type::GLOBAL_ACC_R;
     mf_type type = _current_inst->is_dma_write() ? mf_type::WRITE_REQUEST : mf_type::READ_REQUEST;
-    mem_fetch* access = new mem_fetch(addr, acc_type, type, _dram_req_size, generate_mem_access_id(),
-      _current_inst->get_numa_id(), static_cast<void*>(_current_inst.get()));
+    mem_fetch* access = new mem_fetch(addr, acc_type, type, _dram_req_size, _current_inst->get_numa_id(), static_cast<void*>(_current_inst.get()));
     _current_inst->inc_waiting_request();
     access_vec.push_back(access);
   }

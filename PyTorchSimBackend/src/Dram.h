@@ -10,12 +10,14 @@
 #include "ramulator2.hh"
 #include "Hashing.h"
 #include "Cache.h"
+#include "DelayQueue.h"
 
 class Dram {
  public:
   virtual ~Dram() = default;
   virtual bool running() = 0;
   virtual void cycle() = 0;
+  virtual void cache_cycle() = 0;
   virtual bool is_full(uint32_t cid, mem_fetch* request) = 0;
   virtual void push(uint32_t cid, mem_fetch* request) = 0;
   virtual bool is_empty(uint32_t cid) = 0;
@@ -26,18 +28,25 @@ class Dram {
 
  protected:
   SimulationConfig _config;
+  CacheConfig _m_cache_config;
   uint32_t _n_ch;
   uint32_t _n_partitions;
   uint32_t _n_ch_per_partition;
   cycle_type _cycles;
+
+  std::vector<DelayQueue<mem_fetch*>> m_cache_latency_queue;
+  std::vector<std::queue<mem_fetch*>> m_from_crossbar_queue;
+  std::vector<std::queue<mem_fetch*>> m_to_crossbar_queue;
+  std::vector<std::queue<mem_fetch*>> m_to_mem_queue;
 };
 
 class DramRamulator2 : public Dram {
  public:
-  DramRamulator2(SimulationConfig config);
+  DramRamulator2(SimulationConfig config, cycle_type *core_cycle);
 
   virtual bool running() override;
   virtual void cycle() override;
+  virtual void cache_cycle() override;
   virtual bool is_full(uint32_t cid, mem_fetch* request) override;
   virtual void push(uint32_t cid, mem_fetch* request) override;
   virtual bool is_empty(uint32_t cid) override;
@@ -48,6 +57,7 @@ class DramRamulator2 : public Dram {
  private:
   std::vector<std::unique_ptr<Cache>> _m_caches;
   std::vector<std::unique_ptr<Ramulator2>> _mem;
+  cycle_type* _core_cycles;
   int _tx_ch_log2;
   int _tx_log2;
   int _req_size;
