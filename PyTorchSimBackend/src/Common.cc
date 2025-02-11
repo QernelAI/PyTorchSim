@@ -47,6 +47,18 @@ SimulationConfig initialize_config(json config) {
     parsed_config.dram_num_partitions = config["dram_num_partitions"];
 
    /* L2D config */
+  if (config.contains("l2d_type")) {
+    if ((std::string)config["l2d_type"] == "nocache")
+      parsed_config.l2d_type = L2CacheType::NOCACHE;
+    else if ((std::string)config["l2d_type"] == "readonly")
+      parsed_config.l2d_type = L2CacheType::READONLY;
+    else
+      throw std::runtime_error(fmt::format("Not implemented l2 cache type {} ",
+                                          (std::string)config["l2d_type"]));
+  } else {
+    parsed_config.l2d_type = L2CacheType::NOCACHE;
+  }
+
   if (config.contains("l2d_config"))
     parsed_config.l2d_config_str = config["l2d_config"];
   if (config.contains("l2d_hit_latency"))

@@ -195,13 +195,13 @@ uint64_t CacheStats::get_interval_miss() {
 void CacheStats::print_stats(FILE *out, const char *cache_name) const {
   uint64_t hit = get_hit();
   uint64_t miss = get_miss();
-  fprintf(out, "\tCache Hit : %llu, Cache Miss : %llu, Hit Ratio : %.2f\n", hit,
+  fprintf(out, "\tCache Hit : %lu, Cache Miss : %lu, Hit Ratio : %.2f\n", hit,
           miss, (float)hit / (get_accesses()));
   std::vector<uint32_t> total_access;
   total_access.resize(NUM_MEM_ACCESS_TYPE, 0);
   for (int type = 0; type < NUM_MEM_ACCESS_TYPE; type++) {
     for (int status = 0; status < NUM_CACHE_REQUEST_STATUS; status++) {
-      fprintf(out, "\t%s[%s][%s] = %llu\n", cache_name,
+      fprintf(out, "\t%s[%s][%s] = %lu\n", cache_name,
               mem_access_type_str[type], cache_request_status_str[status],
               m_stats[type][status]);
       if (status != RESERVATION_FAIL && status != MSHR_HIT)
@@ -217,7 +217,7 @@ void CacheStats::print_stats(FILE *out, const char *cache_name) const {
 void CacheStats::print_fail_stats(FILE *out, const char *cache_name) const {
   for (int type = 0; type < NUM_MEM_ACCESS_TYPE; type++) {
     for (int status = 0; status < NUM_CACHE_REQUEST_STATUS; status++) {
-      fprintf(out, "\t%s[%s][%s] = %llu\n", cache_name,
+      fprintf(out, "\t%s[%s][%s] = %lu\n", cache_name,
               mem_access_type_str[type],
               cache_reservation_fail_reason_str[status],
               m_fail_stats[type][status]);
@@ -226,10 +226,10 @@ void CacheStats::print_fail_stats(FILE *out, const char *cache_name) const {
 }
 
 void CacheStats ::print_energy_stats(FILE *out, const char *cache_name) const {
-  fprintf(out, "%s_RH: %llu\n", cache_name, get_read_hit());
-  fprintf(out, "%s_RM: %llu\n", cache_name, get_read_miss());
-  fprintf(out, "%s_WH: %llu\n", cache_name, get_write_hit());
-  fprintf(out, "%s_WM: %llu\n", cache_name, get_write_miss());
+  fprintf(out, "%s_RH: %lu\n", cache_name, get_read_hit());
+  fprintf(out, "%s_RM: %lu\n", cache_name, get_read_miss());
+  fprintf(out, "%s_WH: %lu\n", cache_name, get_write_hit());
+  fprintf(out, "%s_WM: %lu\n", cache_name, get_write_miss());
 }
 
 bool CacheStats::check_valid(int access_type, int access_outcome) const {

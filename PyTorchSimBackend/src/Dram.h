@@ -11,9 +11,11 @@
 #include "Hashing.h"
 #include "Cache.h"
 #include "DelayQueue.h"
+#include "L2Cache.h"
 
 class Dram {
  public:
+  Dram(SimulationConfig config, cycle_type* core_cycle);
   virtual ~Dram() = default;
   virtual bool running() = 0;
   virtual void cycle() = 0;
@@ -32,12 +34,14 @@ class Dram {
   uint32_t _n_ch;
   uint32_t _n_partitions;
   uint32_t _n_ch_per_partition;
+  uint32_t _req_size;
   cycle_type _cycles;
-
+  cycle_type* _core_cycles;
   std::vector<DelayQueue<mem_fetch*>> m_cache_latency_queue;
   std::vector<std::queue<mem_fetch*>> m_from_crossbar_queue;
   std::vector<std::queue<mem_fetch*>> m_to_crossbar_queue;
   std::vector<std::queue<mem_fetch*>> m_to_mem_queue;
+  std::vector<L2Cache*> _m_caches;
 };
 
 class DramRamulator2 : public Dram {
@@ -55,12 +59,9 @@ class DramRamulator2 : public Dram {
   virtual void print_stat() override;
 
  private:
-  std::vector<std::unique_ptr<Cache>> _m_caches;
   std::vector<std::unique_ptr<Ramulator2>> _mem;
-  cycle_type* _core_cycles;
   int _tx_ch_log2;
   int _tx_log2;
-  int _req_size;
 };
 
 #endif

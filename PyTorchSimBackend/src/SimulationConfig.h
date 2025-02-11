@@ -9,6 +9,8 @@ enum class DramType { SIMPLE, RAMULATOR1, RAMULATOR2 };
 
 enum class IcntType { SIMPLE, BOOKSIM2 };
 
+enum class L2CacheType { NOCACHE, READONLY };
+
 struct SimulationConfig {
   /* Core config */
   uint32_t num_cores;
@@ -27,7 +29,8 @@ struct SimulationConfig {
   std::string dram_config_path;
 
   /* L2 Cache config */
-  std::string l2d_config_str = "S:64:128:16,32,L:R:m:L:L,A:192:4,32:0,32";
+  L2CacheType l2d_type = L2CacheType::NOCACHE;
+  std::string l2d_config_str;
   uint32_t l2d_hit_latency = 1;
 
   /* ICNT config */

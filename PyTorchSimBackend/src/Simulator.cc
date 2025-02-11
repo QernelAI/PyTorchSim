@@ -84,6 +84,7 @@ void Simulator::core_cycle() {
     }
     _cores[core_id]->cycle();
   }
+  /* L2 cache */
   _dram->cache_cycle();
   _core_cycles++;
 }
