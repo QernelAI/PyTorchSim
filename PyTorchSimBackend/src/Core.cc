@@ -82,7 +82,6 @@ void Core::sa_cycle() {
     bool retry = true;
     while (retry) {
       if (!_sa_compute_pipeline.at(i).empty()) {
-        _stat_sa_compute_cycle.at(i)++;
         if(_sa_compute_pipeline.at(i).front()->finish_cycle <= _core_cycle) {
           int bubble = _sa_compute_pipeline.at(i).front()->bubble_cycle;
           _stat_sa_compute_idle_cycle.at(i) += bubble;
@@ -90,6 +89,7 @@ void Core::sa_cycle() {
           finish_instruction(_sa_compute_pipeline.at(i).front());
           _sa_compute_pipeline.at(i).pop();
         } else {
+          _stat_sa_compute_cycle.at(i)++;
           retry = false;
         }
       } else {

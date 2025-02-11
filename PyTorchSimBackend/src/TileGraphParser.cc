@@ -308,11 +308,13 @@ std::vector<std::shared_ptr<Tile>> TileLoopNode::get_tiles_from_iter(TileGraphPa
         }
       }
 
-      uint32_t step = std::stoi(tog_parser->getMetaByName("systolic_size"));
+      uint32_t systolic_size = std::stoi(tog_parser->getMetaByName("systolic_size"));
       for (auto loop_idx: tag_idx_list) {
         if (iter.find(loop_idx) == iter.end())
           tag_list.push_back(0);
         else {
+          uint32_t step = (uint32_t)tog_parser->get_loop_step(loop_idx);
+          step = step > systolic_size ? systolic_size : step;
           auto iter_value = getLoopIndexValue(iter, loop_idx) / step;
           tag_list.push_back(iter_value);
         }
