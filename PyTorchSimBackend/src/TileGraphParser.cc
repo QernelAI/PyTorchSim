@@ -328,6 +328,11 @@ std::vector<std::shared_ptr<Tile>> TileLoopNode::get_tiles_from_iter(TileGraphPa
         int stride_idx = calculateAddress(outer_loop_size, tog_parser->lookupNumaInfo(base_addr_name));
         numa_id = total_idx / stride_idx;
       }
+      /* Check need to make this memory node */
+      std::vector<int> key = tog_parser->calc_tag(accum_tag_list, tag_list, tag_stride_list);
+      if (tog_parser->check_memory_tag(base_addr_name, key))
+        continue;
+      tog_parser->register_memory_tag(base_addr_name, key);
 
       printIndexMap("[TOGParser] Load Node " + mem_node->get_base_addr_name() + " Numa_id: " + std::to_string(numa_id), iter);
       std::shared_ptr<Instruction> inst = std::make_shared<Instruction>(
@@ -674,6 +679,7 @@ TileGraphParser::TileGraphParser(std::string onnx_path, json& attribute_json) {
     auto indices = iter.get_indices();
     for (auto loop : _loop_nodes.at(last_outer_idx)) {
       std::shared_ptr<TileLoopNode> outer_loop = std::static_pointer_cast<TileLoopNode>(loop);
+      this->clear_tag_table(); // Clear tag table for each inner loop
       std::vector<std::shared_ptr<Tile>> sub_tiles = outer_loop->get_tiles_from_iter(this, indices);
 
       /* insert tiles to subgraph */
@@ -726,6 +732,26 @@ void TileGraphParser::register_tile(std::shared_ptr<TileNode> tile_node) {
       tile_node->add_parent(parent);
     }
   }
+}
+
+std::vector<int> TileGraphParser::calc_tag(std::vector<int>& accum_tag, std::vector<int>& tag_idx, std::vector<int>& tag_stride) {
+  int key_offset = 0;
+  std::vector<int> tag_key;
+  for (int i=0; i<tag_idx.size(); i++)
+    key_offset += tag_idx.at(i) * tag_stride.at(i);
+  for (auto accum_dim : accum_tag)
+    tag_key.push_back(accum_dim);
+  tag_key.push_back(key_offset);
+  return tag_key;
+}
+
+void TileGraphParser::register_memory_tag(std::string name, std::vector<int>& tag_key) {
+  assert(_tag_table.find(std::make_pair(name, tag_key))==_tag_table.end());
+  _tag_table[std::make_pair(name, tag_key)] = true;
+}
+
+bool TileGraphParser::check_memory_tag(std::string name, std::vector<int>& tag_key) {
+  return _tag_table.find(std::make_pair(name, tag_key))==_tag_table.end() ? false : true;
 }
 
 std::shared_ptr<TileNode> TileGraphParser::get_top_loop() {

@@ -74,6 +74,10 @@ class TileGraphParser {
   int getCoreIdFromJson(const json& attribute_json, int subgraph_id);
   std::string getMetaByName(std::string key) { return _tog_meta[key]; }
   const json& get_attribute_file() { return _attribute_json; }
+  std::vector<int> calc_tag(std::vector<int>& accum_tag, std::vector<int>& tag_idx, std::vector<int>& tag_stride);
+  void register_memory_tag(std::string name, std::vector<int>& tag_key);
+  bool check_memory_tag(std::string name, std::vector<int>& tag_key);
+  void clear_tag_table() { _tag_table.clear(); }
  private:
   void register_tile(std::shared_ptr<TileNode> tile_node);
   void _tile_generate() {}
@@ -91,6 +95,7 @@ class TileGraphParser {
   std::map<std::string, std::vector<uint32_t>> _arg_numa_stride;
   std::map<std::string, std::tuple<int, int, LoopType>> _loop_size_map;
   std::map<std::string, std::string> _tog_meta;
+  std::map<std::pair<std::string, std::vector<int>>, bool> _tag_table;
 };
 
 class TileComputeNode : public TileNode {
