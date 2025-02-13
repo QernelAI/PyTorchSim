@@ -11,7 +11,7 @@
 #include <memory>
 #include <vector>
 
-enum class Opcode { MOVIN, MOVOUT, COMP, BAR};
+enum class Opcode { MOVIN, MOVOUT, COMP, BAR, COUNT};
 
 typedef uint64_t addr_type;
 typedef uint64_t cycle_type;

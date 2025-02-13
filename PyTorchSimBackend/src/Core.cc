@@ -14,6 +14,8 @@ Core::Core(uint32_t id, SimulationConfig config)
   _stat_sa_compute_cycle.resize(_num_systolic_array_per_core);
   _stat_tot_sa_compute_idle_cycle.resize(_num_systolic_array_per_core);
   _stat_sa_compute_idle_cycle.resize(_num_systolic_array_per_core);
+  _stat_tot_sa_inst.resize(_num_systolic_array_per_core);
+  _stat_tot_sa_inst.resize(static_cast<size_t>(Opcode::COUNT), 0);
 }
 
 bool Core::can_issue(const std::shared_ptr<Tile>& op) {
@@ -228,6 +230,7 @@ void Core::cycle() {
                             fmt::format("[{}]", fmt::join(inst->get_tag_idx_list(), ", ")),
                             fmt::format("[{}]", fmt::join(inst->get_tag_stride_list(), ", ")));
               issued = true;
+              _stat_skip_dma++;
               break;
             } else {
               spdlog::trace("[Core {}][{}] {} ISSUED, free_sram_size: {} addr_name: {} tag_id: {} tag_idx_list: {} tag_stride_list: {}", _id, _core_cycle,
@@ -262,6 +265,9 @@ void Core::cycle() {
                           opcode_to_string(inst->get_opcode()), inst->get_compute_type(), inst->finish_cycle);
             target_pipeline.push(inst);
             issued = true;
+            if (inst->get_compute_type()) {
+              _stat_gemm_inst++;
+            }
           }
           break;
         case Opcode::BAR:
@@ -273,6 +279,8 @@ void Core::cycle() {
             } else {
               _tma.register_tag_waiter(inst->subgraph_id, key, inst);
             }
+            spdlog::trace("[Core {}][{}] {} ISSUED", _id, _core_cycle,
+                          opcode_to_string(inst->get_opcode()));
             issued = true;
           }
           break;
@@ -282,6 +290,7 @@ void Core::cycle() {
       }
 
       if (issued) {
+        _stat_tot_sa_inst.at(static_cast<size_t>(inst->get_opcode()))++;
         auto it = instructions.begin() + j; // Position 2 is the third element
         instructions.erase(it);
         break;
@@ -371,6 +380,13 @@ bool Core::can_issue_compute(std::shared_ptr<Instruction>& inst) {
 
 void Core::print_stats() {
   std::vector<float> sa_utilization;
+  for (int i=0; i < static_cast<size_t>(Opcode::COUNT); i++) {
+    if (i == static_cast<size_t>(Opcode::COMP))
+      spdlog::info("Core [{}] : {} inst count {} (GEMM: {}, Vector: {})", _id, opcode_to_string(static_cast<Opcode>(i)), _stat_tot_sa_inst.at(i), _stat_gemm_inst, _stat_tot_sa_inst.at(i) - _stat_gemm_inst);
+    else
+      spdlog::info("Core [{}] : {} inst count {}", _id, opcode_to_string(static_cast<Opcode>(i)), _stat_tot_sa_inst.at(i));
+  }
+  spdlog::trace("Core [{}] : SKipped MOVIN inst count {}", _id, _stat_skip_dma);
   for (int i=0; i<_num_systolic_array_per_core; i++)
     sa_utilization.push_back(static_cast<float>(_stat_tot_sa_compute_cycle.at(i) * 100) / _core_cycle);
   spdlog::info(
@@ -378,7 +394,7 @@ void Core::print_stats() {
   for (int i=0; i<_num_systolic_array_per_core; i++)
     spdlog::info("Core [{}] : Systolic array[{}] active cycle {}", _id, i, _stat_tot_sa_compute_cycle.at(i));
   spdlog::info("Core [{}] : TMA active cycle {} TMA idle cycle {}", _id, _stat_tot_tma_cycle, _stat_tot_tma_idle_cycle);
-  spdlog::info("Core[{}] : Vector unit idle cycle {}", _id, _stat_vu_compute_idle_cycle);
+  spdlog::info("Core [{}] : Vector unit idle cycle {}", _id, _stat_vu_compute_idle_cycle);
   for (int i=0; i<_num_systolic_array_per_core; i++)
     spdlog::info("Core [{}] : Systolic Array[{}] idle cycle [{}]", _id, i, _stat_tot_sa_compute_cycle.at(i));
   spdlog::info("Core [{}] : Vector Unit Utilization(%) {:.2f}", _id, static_cast<float>(_stat_tot_vu_compute_cycle * 100) / _core_cycle);
