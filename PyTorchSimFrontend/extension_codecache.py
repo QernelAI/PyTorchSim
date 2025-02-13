@@ -201,8 +201,8 @@ class MLIRCodeCache:
 
         # Create TOG
         offset = vectorlane_size
-        if kwargs['loop_size'] is not None and kwargs['loop_size'][0] < vectorlane_size:
-            offset = kwargs['loop_size'][0]
+        if kwargs['loop_size'] is not None and kwargs['loop_size'][-3] < vectorlane_size:
+            offset = kwargs['loop_size'][-3]
         tile_graph_generator = tog_generator(origins)
         tile_graph_generator.load_file(raw_tog_path)
         tile_graph_generator.generate_tile_graph(
