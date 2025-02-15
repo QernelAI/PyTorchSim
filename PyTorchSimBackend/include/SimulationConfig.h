@@ -16,6 +16,7 @@ enum class L2CacheType { NOCACHE, READONLY };
 struct SimulationConfig {
   /* Core config */
   CoreType core_type = CoreType::OS_MESH;
+  std::string stonne_config_path;
   uint32_t num_cores;
   uint32_t core_freq;
   uint32_t sram_size;

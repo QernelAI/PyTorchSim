@@ -5,9 +5,10 @@
 class SparseCore : public Core {
 public:
   SparseCore(uint32_t id, SimulationConfig config);
-  ~SparseCore() = default;
+  ~SparseCore();
   bool running();
   bool can_issue(const std::shared_ptr<Tile>& op);
+  void issue(std::shared_ptr<Tile> tile);
   std::shared_ptr<Tile> pop_finished_tile();
   void cycle();
   bool has_memory_request();
