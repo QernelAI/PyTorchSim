@@ -5,6 +5,8 @@
 
 using json = nlohmann::json;
 
+enum class CoreType { OS_MESH, STONNE };
+
 enum class DramType { SIMPLE, RAMULATOR1, RAMULATOR2 };
 
 enum class IcntType { SIMPLE, BOOKSIM2 };
@@ -13,6 +15,7 @@ enum class L2CacheType { NOCACHE, READONLY };
 
 struct SimulationConfig {
   /* Core config */
+  CoreType core_type = CoreType::OS_MESH;
   uint32_t num_cores;
   uint32_t core_freq;
   uint32_t sram_size;

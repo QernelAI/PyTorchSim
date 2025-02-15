@@ -40,13 +40,17 @@ add_subdirectory("${PROJECT_SOURCE_DIR}/extern/protobuf/cmake" EXCLUDE_FROM_ALL)
 set_target_properties(libprotoc PROPERTIES FOLDER "external/protobuf")
 set_target_properties(protoc PROPERTIES FOLDER "external/protobuf")
 
+# Add libaray stonne core
+add_subdirectory("${PROJECT_SOURCE_DIR}/extern/stonneCore")
+
 # Add libaray onnx
 add_definitions("-DONNX_NAMESPACE=onnx")
 add_subdirectory("${PROJECT_SOURCE_DIR}/extern/onnx" EXCLUDE_FROM_ALL)
 set_target_properties(onnx PROPERTIES FOLDER "extern/onnx")
 set_target_properties(onnx_proto PROPERTIES FOLDER "extern/onnx")
 
+target_include_directories(Simulator PUBLIC ${PROJECT_SOURCE_DIR}/extern/stonneCore/include)
 target_include_directories(Simulator PUBLIC ${ONNX_INCLUDE_DIRS})
 target_include_directories(Simulator PUBLIC ${PROJECT_SOURCE_DIR}/src)
-target_link_libraries(Simulator booksim2 ramulator)
-target_link_libraries(Simulator ${PROTOBUF_LIB} onnx_proto ${CONAN_LIBS} stdc++fs)
+target_link_libraries(Simulator booksim2 ramulator sstStonne)
+target_link_libraries(Simulator ${PROTOBUF_LIB} onnx_proto sstStonne ${CONAN_LIBS} stdc++fs)
