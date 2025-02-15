@@ -15,18 +15,19 @@ class Core {
  public:
   Core(uint32_t id, SimulationConfig config);
   ~Core() = default;
-  bool running();
-  bool can_issue(const std::shared_ptr<Tile>& op);
-  void issue(std::shared_ptr<Tile> tile);
-  std::shared_ptr<Tile> pop_finished_tile();
-  void cycle();
-  bool has_memory_request();
-  void pop_memory_request();
-  mem_fetch* top_memory_request() { return _request_queue.front(); }
-  void push_memory_response(mem_fetch* response);
-  void print_stats();
-  void print_current_stats();
-  void finish_instruction(std::shared_ptr<Instruction>& inst);
+  virtual bool running();
+  virtual bool can_issue(const std::shared_ptr<Tile>& op);
+  virtual void issue(std::shared_ptr<Tile> tile);
+  virtual std::shared_ptr<Tile> pop_finished_tile();
+  virtual void cycle();
+  virtual void print_stats();
+  virtual void print_current_stats();
+  virtual void finish_instruction(std::shared_ptr<Instruction>& inst);
+  virtual bool has_memory_request();
+  virtual void pop_memory_request();
+  virtual mem_fetch* top_memory_request() { return _request_queue.front(); }
+  virtual void push_memory_response(mem_fetch* response);
+
   std::queue<std::shared_ptr<Instruction>>& get_compute_pipeline(int compute_type);
   enum {
     VECTOR_UNIT,

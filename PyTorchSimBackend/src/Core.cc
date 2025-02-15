@@ -358,7 +358,9 @@ bool Core::running() {
   return running;
 }
 
-bool Core::has_memory_request() { return _request_queue.size() > 0; }
+bool Core::has_memory_request() {
+  return !_request_queue.empty();
+}
 
 void Core::pop_memory_request() {
   _request_queue.pop();

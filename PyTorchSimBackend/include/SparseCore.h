@@ -6,17 +6,16 @@ class SparseCore : public Core {
 public:
   SparseCore(uint32_t id, SimulationConfig config);
   ~SparseCore();
-  bool running();
-  bool can_issue(const std::shared_ptr<Tile>& op);
-  void issue(std::shared_ptr<Tile> tile);
-  std::shared_ptr<Tile> pop_finished_tile();
-  void cycle();
+  bool running() override;
+  bool can_issue(const std::shared_ptr<Tile>& op) override;
+  void issue(std::shared_ptr<Tile> tile) override;
+  void cycle() override;
   bool has_memory_request();
   void pop_memory_request();
   mem_fetch* top_memory_request() { return _request_queue.front(); }
-  void push_memory_response(mem_fetch* response);
-  void print_stats();
-  void print_current_stats();
+  void push_memory_response(mem_fetch* response) override;
+  void print_stats() override;
+  void print_current_stats() override;
 
 private:
   SST_STONNE::sstStonne *stonneCore;

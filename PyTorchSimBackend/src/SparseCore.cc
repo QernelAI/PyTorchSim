@@ -11,15 +11,15 @@ SparseCore::SparseCore(uint32_t id, SimulationConfig config) : Core(id, config) 
   opDesc.GEMM_M = 64;
   opDesc.GEMM_T_K = 4;
   opDesc.GEMM_T_N = 1;
-  opDesc.mem_init = "/workspace/sstStonne/tests/outerproduct/outerproduct_gemm_mem.ini";
-  opDesc.mem_matrix_c_file_name = "/workspace/sstStonne/tests/outerproduct/result.out";
+  opDesc.mem_init = "/workspace/PyTorchSim/PyTorchSimBackend/extern/stonneCore/tests/outerproduct/outerproduct_gemm_mem.ini";
+  opDesc.mem_matrix_c_file_name = "/workspace/PyTorchSim/PyTorchSimBackend/extern/stonneCore/tests/outerproduct/result.out";
   opDesc.matrix_a_dram_address = 0;
   opDesc.matrix_b_dram_address = 12444;
   opDesc.matrix_c_dram_address = 24608;
-  opDesc.rowpointer_matrix_a_init = "/workspace/sstStonne/tests/outerproduct/outerproduct_gemm_rowpointerA.in";
-  opDesc.colpointer_matrix_a_init = "/workspace/sstStonne/tests/outerproduct/outerproduct_gemm_colpointerA.in";
-  opDesc.rowpointer_matrix_b_init = "/workspace/sstStonne/tests/outerproduct/outerproduct_gemm_rowpointerB.in";
-  opDesc.colpointer_matrix_b_init = "/worksnpace/sstStonne/tests/outerproduct/outerproduct_gemm_colpointerB.in";
+  opDesc.rowpointer_matrix_a_init = "/workspace/PyTorchSim/PyTorchSimBackend/extern/stonneCore/tests/outerproduct/outerproduct_gemm_rowpointerA.in";
+  opDesc.colpointer_matrix_a_init = "/workspace/PyTorchSim/PyTorchSimBackend/extern/stonneCore/tests/outerproduct/outerproduct_gemm_colpointerA.in";
+  opDesc.rowpointer_matrix_b_init = "/workspace/PyTorchSim/PyTorchSimBackend/extern/stonneCore/tests/outerproduct/outerproduct_gemm_rowpointerB.in";
+  opDesc.colpointer_matrix_b_init = "/workspace/PyTorchSim/PyTorchSimBackend/extern/stonneCore/tests/outerproduct/outerproduct_gemm_colpointerB.in";
   stonneCore->setup(opDesc);
   stonneCore->init(1);
 };
@@ -30,19 +30,17 @@ bool SparseCore::running() {
   return !_request_queue.empty() || !_response_queue.empty() || !stonneCore->isFinished();
 }
 
+void SparseCore::issue(std::shared_ptr<Tile> tile) {};
+
 bool SparseCore::can_issue(const std::shared_ptr<Tile>& op) {
   return !running();
-}
-
-std::shared_ptr<Tile> SparseCore::pop_finished_tile() {
-  return nullptr;
 }
 
 void SparseCore::cycle() {
   stonneCore->cycle();
 
   /* Send Memory Request */
-  if (SimpleMem::Request* req = stonneCore->popRequest()) {
+  while (SimpleMem::Request* req = stonneCore->popRequest()) {
     mem_access_type acc_type;
     mf_type type;
     switch(req->getcmd()) {
@@ -62,12 +60,12 @@ void SparseCore::cycle() {
     _request_queue.push(req_wrapper);
   }
 
-  if (!_response_queue.empty()) {
+  while (!_response_queue.empty()) {
     mem_fetch* resp_wrapper = _response_queue.front();
-    _request_queue.pop();
     SimpleMem::Request* resp = static_cast<SimpleMem::Request*>(resp_wrapper->get_custom_data());
     resp->setReply();
     stonneCore->pushResponse(resp);
+    _response_queue.pop();
     delete resp_wrapper;
   }
 }
@@ -77,9 +75,7 @@ bool SparseCore::has_memory_request() {
 }
 
 void SparseCore::pop_memory_request() {
-  if (!_request_queue.empty()) {
-    _request_queue.pop();
-  }
+  _request_queue.pop();
 }
 
 void SparseCore::push_memory_response(mem_fetch* response) {

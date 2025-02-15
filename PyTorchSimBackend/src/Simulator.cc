@@ -42,15 +42,25 @@ Simulator::Simulator(SimulationConfig config)
     spdlog::info("[Config/Interconnect] BookSim2 selected");
     _icnt = std::make_unique<Booksim2Interconnect>(config);
   } else {
-    spdlog::error("[Configuration] {} Invalid interconnect type...!");
+    spdlog::error("[Configuration] Invalid interconnect type...!");
     exit(EXIT_FAILURE);
   }
   _icnt_interval = config.icnt_print_interval;
 
   // Create core objects
-  _cores.resize(config.num_cores);
-  for (int core_index = 0; core_index < _n_cores; core_index++)
-    _cores[core_index] = std::make_unique<Core>(core_index, _config);
+  _cores.resize(_n_cores);
+  for (int core_index = 0; core_index < _n_cores; core_index++) {
+    if (config.core_type == CoreType::OS_MESH) {
+      _cores.at(core_index) = std::make_unique<Core>(core_index, _config);
+    } else if (config.core_type == CoreType::STONNE) {
+      _cores.at(core_index) = std::make_unique<SparseCore>(core_index, _config);
+    } else {
+      spdlog::error("[Configuration] Invalid core type...!");
+      exit(EXIT_FAILURE);
+    }
+  }
+
+
 
   // Initialize Scheduler
   for (int i=0; i<config.num_patition;i++)
