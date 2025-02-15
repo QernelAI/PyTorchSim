@@ -20,10 +20,6 @@ class Core {
   void issue(std::shared_ptr<Tile> tile);
   std::shared_ptr<Tile> pop_finished_tile();
   void cycle();
-  void vu_cycle();
-  void sa_cycle();
-  void compute_cycle();
-  void dma_cycle();
   bool has_memory_request();
   void pop_memory_request();
   mem_fetch* top_memory_request() { return _request_queue.front(); }
@@ -39,6 +35,10 @@ class Core {
   };
 
  protected:
+  void dma_cycle();
+  void compute_cycle();
+  void vu_cycle();
+  void sa_cycle();
   bool can_issue_compute(std::shared_ptr<Instruction>& inst);
   void update_stats();
 
