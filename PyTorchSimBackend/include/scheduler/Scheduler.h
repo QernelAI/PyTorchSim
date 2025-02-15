@@ -1,8 +1,8 @@
 #pragma once
 #include <robin_hood.h>
-#include "../Tile.h"
-#include "../Common.h"
-#include "../TileGraph.h"
+#include "Tile.h"
+#include "Common.h"
+#include "TileGraph.h"
 
 class Scheduler {
  public:
