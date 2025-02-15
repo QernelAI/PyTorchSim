@@ -13,3 +13,6 @@
 [submodule "PyTorchSimBackend/extern/ramulator2"]
 	path = PyTorchSimBackend/extern/ramulator2
 	url = https://github.com/PSAL-POSTECH/ramulator2
+[submodule "PyTorchSimBackend/extern/stonneCore"]
+	path = PyTorchSimBackend/extern/stonneCore
+	url = https://github.com/PSAL-POSTECH/stonne_core.git

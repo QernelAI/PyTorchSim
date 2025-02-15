@@ -6,7 +6,7 @@ CacheStats::CacheStats() {
   m_fail_stats.resize(NUM_MEM_ACCESS_TYPE);
   for (int i = 0; i < NUM_MEM_ACCESS_TYPE; i++) {
     m_stats[i].resize(NUM_CACHE_REQUEST_STATUS, 0);
-    m_fail_stats[i].resize(NUM_CACHE_REQUEST_STATUS, 0);
+    m_fail_stats[i].resize(NUM_CACHE_RESERVATION_FAIL_REASON, 0);
   }
   m_cache_port_available_cycles = 0;
   m_cache_data_port_busy_cycles = 0;
@@ -216,7 +216,7 @@ void CacheStats::print_stats(FILE *out, const char *cache_name) const {
 
 void CacheStats::print_fail_stats(FILE *out, const char *cache_name) const {
   for (int type = 0; type < NUM_MEM_ACCESS_TYPE; type++) {
-    for (int status = 0; status < NUM_CACHE_REQUEST_STATUS; status++) {
+    for (int status = 0; status < NUM_CACHE_RESERVATION_FAIL_REASON; status++) {
       fprintf(out, "\t%s[%s][%s] = %lu\n", cache_name,
               mem_access_type_str[type],
               cache_reservation_fail_reason_str[status],
