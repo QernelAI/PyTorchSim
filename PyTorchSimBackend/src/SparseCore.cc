@@ -2,38 +2,24 @@
 
 SparseCore::SparseCore(uint32_t id, SimulationConfig config) : Core(id, config) {
   stonneCore = new SST_STONNE::sstStonne(config.stonne_config_path);
-
-  // Dummy instruction
-  SST_STONNE::StonneOpDesc opDesc;
-  opDesc.operation = Layer_t::outerProductGEMM;
-  opDesc.GEMM_K = 512;
-  opDesc.GEMM_N = 64;
-  opDesc.GEMM_M = 64;
-  opDesc.GEMM_T_K = 4;
-  opDesc.GEMM_T_N = 1;
-  opDesc.mem_init = "/workspace/PyTorchSim/PyTorchSimBackend/extern/stonneCore/tests/outerproduct/outerproduct_gemm_mem.ini";
-  opDesc.mem_matrix_c_file_name = "/workspace/PyTorchSim/PyTorchSimBackend/extern/stonneCore/tests/outerproduct/result.out";
-  opDesc.matrix_a_dram_address = 0;
-  opDesc.matrix_b_dram_address = 12444;
-  opDesc.matrix_c_dram_address = 24608;
-  opDesc.rowpointer_matrix_a_init = "/workspace/PyTorchSim/PyTorchSimBackend/extern/stonneCore/tests/outerproduct/outerproduct_gemm_rowpointerA.in";
-  opDesc.colpointer_matrix_a_init = "/workspace/PyTorchSim/PyTorchSimBackend/extern/stonneCore/tests/outerproduct/outerproduct_gemm_colpointerA.in";
-  opDesc.rowpointer_matrix_b_init = "/workspace/PyTorchSim/PyTorchSimBackend/extern/stonneCore/tests/outerproduct/outerproduct_gemm_rowpointerB.in";
-  opDesc.colpointer_matrix_b_init = "/workspace/PyTorchSim/PyTorchSimBackend/extern/stonneCore/tests/outerproduct/outerproduct_gemm_colpointerB.in";
-  stonneCore->setup(opDesc);
   stonneCore->init(1);
 };
 
 SparseCore::~SparseCore() { delete stonneCore; }
 
 bool SparseCore::running() {
-  return !_request_queue.empty() || !_response_queue.empty() || !stonneCore->isFinished();
+  return !_request_queue.empty() || !_response_queue.empty() || _tiles.size();
 }
 
-void SparseCore::issue(std::shared_ptr<Tile> tile) {};
+void SparseCore::issue(std::shared_ptr<Tile> tile) {
+  SST_STONNE::StonneOpDesc *opDesc = static_cast<SST_STONNE::StonneOpDesc*>(tile->get_custom_data());
+  stonneCore->setup(*opDesc);
+  stonneCore->init(1);
+  _tiles.push_back(tile);
+};
 
 bool SparseCore::can_issue(const std::shared_ptr<Tile>& op) {
-  return !running();
+  return !running() && op->is_stonne_tile();
 }
 
 void SparseCore::cycle() {
@@ -60,6 +46,7 @@ void SparseCore::cycle() {
     _request_queue.push(req_wrapper);
   }
 
+  /* Send Memory Response */
   while (!_response_queue.empty()) {
     mem_fetch* resp_wrapper = _response_queue.front();
     SimpleMem::Request* resp = static_cast<SimpleMem::Request*>(resp_wrapper->get_custom_data());
@@ -67,6 +54,13 @@ void SparseCore::cycle() {
     stonneCore->pushResponse(resp);
     _response_queue.pop();
     delete resp_wrapper;
+  }
+
+  if (stonneCore->isFinished()) {
+    std::shared_ptr<Tile> target_tile = _tiles.front();
+    target_tile->set_status(Tile::Status::FINISH);
+    _finished_tiles.push(target_tile);
+    _tiles.erase(_tiles.begin());
   }
 }
 

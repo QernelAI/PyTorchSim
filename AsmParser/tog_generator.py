@@ -7,7 +7,7 @@ from collections import defaultdict
 if __name__ == "__main__":
     from onnx_utility import node, loop_index_node, loop_end_node, load_node, store_node, memory_wait_node, compute_node, connect_nodes, dump_onnx_graph
 else:
-    from AsmParser.onnx_utility import node, loop_index_node, loop_end_node, load_node, store_node, memory_wait_node, compute_node, connect_nodes, dump_onnx_graph
+    from AsmParser.onnx_utility import node, loop_index_node, loop_end_node, load_node, store_node, memory_wait_node, compute_node, stonne_node, connect_nodes, dump_onnx_graph
 
 
 def import_module_from_path(module_name, path):
@@ -31,6 +31,7 @@ class tog_generator:
     LoopNodeKind = 2
     DMANodeKind = 3
     DMAWaitNodeKind = 4
+    StonneNodeKind = 5
     def __init__(self, origins="Unknown") -> None:
         self.module_name = "tile_operation_graph"
         self.module = None
@@ -104,6 +105,8 @@ class tog_generator:
             tile_info["tag_divider_list"] = dump_data["tag_divider_list"]
             tile_info["base_addr"] = dump_data["base_address"]
             new_node = memory_wait_node(tile_info, node_id=node_id)
+        elif node_type == self.StonneNodeKind:
+            new_node = stonne_node(dump_data, node_id=node_id)
         else:
             print("Unexpected node_type :", node_type)
             exit(1)

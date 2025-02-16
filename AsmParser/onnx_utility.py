@@ -96,6 +96,58 @@ class compute_node(node):
         self.torchsim_overlapping_cycle = overlapping_cycle
         self.torchsim_compute_type = compute_type
 
+class stonne_node(node):
+    def __init__(self, tile_info, node_id=0):
+        super().__init__(node_id)
+        self.torchsim_stonne_operation = tile_info.get("stonne_operation", "CONV")
+        self.torchsim_stonne_layer_name = tile_info.get("stonne_layer_name", "")
+        self.torchsim_stonne_mem_init = tile_info.get("stonne_mem_init", "")
+
+        # Convolution Parameters
+        self.torchsim_stonne_R = tile_info.get("stonne_R", 1)
+        self.torchsim_stonne_S = tile_info.get("stonne_S", 1)
+        self.torchsim_stonne_C = tile_info.get("stonne_C", 1)
+        self.torchsim_stonne_K = tile_info.get("stonne_K", 1)
+        self.torchsim_stonne_G = tile_info.get("stonne_G", 1)
+        self.torchsim_stonne_N = tile_info.get("stonne_N", 1)
+        self.torchsim_stonne_X = tile_info.get("stonne_X", 1)
+        self.torchsim_stonne_Y = tile_info.get("stonne_Y", 1)
+        self.torchsim_stonne_X_ = tile_info.get("stonne_X_", 1)
+        self.torchsim_stonne_Y_ = tile_info.get("stonne_Y_", 1)
+        self.torchsim_stonne_strides = tile_info.get("stonne_strides", 1)
+
+        # Convolution Tile Parameters
+        self.torchsim_stonne_T_R = tile_info.get("stonne_T_R", 1)
+        self.torchsim_stonne_T_S = tile_info.get("stonne_T_S", 1)
+        self.torchsim_stonne_T_C = tile_info.get("stonne_T_C", 1)
+        self.torchsim_stonne_T_K = tile_info.get("stonne_T_K", 1)
+        self.torchsim_stonne_T_G = tile_info.get("stonne_T_G", 1)
+        self.torchsim_stonne_T_N = tile_info.get("stonne_T_N", 1)
+        self.torchsim_stonne_T_X_ = tile_info.get("stonne_T_X_", 1)
+        self.torchsim_stonne_T_Y_ = tile_info.get("stonne_T_Y_", 1)
+
+        # GEMM Parameters
+        self.torchsim_stonne_GEMM_K = tile_info.get("stonne_GEMM_K", 1)
+        self.torchsim_stonne_GEMM_N = tile_info.get("stonne_GEMM_N", 1)
+        self.torchsim_stonne_GEMM_M = tile_info.get("stonne_GEMM_M", 1)
+        self.torchsim_stonne_GEMM_T_K = tile_info.get("stonne_GEMM_T_K", 1)
+        self.torchsim_stonne_GEMM_T_N = tile_info.get("stonne_GEMM_T_N", 1)
+        self.torchsim_stonne_GEMM_T_M = tile_info.get("stonne_GEMM_T_M", 1)
+
+        # Memory Addresses
+        self.torchsim_stonne_matrix_a_dram_address = tile_info.get("stonne_matrix_a_dram_address", 0)
+        self.torchsim_stonne_matrix_b_dram_address = tile_info.get("stonne_matrix_b_dram_address", 0)
+        self.torchsim_stonne_matrix_c_dram_address = tile_info.get("stonne_matrix_c_dram_address", 0)
+        self.torchsim_stonne_mem_matrix_c_file_name = tile_info.get("stonne_mem_matrix_c_file_name", "")
+
+        # Bitmap and CSR Data
+        self.torchsim_stonne_bitmap_matrix_a_init = tile_info.get("stonne_bitmap_matrix_a_init", "")
+        self.torchsim_stonne_bitmap_matrix_b_init = tile_info.get("stonne_bitmap_matrix_b_init", "")
+        self.torchsim_stonne_rowpointer_matrix_a_init = tile_info.get("stonne_rowpointer_matrix_a_init", "")
+        self.torchsim_stonne_colpointer_matrix_a_init = tile_info.get("stonne_colpointer_matrix_a_init", "")
+        self.torchsim_stonne_rowpointer_matrix_b_init = tile_info.get("stonne_rowpointer_matrix_b_init", "")
+        self.torchsim_stonne_colpointer_matrix_b_init = tile_info.get("stonne_colpointer_matrix_b_init", "")
+
 def connect_nodes(parent, child):
     child.add_parent(parent)
     parent.add_child(child)

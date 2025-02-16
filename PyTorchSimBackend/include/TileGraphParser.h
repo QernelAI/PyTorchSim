@@ -6,6 +6,7 @@
 #include <google/protobuf/io/zero_copy_stream_impl.h>
 #include "TileGraph.h"
 #include "Instruction.h"
+#include "sstStonne.h"
 #include "onnx/defs/schema.h"
 #include "onnx/onnx-operators_pb.h"
 #include "onnx/onnx_pb.h"
@@ -18,7 +19,8 @@ enum class TileType{
   LOAD_NODE,
   STORE_NODE,
   COMPUTE_NODE,
-  MEMORY_WAIT_NODE
+  MEMORY_WAIT_NODE,
+  STONNE_NODE,
 };
 
 enum class LoopType {
@@ -153,8 +155,6 @@ class TileMemoryWaitNode : public TileNode {
   std::string _base_addr_name;
 };
 
-
-
 class TileLoopNode : public TileNode {
  public:
  TileLoopNode(onnx::NodeProto& node);
@@ -178,4 +178,117 @@ class TileLoopNode : public TileNode {
 class TileLoopEndNode : public TileNode {
  public:
   TileLoopEndNode(onnx::NodeProto& node) : TileNode(node) {}
+};
+
+class TileStonneNode : public TileNode {
+ public:
+  TileStonneNode(onnx::NodeProto& node) : TileNode(node) {
+    for (auto attribute : node.attribute()) {
+      if (attribute.name() == "torchsim_stonne_operation") {
+        std::string op_type = attribute.s();
+        if (op_type == "CONV") {
+            desc.operation = Layer_t::CONV;
+        } else if (op_type == "GEMM") {
+            desc.operation = Layer_t::GEMM;
+        } else if (op_type == "POOL") {
+            desc.operation = Layer_t::POOL;
+        } else if (op_type == "FC") {
+            desc.operation = Layer_t::FC;
+        } else if (op_type == "SPARSE_DENSE") {
+            desc.operation = Layer_t::SPARSE_DENSE;
+        } else if (op_type == "bitmapSpMSpM") {
+            desc.operation = Layer_t::bitmapSpMSpM;
+        } else if (op_type == "csrSpMM") {
+            desc.operation = Layer_t::csrSpMM;
+        } else if (op_type == "outerProductGEMM") {
+            desc.operation = Layer_t::outerProductGEMM;
+        } else if (op_type == "gustavsonsGEMM") {
+            desc.operation = Layer_t::gustavsonsGEMM;
+        } else {
+            spdlog::error("[TileStonneNode] Unknown operation type: {}", op_type);
+            throw std::runtime_error("Invalid operation type in TileStonneNode");
+        }
+      } else if (attribute.name() == "torchsim_stonne_layer_name") {
+          desc.layer_name = attribute.s();
+      } else if (attribute.name() == "torchsim_stonne_mem_init") {
+          desc.mem_init = attribute.s();
+      } else if (attribute.name() == "torchsim_stonne_R") {
+          desc.R = attribute.i();
+      } else if (attribute.name() == "torchsim_stonne_S") {
+          desc.S = attribute.i();
+      } else if (attribute.name() == "torchsim_stonne_C") {
+          desc.C = attribute.i();
+      } else if (attribute.name() == "torchsim_stonne_K") {
+          desc.K = attribute.i();
+      } else if (attribute.name() == "torchsim_stonne_G") {
+          desc.G = attribute.i();
+      } else if (attribute.name() == "torchsim_stonne_N") {
+          desc.N = attribute.i();
+      } else if (attribute.name() == "torchsim_stonne_X") {
+          desc.X = attribute.i();
+      } else if (attribute.name() == "torchsim_stonne_Y") {
+          desc.Y = attribute.i();
+      } else if (attribute.name() == "torchsim_stonne_X_") {
+          desc.X_ = attribute.i();
+      } else if (attribute.name() == "torchsim_stonne_Y_") {
+          desc.Y_ = attribute.i();
+      } else if (attribute.name() == "torchsim_stonne_strides") {
+          desc.strides = attribute.i();
+      } else if (attribute.name() == "torchsim_stonne_T_R") {
+          desc.T_R = attribute.i();
+      } else if (attribute.name() == "torchsim_stonne_T_S") {
+          desc.T_S = attribute.i();
+      } else if (attribute.name() == "torchsim_stonne_T_C") {
+          desc.T_C = attribute.i();
+      } else if (attribute.name() == "torchsim_stonne_T_K") {
+          desc.T_K = attribute.i();
+      } else if (attribute.name() == "torchsim_stonne_T_G") {
+          desc.T_G = attribute.i();
+      } else if (attribute.name() == "torchsim_stonne_T_N") {
+          desc.T_N = attribute.i();
+      } else if (attribute.name() == "torchsim_stonne_T_X_") {
+          desc.T_X_ = attribute.i();
+      } else if (attribute.name() == "torchsim_stonne_T_Y_") {
+          desc.T_Y_ = attribute.i();
+      } else if (attribute.name() == "torchsim_stonne_GEMM_K") {
+          desc.GEMM_K = attribute.i();
+      } else if (attribute.name() == "torchsim_stonne_GEMM_N") {
+          desc.GEMM_N = attribute.i();
+      } else if (attribute.name() == "torchsim_stonne_GEMM_M") {
+          desc.GEMM_M = attribute.i();
+      } else if (attribute.name() == "torchsim_stonne_GEMM_T_K") {
+          desc.GEMM_T_K = attribute.i();
+      } else if (attribute.name() == "torchsim_stonne_GEMM_T_N") {
+          desc.GEMM_T_N = attribute.i();
+      } else if (attribute.name() == "torchsim_stonne_GEMM_T_M") {
+          desc.GEMM_T_M = attribute.i();
+      } else if (attribute.name() == "torchsim_stonne_matrix_a_dram_address") {
+          desc.matrix_a_dram_address = attribute.i();
+      } else if (attribute.name() == "torchsim_stonne_matrix_b_dram_address") {
+          desc.matrix_b_dram_address = attribute.i();
+      } else if (attribute.name() == "torchsim_stonne_matrix_c_dram_address") {
+          desc.matrix_c_dram_address = attribute.i();
+      } else if (attribute.name() == "torchsim_stonne_mem_matrix_c_file_name") {
+          desc.mem_matrix_c_file_name = attribute.s();
+      } else if (attribute.name() == "torchsim_stonne_bitmap_matrix_a_init") {
+          desc.bitmap_matrix_a_init = attribute.s();
+      } else if (attribute.name() == "torchsim_stonne_bitmap_matrix_b_init") {
+          desc.bitmap_matrix_b_init = attribute.s();
+      } else if (attribute.name() == "torchsim_stonne_rowpointer_matrix_a_init") {
+          desc.rowpointer_matrix_a_init = attribute.s();
+      } else if (attribute.name() == "torchsim_stonne_colpointer_matrix_a_init") {
+          desc.colpointer_matrix_a_init = attribute.s();
+      } else if (attribute.name() == "torchsim_stonne_rowpointer_matrix_b_init") {
+          desc.rowpointer_matrix_b_init = attribute.s();
+      } else if (attribute.name() == "torchsim_stonne_colpointer_matrix_b_init") {
+          desc.colpointer_matrix_b_init = attribute.s();
+      } else {
+          spdlog::warn("[TileStonneNode] Unrecognized attribute: {}", attribute.name());
+      }
+    }
+  }
+  SST_STONNE::StonneOpDesc* getDesc() { return &desc; }
+  void print_node() override;
+ private:
+  SST_STONNE::StonneOpDesc desc;
 };

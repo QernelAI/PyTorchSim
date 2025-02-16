@@ -128,6 +128,8 @@ TileType TileNode::get_tile_type(std::string type) {
     return TileType::COMPUTE_NODE;
   else if (type == "memory_wait_node")
     return TileType::MEMORY_WAIT_NODE;
+  else if (type == "stonne_node")
+    return TileType::STONNE_NODE;
   spdlog::error("[TileGraphParser] Invalid node type...");
   exit(EXIT_FAILURE);
 }
@@ -224,6 +226,41 @@ TileMemoryWaitNode::TileMemoryWaitNode(onnx::NodeProto& node) : TileNode(node) {
       _base_addr_name = attribute.s();
     }
   }
+}
+
+void TileStonneNode::print_node() {
+  TileNode::print_node();
+  std::string spaces(get_depth(), '\t');
+
+  spdlog::debug("{} operation: {}", spaces, static_cast<int>(desc.operation));
+  spdlog::debug("{} layer_name: {}", spaces, desc.layer_name);
+  spdlog::debug("{} mem_init: {}", spaces, desc.mem_init);
+
+  // Convolution Parameters
+  spdlog::debug("{} R: {}, S: {}, C: {}, K: {}, G: {}, N: {}", spaces, desc.R, desc.S, desc.C, desc.K, desc.G, desc.N);
+  spdlog::debug("{} X: {}, Y: {}, X_: {}, Y_: {}, strides: {}", spaces, desc.X, desc.Y, desc.X_, desc.Y_, desc.strides);
+
+  // Convolution Tile Parameters
+  spdlog::debug("{} T_R: {}, T_S: {}, T_C: {}, T_K: {}, T_G: {}, T_N: {}", spaces, desc.T_R, desc.T_S, desc.T_C, desc.T_K, desc.T_G, desc.T_N);
+  spdlog::debug("{} T_X_: {}, T_Y_: {}", spaces, desc.T_X_, desc.T_Y_);
+
+  // GEMM Parameters
+  spdlog::debug("{} GEMM_K: {}, GEMM_N: {}, GEMM_M: {}", spaces, desc.GEMM_K, desc.GEMM_N, desc.GEMM_M);
+  spdlog::debug("{} GEMM_T_K: {}, GEMM_T_N: {}, GEMM_T_M: {}", spaces, desc.GEMM_T_K, desc.GEMM_T_N, desc.GEMM_T_M);
+
+  // Memory Addresses
+  spdlog::debug("{} matrix_a_dram_address: {}", spaces, desc.matrix_a_dram_address);
+  spdlog::debug("{} matrix_b_dram_address: {}", spaces, desc.matrix_b_dram_address);
+  spdlog::debug("{} matrix_c_dram_address: {}", spaces, desc.matrix_c_dram_address);
+  spdlog::debug("{} mem_matrix_c_file_name: {}", spaces, desc.mem_matrix_c_file_name);
+
+  // Bitmap and CSR Data
+  spdlog::debug("{} bitmap_matrix_a_init: {}", spaces, desc.bitmap_matrix_a_init);
+  spdlog::debug("{} bitmap_matrix_b_init: {}", spaces, desc.bitmap_matrix_b_init);
+  spdlog::debug("{} rowpointer_matrix_a_init: {}", spaces, desc.rowpointer_matrix_a_init);
+  spdlog::debug("{} colpointer_matrix_a_init: {}", spaces, desc.colpointer_matrix_a_init);
+  spdlog::debug("{} rowpointer_matrix_b_init: {}", spaces, desc.rowpointer_matrix_b_init);
+  spdlog::debug("{} colpointer_matrix_b_init: {}", spaces, desc.colpointer_matrix_b_init);
 }
 
 void TileMemoryWaitNode::print_node() {
@@ -531,6 +568,26 @@ std::vector<std::shared_ptr<Tile>> TileLoopNode::get_tiles_from_iter(TileGraphPa
       parent->append_child(child);
       /* Create new tile */
       tile_vec.push_back(child);
+    } else if (tile_node->get_type() == TileType::STONNE_NODE) {
+        printIndexMap("[TOGParser] Stonne Node ", iter);
+        std::shared_ptr<TileStonneNode> stonne_node = std::static_pointer_cast<TileStonneNode>(tile_node);
+        /* Lookup given name's address */
+        std::vector<int> iter_list;
+        std::vector<int> tag_list;
+        std::vector<int> tag_stride_list;
+        std::vector<int> accum_tag_list;
+
+        /* Put dummy computation instruction */
+        std::shared_ptr<Instruction> inst = std::make_shared<Instruction>(
+          Opcode::COMP, 0,
+          0, 0,
+          std::vector<size_t>(), 0, iter_list,
+          iter_list, tag_list, tag_stride_list, accum_tag_list, std::vector<int>()
+        );
+        link_map[tile_node] = inst;
+        tile_vec.back()->append_instuction(inst);
+        tile_vec.back()->set_custom_data(stonne_node->getDesc());
+        tile_vec.back()->set_stonne_tile(true);
     }
   }
 
@@ -640,6 +697,10 @@ TileGraphParser::TileGraphParser(std::string onnx_path, json& attribute_json) {
       register_tile(tile_node);
     } else if (type == TileType::MEMORY_WAIT_NODE) {
       std::shared_ptr<TileMemoryWaitNode> tile_node = std::make_shared<TileMemoryWaitNode>(node_proto);
+      /* Register output */
+      register_tile(tile_node);
+    } else if (type == TileType::STONNE_NODE) {
+      std::shared_ptr<TileStonneNode> tile_node = std::make_shared<TileStonneNode>(node_proto);
       /* Register output */
       register_tile(tile_node);
     }
