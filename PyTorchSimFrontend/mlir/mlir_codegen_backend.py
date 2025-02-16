@@ -93,6 +93,8 @@ class ExtensionWrapperCodegen(wrapper.WrapperCodeGen):
                 from {extension_codecache.__name__} import CustomAsyncCompile
                 from torch._inductor.select_algorithm import extern_kernels
 
+                import PyTorchSimFrontend.extension_op
+
                 aten = torch.ops.aten
                 inductor_ops = torch.ops.inductor
                 assert_size_stride = torch._C._dynamo.guards.assert_size_stride

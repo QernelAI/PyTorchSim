@@ -3,15 +3,18 @@ from typing import List, Optional, Sequence
 import torch
 from torch._inductor.lowering import lowerings
 from torch._inductor.kernel.mm_common import mm_args
+# from torch._inductor.select_algorithm import ExternKernelChoice
 from torch._inductor import ir
 from torch._inductor.virtualized import V
 from torch._inductor.ir import TensorBox
+from PyTorchSimFrontend.extension_op import MLIRExternKernelChoice
 from PyTorchSimFrontend.mlir.mlir_gemm_template import MLIRGemmTemplate
 from PyTorchSimFrontend.mlir.mlir_bmm_template import MLIRBMMTemplate
 from PyTorchSimFrontend.mlir.mlir_conv_template import MLIRConvTemplate
 from PyTorchSimFrontend.mlir.mlir_maxpool_template import MLIRMaxPoolTemplate
 
 aten = torch.ops.aten
+aten_spmm = MLIRExternKernelChoice(torch.sparse.mm, "custom_op::sparse_addmm")
 
 def tuned_mm(mat1, mat2, * ,layout=None):
     m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=layout)
@@ -141,7 +144,18 @@ def custom_maxpool(
     mlir_template = MLIRMaxPoolTemplate([x], layout, **kwargs)
     return mlir_template.generate().output_node(), x # FIXME: x is dummy IRNode, indices are not used in our case
 
+def sparse_addmm(*args, **kwargs):
+    print("Custom sparse addmm")
+    _, sp_mat1, sp_mat2 = args
+    mat1_layout = sp_mat1.layout
+    mat2_layout = sp_mat2.layout
+    layout = ir.FlexibleLayout(
+            device=mat1_layout.device, dtype=mat1_layout.dtype, size=[mat1_layout.size[0], mat2_layout.size[1]]  # FIXME: Example code for aten op overwrite by externkernel call
+        )
+    return aten_spmm.bind((sp_mat1, sp_mat2), layout).output_node()
+
 lowerings.update({getattr(aten.mm, overload): tuned_mm for overload in aten.mm.overloads()})
 lowerings.update({getattr(aten.addmm, overload): tuned_addmm for overload in aten.addmm.overloads()})
 lowerings.update({getattr(aten.convolution, overload): convolution for overload in aten.convolution.overloads()})
 lowerings.update({getattr(aten.bmm, overload): tuned_bmm for overload in aten.bmm.overloads()})
+lowerings.update({getattr(aten._sparse_addmm, overload): sparse_addmm for overload in aten._sparse_addmm.overloads()})
