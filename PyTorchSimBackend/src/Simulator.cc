@@ -3,9 +3,6 @@
 Simulator::Simulator(SimulationConfig config)
     : _config(config), _core_cycles(0) {
   // Create dram object
-  for (int i=0; i<config.num_cores;i++)
-    spdlog::info("[Config/Core] Core {}: {} MHz, Spad size: {} KB",
-      i, config.core_freq , config.sram_size);
   _core_period = 1000000 / (config.core_freq);
   _icnt_period = 1000000 / (config.icnt_freq);
   _dram_period = 1000000 / (config.dram_freq);
@@ -21,6 +18,22 @@ Simulator::Simulator(SimulationConfig config)
   char* onnxim_path_env = std::getenv("TORCHSIM_DIR");
   std::string onnxim_path = onnxim_path_env != NULL?
     std::string(onnxim_path_env) + "/PyTorchSimBackend" : std::string("./");
+
+  // Create core objects
+  _cores.resize(_n_cores);
+  for (int core_index = 0; core_index < _n_cores; core_index++) {
+    if (config.core_type == CoreType::WS_MESH) {
+      spdlog::info("[Config/Core] Core {}: {} MHz, Spad size: {} KB", core_index, config.core_freq , config.sram_size);
+      _cores.at(core_index) = std::make_unique<Core>(core_index, _config);
+    } else if (config.core_type == CoreType::STONNE) {
+      spdlog::info("[Config/Core] Core {}: {} MHz, Stonne Core selected", core_index, config.core_freq);
+      _cores.at(core_index) = std::make_unique<SparseCore>(core_index, _config);
+    } else {
+      spdlog::error("[Configuration] Invalid core type...!");
+      exit(EXIT_FAILURE);
+    }
+  }
+
   if (config.dram_type == DramType::RAMULATOR2) {
     std::string ramulator_config = fs::path(onnxim_path)
                                        .append("configs")
@@ -46,21 +59,6 @@ Simulator::Simulator(SimulationConfig config)
     exit(EXIT_FAILURE);
   }
   _icnt_interval = config.icnt_print_interval;
-
-  // Create core objects
-  _cores.resize(_n_cores);
-  for (int core_index = 0; core_index < _n_cores; core_index++) {
-    if (config.core_type == CoreType::WS_MESH) {
-      _cores.at(core_index) = std::make_unique<Core>(core_index, _config);
-    } else if (config.core_type == CoreType::STONNE) {
-      _cores.at(core_index) = std::make_unique<SparseCore>(core_index, _config);
-    } else {
-      spdlog::error("[Configuration] Invalid core type...!");
-      exit(EXIT_FAILURE);
-    }
-  }
-
-
 
   // Initialize Scheduler
   for (int i=0; i<config.num_patition;i++)

@@ -78,11 +78,8 @@ void SparseCore::push_memory_response(mem_fetch* response) {
 
 void SparseCore::print_stats() {
   stonneCore->printStats();
-  std::cout << "Pending Requests: " << _request_queue.size() << std::endl;
-  std::cout << "Pending Responses: " << _response_queue.size() << std::endl;
 }
 
 void SparseCore::print_current_stats() {
-  std::cout << "Current SparseCore Status:" << std::endl;
   print_stats();
 }
