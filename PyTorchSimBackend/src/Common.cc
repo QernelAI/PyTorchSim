@@ -18,17 +18,21 @@ SimulationConfig initialize_config(json config) {
   SimulationConfig parsed_config;
 
   /* Core configs */
-  if ((std::string)config["core_type"] == "os_mesh")
+  if (config.contains("core_type")) {
+    if ((std::string)config["core_type"] == "os_mesh")
+      parsed_config.core_type = CoreType::OS_MESH;
+    else if ((std::string)config["core_type"] == "stonne"){
+      parsed_config.core_type = CoreType::STONNE;
+      if (config.contains("stonne_config_path"))
+        parsed_config.stonne_config_path = config["stonne_config_path"];
+      else
+        throw std::runtime_error("Stonne config path is missing");
+    } else
+      throw std::runtime_error(fmt::format("Not implemented dram type {} ",
+                                          (std::string)config["core_type"]));
+  } else {
     parsed_config.core_type = CoreType::OS_MESH;
-  else if ((std::string)config["core_type"] == "stonne"){
-    parsed_config.core_type = CoreType::STONNE;
-    if (config.contains("stonne_config_path"))
-      parsed_config.stonne_config_path = config["stonne_config_path"];
-    else
-      throw std::runtime_error("Stonne config path is missing");
-  } else
-    throw std::runtime_error(fmt::format("Not implemented dram type {} ",
-                                         (std::string)config["core_type"]));
+  }
   parsed_config.num_cores = config["num_cores"];
   parsed_config.core_freq = config["core_freq"];
   parsed_config.sram_size = config["sram_size"];
