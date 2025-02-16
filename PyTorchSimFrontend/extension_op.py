@@ -20,38 +20,98 @@ def _sparse_mm(a, b, out):
     print("PYTHON CUSTOM OP EXAMPLE")
     out.copy_(a + b)
 
-def generate_outer_product_matrix(a, outer, inner, name):
+# def generate_outer_product_matrix(a, outer, inner, name):
+#     a_cpu = a.cpu()
+#     value_pointer = os.path.join(extension_config.CONFIG_TORCHSIM_DIR,
+#         'PyTorchSimBackend/extern/stonneCore/tests/outerproduct/outerproduct_gemm_mem.ini')
+#     row_pointer = os.path.join(extension_config.CONFIG_TORCHSIM_DIR,
+#         f'PyTorchSimBackend/extern/stonneCore/tests/outerproduct/outerproduct_gemm_rowpointer{name}.in')
+#     col_pointer = os.path.join(extension_config.CONFIG_TORCHSIM_DIR,
+#         f'PyTorchSimBackend/extern/stonneCore/tests/outerproduct/outerproduct_gemm_colpointer{name}.in')
+
+#     with open(value_pointer, "a") as fd, open(row_pointer, "w") as rp, open(col_pointer, "w") as cp:
+#     #generating matrix
+#         n_nonzeros=0
+#         for o in range(outer):  # col major
+#             rp.write(str(n_nonzeros)+","); # writing the index
+#             for i in range(inner):
+#                 value = a_cpu[i, o]
+#                 if value:
+#                     if((i==(inner-1)) and (o==(outer-1))):
+#                         cp.write(str(i))
+#                     else:
+#                         cp.write(str(i)+","); #writing the row index
+#                     ba = bytearray(struct.pack(">f", value))  # generating list of bytes
+#                     my_int = int.from_bytes(ba, "big")
+#                     fd.write(str(my_int))
+#                     fd.write(",")
+#                     n_nonzeros+=1
+#         rp.write(str(n_nonzeros))
+#         next_address_matrix=n_nonzeros*4
+#     return next_address_matrix
+
+def generate_outer_product_matrix(a, b, M, K, N):
+    # Generating matrix A
+    data_width = 4
     a_cpu = a.cpu()
+    b_cpu = b.cpu()
     value_pointer = os.path.join(extension_config.CONFIG_TORCHSIM_DIR,
         'PyTorchSimBackend/extern/stonneCore/tests/outerproduct/outerproduct_gemm_mem.ini')
-    row_pointer = os.path.join(extension_config.CONFIG_TORCHSIM_DIR,
-        f'PyTorchSimBackend/extern/stonneCore/tests/outerproduct/outerproduct_gemm_rowpointer{name}.in')
-    col_pointer = os.path.join(extension_config.CONFIG_TORCHSIM_DIR,
-        f'PyTorchSimBackend/extern/stonneCore/tests/outerproduct/outerproduct_gemm_colpointer{name}.in')
-
-    with open(value_pointer, "a") as fd, open(row_pointer, "w") as rp, open(col_pointer, "w") as cp:
-    #generating matrix
+    rowA_pointer = os.path.join(extension_config.CONFIG_TORCHSIM_DIR,
+        f'PyTorchSimBackend/extern/stonneCore/tests/outerproduct/outerproduct_gemm_rowpointerA.in')
+    colA_pointer = os.path.join(extension_config.CONFIG_TORCHSIM_DIR,
+        f'PyTorchSimBackend/extern/stonneCore/tests/outerproduct/outerproduct_gemm_colpointerA.in')
+    rowB_pointer = os.path.join(extension_config.CONFIG_TORCHSIM_DIR,
+        f'PyTorchSimBackend/extern/stonneCore/tests/outerproduct/outerproduct_gemm_rowpointerB.in')
+    colB_pointer = os.path.join(extension_config.CONFIG_TORCHSIM_DIR,
+        f'PyTorchSimBackend/extern/stonneCore/tests/outerproduct/outerproduct_gemm_colpointerB.in')
+    with open(value_pointer, "w") as fd, open(rowA_pointer, "w") as rpA, open(colA_pointer, "w") as cpA, open(rowB_pointer, "w") as rpB, open(colB_pointer, "w") as cpB:
+        #generating matrixA
         n_nonzeros=0
-        for o in range(outer):  # col major
-            rp.write(str(n_nonzeros)+","); # writing the index
-            for i in range(inner):
-                value = a_cpu[i, o]
-                if value:  # value is generated
-                    if((i==(inner-1)) and (o==(outer-1))):
-                        cp.write(str(i))
+        for k in range(K):  # col major
+            initial_values=0
+            rpA.write(str(n_nonzeros)+","); # writing the index of A
+            for m in range(M):
+                if(a_cpu[m, k]):  # value is nonzero
+                    if((m==(M-1)) and (k==(K-1))):
+                        cpA.write(str(m))
                     else:
-                        cp.write(str(i)+","); #writing the row index
+                        cpA.write(str(m)+","); #writing the row index
+                    initial_values+=1
+                    value = a_cpu[m, k]
+                    ba = bytearray(struct.pack(">f", value))  # generating list of bytes
+                    my_int = int.from_bytes(ba, "big")
+                    fd.write(str(my_int))
+                    fd.write(",")
+                    n_nonzeros+=1
+        rpA.write(str(n_nonzeros))
+        address_matrix_b=n_nonzeros*data_width
+        #Generating matrix B
+        n_nonzeros=0
+        for k in range(0,K):  # Row major
+            initial_values=0
+            rpB.write(str(n_nonzeros)+","); # writing the index of A
+            for n in range(0,N):
+                if(b_cpu[k, n]):  # value is nonzero
+                    if((k==(K-1)) and (n==(N-1))):
+                        cpB.write(str(n))
+                    else:
+                        cpB.write(str(n)+","); #writing the row index
+
+                    initial_values+=1
+                    value = b_cpu[k, n]
                     ba = bytearray(struct.pack(">f", value))  # generating list of bytes
                     my_int = int.from_bytes(ba, "big")
                     fd.write(str(my_int))
                     fd.write(",")
                     n_nonzeros+=1
 
+        rpB.write(str(n_nonzeros))
+        fd.write(str(0)) # Adding a final 0 to the memory which will never be used. This is just to avoid having a last comma.
+        address_matrix_c=address_matrix_b+(n_nonzeros*data_width)
+
 def flexagon_frontend(a, b, out):
     print("FLEXAGON FRONTEND")
-    x_shape = a.shape
-    w_shape = b.shape
-
     M = a.shape[0]
     N = b.shape[1]
     K = b.shape[0]
@@ -87,9 +147,7 @@ def flexagon_frontend(a, b, out):
     else:
         print(f"File does not exist: {value_path}")
 
-    generate_outer_product_matrix(a, K, M, "A")
-    generate_outer_product_matrix(b, K, N, "B")
-
+    generate_outer_product_matrix(a, b, M, K, N)
 
     graph = {
         0: {
