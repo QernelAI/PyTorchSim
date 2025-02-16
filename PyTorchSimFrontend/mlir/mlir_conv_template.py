@@ -250,14 +250,14 @@ SINGLE_BATCH_CONV_TEMPLATE = r"""
 // DATA_SIZE = {{ DATA_SIZE }}
 
 #map0 = affine_map<(d0, d1, d2, d3) -> (d0 * {{ O_W * O_H * O_C }} + d1 * {{ O_W * O_C }} + d2 * {{ O_C }} + d3)> // output (BATCH, O_H, O_W, O_C)
-#map1 = affine_map<(d0, d1, d2, d3) -> (d0 * {{ (I_W + 2 * PADDING_W) * (I_H + 2 * PADDING_W) * I_C }} + d1 * {{ (I_W + 2 * PADDING_W) * I_C }} + d2 * {{ I_C }} + d3)> // input (BATCH, I_H, I_W, I_C) Stride should be changed if kernel stride > 1
+#map1 = affine_map<(d0, d1, d2, d3) -> (d0 * {{ (I_W + 2 * PADDING_W) * I_C }} + d1 * {{ I_C }} + d2 * {{ I_C * STRIDE_W }} + d3)> // input (I_H, (k_w), I_W, I_C) // duplicate for k_w
 #map2 = affine_map<(d0, d1, d2, d3) -> (d0 * {{ K_W * I_C * O_C }} + d1 * {{ I_C * O_C }} + d2 * {{ O_C }} + d3)> // weight (K_H, K_W, I_C, O_C)
 #map_I_H = affine_map<(d0, d1) -> (d0 * {{ STRIDE_H }} + d1)>
 #offset_w_map = affine_map<(d0, d1) -> (d0 * {{ kernel.get_spad_size_per_lane(TILE_K_W * TILE_K, TILE_N) }} + d1 * {{ kernel.get_spad_size_per_lane(TILE_K, TILE_N) }})>
-#offset_x_map = affine_map<(d0, d1) -> (d0 * {{ kernel.get_spad_size_per_lane(TILE_I_W, TILE_K) }} + d1)>
+#offset_x_map = affine_map<(d0, d1) -> (d0 * {{ kernel.get_spad_size_per_lane(TILE_M * TILE_K_W, TILE_K) }} + d1 * {{ kernel.get_spad_size_per_lane(TILE_M, TILE_K) }})>
 #offset_y_map = affine_map<(d0, d1) -> (d0 * {{ kernel.get_spad_size_per_lane(TILE_M, TILE_N) }} + d1 * {{ kernel.get_spad_size_per_lane(TILE_M, TILE_N) }})>
 
-memref.global @X_spad : memref<{{ 1 }}x{{ TILE_I_H }}x{{ TILE_I_W }}x{{ TILE_K }}xf32, 1>
+memref.global @X_spad : memref<{{ TILE_I_H }}x{{ TILE_K_W }}x{{ TILE_M }}x{{ TILE_K }}xf32, 1>
 memref.global @W_spad : memref<{{ TILE_K_H }}x{{ TILE_K_W }}x{{ TILE_K }}x{{ TILE_N }}xf32, 1>
 memref.global @Y_spad : memref<{{ 1 }}x{{ TILE_O_H }}x{{ TILE_M }}x{{ TILE_N }}xf32, 1>
 
@@ -269,7 +269,7 @@ func.func @{{ KERNEL_NAME }}({{ KERNEL_DEF }}) {
   %vstride = arith.constant 1 : index
   %input_axis = arith.constant 3 : index
   %weight_axis = arith.constant 2 : index
-  %input_buffer = memref.get_global @X_spad : memref<{{ 1 }}x{{ TILE_I_H }}x{{ TILE_I_W }}x{{ TILE_K }}xf32, 1>
+  %input_buffer = memref.get_global @X_spad : memref<{{ TILE_I_H }}x{{ TILE_K_W }}x{{ TILE_M }}x{{ TILE_K }}xf32, 1>
   %weight_buffer = memref.get_global @W_spad : memref<{{ TILE_K_H }}x{{ TILE_K_W }}x{{ TILE_K }}x{{ TILE_N }}xf32, 1>
   %output_buffer = memref.get_global @Y_spad : memref<{{ 1 }}x{{ TILE_O_H }}x{{ TILE_M }}x{{ TILE_N }}xf32, 1>
   %tag = memref.alloc() : memref<1xi32>
@@ -297,11 +297,11 @@ func.func @{{ KERNEL_NAME }}({{ KERNEL_DEF }}) {
           affine.for %k_w = 0 to {{ K_W }} step {{ TILE_K_W }} {
             affine.for %tile_k = 0 to {{ I_C }} step {{ TILE_K }} {
               %index_i_h = affine.apply #map_I_H(%o_h, %k_h)
-              %index1 = affine.apply #map1(%c0, %index_i_h, %k_w, %tile_k) // input index
+              %index1 = affine.apply #map1(%index_i_h, %k_w, %c0, %tile_k) // input index
               %index2 = affine.apply #map2(%k_h, %k_w, %tile_k, %tile_n) // weight index
               // Load input matrix
               memref.dma_start %X[%index1], %input_buffer[%c0, %c0, %c0, %c0], %c_mvin, %tag1[%c0], %input_axis, %vstride
-                  : memref<{{ BATCH * I_C * (I_H + 2 * PADDING_H) * (I_W + 2 * PADDING_W) }}xf32>, memref<{{ 1 }}x{{ TILE_I_H }}x{{ TILE_I_W }}x{{ TILE_K }}xf32, 1>, memref<1xi32> { subtile_size=[{{ 1 }}, {{ SUB_TILE_I_H }}, {{ SUB_TILE_M }}, {{ TILE_K }}], async=1, sram_stride=[{{ TILE_I_H * TILE_I_W * TILE_K }}, {{ TILE_I_W * TILE_K }}, 1, {{ TILE_I_W }}]}
+                  : memref<{{ BATCH * I_C * (I_H + 2 * PADDING_H) * (I_W + 2 * PADDING_W) }}xf32>, memref<{{ TILE_I_H }}x{{ TILE_K_W }}x{{ TILE_M }}x{{ TILE_K }}xf32, 1>, memref<1xi32> { subtile_size=[{{ SUB_TILE_I_H }}, {{ SUB_TILE_K_W }}, {{ SUB_TILE_M }}, {{ TILE_K }}], async=1, sram_stride=[{{ TILE_K_W * TILE_M * TILE_K }}, {{ TILE_M * TILE_K }}, 1, {{ TILE_M }}]}
               // Load kernel matrix
               memref.dma_start %W[%index2], %weight_buffer[%c0, %c0, %c0, %c0], %c_mvin, %tag2[%c0], %input_axis, %vstride
                   : memref<{{ O_C * I_C * K_H * K_W }}xf32>, memref<{{ TILE_K_H }}x{{ TILE_K_W }}x{{ TILE_K }}x{{ TILE_N }}xf32, 1>, memref<1xi32> { subtile_size=[{{ SUB_TILE_K_H }}, {{ SUB_TILE_K_W }}, {{ TILE_K }}, {{ SUB_TILE_N }}], async=1, sram_stride=[{{ TILE_K_W * TILE_K * TILE_N }}, {{ TILE_K * TILE_N }}, 1, {{ TILE_K }}]}
@@ -313,7 +313,7 @@ func.func @{{ KERNEL_NAME }}({{ KERNEL_DEF }}) {
                       %offset_x = affine.apply #offset_x_map(%tile_i_h, %tile_k_w)
                       %offset_w = affine.apply #offset_w_map(%tile_k_h, %tile_k_w)
                       %offset_y = affine.apply #offset_y_map(%tile_o_h, %tile_o_w)
-                      %X_buffer = memref.reinterpret_cast %input_buffer to offset: [%offset_x], sizes: [{{ TILE_M }}, {{ TILE_K }}], strides: [{{ TILE_K }}, 1] : memref<{{ 1 }}x{{ TILE_I_H }}x{{ TILE_I_W }}x{{ TILE_K }}xf32, 1> to memref<{{ TILE_M }}x{{ TILE_K }}xf32, strided<[{{ TILE_K }}, 1], offset: ?>, 1>
+                      %X_buffer = memref.reinterpret_cast %input_buffer to offset: [%offset_x], sizes: [{{ TILE_M }}, {{ TILE_K }}], strides: [{{ TILE_K }}, 1] : memref<{{ TILE_I_H }}x{{ TILE_K_W }}x{{ TILE_M }}x{{ TILE_K }}xf32, 1> to memref<{{ TILE_M }}x{{ TILE_K }}xf32, strided<[{{ TILE_K }}, 1], offset: ?>, 1>
                       %W_buffer = memref.reinterpret_cast %weight_buffer to offset: [%offset_w], sizes: [{{ TILE_K }}, {{ TILE_N }}], strides: [{{ TILE_N }}, 1] : memref<{{ TILE_K_H }}x{{ TILE_K_W }}x{{ TILE_K }}x{{ TILE_N }}xf32, 1> to memref<{{ TILE_K }}x{{ TILE_N }}xf32, strided<[{{ TILE_N }}, 1], offset: ?>, 1>
                       %Y_buffer = memref.reinterpret_cast %output_buffer to offset: [%offset_y], sizes: [{{ TILE_M }}, {{ TILE_N }}], strides: [{{ TILE_N }}, 1] : memref<{{ 1 }}x{{ TILE_O_H }}x{{ TILE_M }}x{{ TILE_N }}xf32, 1> to memref<{{ TILE_M }}x{{ TILE_N }}xf32, strided<[{{ TILE_N }}, 1], offset: ?>, 1>
                       linalg.matmul ins(%X_buffer, %W_buffer : memref<{{ TILE_M }}x{{ TILE_K }}xf32, strided<[{{ TILE_K }}, 1], offset: ?>, 1>, memref<{{ TILE_K }}x{{ TILE_N }}xf32, strided<[{{ TILE_N }}, 1], offset: ?>, 1>)
@@ -458,12 +458,13 @@ class MLIRConvTemplate(MLIRTemplate):
           TILE_I_H = 1 + (TILE_O_H - 1) * self.stride[0] + (TILE_K_H - 1) * self.dilation[0]
         elif self.is_single_batch(BATCH):
           conv_template = SINGLE_BATCH_CONV_TEMPLATE
-          TILE_K_H, TILE_K_W, TILE_O_H, TILE_O_W, TILE_M, TILE_N, TILE_K = kernel.conv_single_batch_mapping(BATCH, O_C, I_C, K_H, 1, O_H, O_W, self.stride, self.dilation) # TODO: implement K_W
+          TILE_K_H, TILE_K_W, TILE_O_H, TILE_O_W, TILE_M, TILE_N, TILE_K = kernel.conv_single_batch_mapping(BATCH, O_C, I_C, K_H, K_W, O_H, O_W, self.stride, self.dilation) # TODO: implement K_W
           TILE_I_H = 1 + (TILE_O_H - 1) * self.stride[0] + (TILE_K_H - 1) * self.dilation[0]
-          TILE_I_W = 1 + (TILE_O_W - 1) * self.stride[1] + (TILE_K_W - 1) * self.dilation[1]
-          SUB_TILE_M = TILE_I_W if TILE_I_W < kernel.vector_lane else kernel.vector_lane
+          TILE_I_W = TILE_K_W
+          TILE_O_W = 1
+          SUB_TILE_M = TILE_M if TILE_M < kernel.vector_lane else kernel.vector_lane
           SUB_TILE_N = TILE_N if TILE_N < kernel.vector_lane else kernel.vector_lane
-          BATCH = O_W # For TOG latency (heuristic)
+          BATCH = TILE_M # For TOG latency (heuristic)
 
         kernel.loop_size = [K_H, K_W, O_H, O_W, BATCH, O_C, I_C]
 
