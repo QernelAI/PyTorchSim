@@ -1,6 +1,7 @@
 #include "Core.h"
 #include "sstStonne.h"
 #include "SimpleMem.h"
+#include "Config.h"
 
 class SparseCore : public Core {
 public:

@@ -3,6 +3,23 @@
 SparseCore::SparseCore(uint32_t id, SimulationConfig config) : Core(id, config) {
   stonneCore = new SST_STONNE::sstStonne(config.stonne_config_path);
   stonneCore->init(1);
+  Config stonneConfig = stonneCore->getStonneConfig();
+  unsigned int core_freq = config.core_freq; // MHz;
+  unsigned int num_ms = stonneConfig.m_MSNetworkCfg.ms_size;
+  unsigned int dn_bw = stonneConfig.m_SDMemoryCfg.n_read_ports;
+  unsigned int dn_width = stonneConfig.m_SDMemoryCfg.port_width;
+  unsigned int rn_bw = stonneConfig.m_SDMemoryCfg.n_write_ports;
+  unsigned int rn_width = stonneConfig.m_SDMemoryCfg.port_width;
+
+  double compute_throughput = static_cast<double>(num_ms) * core_freq / 1e3; // FLOPs/sec
+  double dn_bandwidth = static_cast<double>(dn_bw) * dn_width * core_freq * 1e6 / 8.0 / 1e9; // GB/s
+  double rn_bandwidth = static_cast<double>(rn_bw) * rn_width * core_freq * 1e6 / 8.0 / 1e9; // GB/s
+
+  spdlog::info("[Config/StonneCore {}] Compute Throughput: {:.2f} GFLOPs/sec", id, compute_throughput);
+  spdlog::info("[Config/StonneCore {}] Distribution Network Bandwidth: {:.2f} GB/s ({} ports x {} bits)",
+             id, dn_bandwidth, dn_bw, dn_width);
+  spdlog::info("[Config/StonneCore {}] Reduction Network Bandwidth: {:.2f} GB/s ({} ports x {} bits)",
+             id, rn_bandwidth, rn_bw, rn_width);
 };
 
 SparseCore::~SparseCore() { delete stonneCore; }
