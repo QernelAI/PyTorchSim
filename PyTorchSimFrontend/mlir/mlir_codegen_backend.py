@@ -965,7 +965,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         index_var = self.parse_indices(index, buffer=self.reductions_suffix)
 
         # Tile is always reuduced in inner loop
-        local_tile_desc, index_var = self.get_dma_info(name, index, index_var, broadcast=False, buffer=self.reductions_suffix)
+        local_tile_desc, index_var = self.get_dma_info(name, index, index_var, broadcast=False, store_reduction=True, buffer=self.reductions_suffix)
         vlane_split_axis = local_tile_desc.vlane_split_axis
         vlane_stride = local_tile_desc.vlane_stride
         tile_numel_per_lane = local_tile_desc.get_numel_per_lane()
@@ -1082,7 +1082,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
             write_atomic(gem5_write_path, self.gem5_header.getvalue())
         return src_code
 
-    def get_dma_info(self, name, index, index_var, broadcast=True, buffer=None): # Need more argument?
+    def get_dma_info(self, name, index, index_var, broadcast=True, store_reduction=False, buffer=None): # Need more argument?
         """
         A tile descriptor exists that is configured on a kernel group
         DMA desc should be adjusted according to buffer.
@@ -1138,7 +1138,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
             local_tile_desc.vlane_stride = kg_tile_desc.get_dim_size(local_dims[0])
         # Case 3. Tile is 2-D tile
         elif len(local_dims) == 2:
-            is_reduction = self.reduction_depth == 1
+            is_reduction = self.reduction_depth == 1 and not store_reduction
             if is_reduction:
                 local_tile_desc.set_tile_size([kg_tile_desc.get_dim_size(dim) for dim in local_dims], [1, 0])
                 local_tile_desc.vlane_split_axis = local_vlane_split_axis
@@ -1149,9 +1149,9 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
                 local_tile_desc.vlane_stride = kg_tile_desc.vlane_stride
         # Case 3. Tile is 3-D tile
         elif len(local_dims) == 3:
-            is_reduction = self.reduction_depth < 3
+            is_reduction = self.reduction_depth < 3 and not store_reduction
             if is_reduction:
-                local_tile_desc.set_tile_size([kg_tile_desc.get_dim_size(dim) for dim in local_dims], [1, 2, 0])
+                local_tile_desc.set_tile_size([kg_tile_desc.get_dim_size(dim) for dim in local_dims], [2, 1, 0])
                 local_tile_desc.vlane_split_axis = local_vlane_split_axis
                 local_tile_desc.vlane_stride = kg_tile_desc.vlane_stride
             else:
