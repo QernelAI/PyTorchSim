@@ -26,7 +26,8 @@ bool Core::can_issue(const std::shared_ptr<Tile>& op) {
 void Core::issue(std::shared_ptr<Tile> op) {
   if (op->get_instructions().size()){
     spdlog::trace("[Core {}][{}] New Tile is issued, remain sram: {} Required size: {}, Free size: {}",
-      _id, _core_cycle, _sram_size-_used_sram_size, op->get_required_sram_size(), op->get_instructions().back()->get_free_sram_size());
+      _id, _core_cycle, _sram_size-_used_sram_size, op->get_required_sram_size(),
+      op->get_instructions().back()->get_free_sram_size());
   } else {
     spdlog::trace("[Core {}][{}] New Tile is issued, remain sram: {} Required size: {}",
       _id, _core_cycle, _sram_size-_used_sram_size, op->get_required_sram_size());
@@ -132,6 +133,7 @@ void Core::dma_cycle() {
                     fmt::format("[{}]", fmt::join(instruction->get_tag_idx_list(), ", ")),
                     fmt::format("[{}]", fmt::join(instruction->get_tag_stride_list(), ", ")));
       for (auto & wait_inst : _tma.get_tag_waiter(instruction->subgraph_id, key)) {
+        _tma.mark_tag_used(instruction->subgraph_id, key);
         finish_instruction(wait_inst);
       }
     }
@@ -275,12 +277,16 @@ void Core::cycle() {
             auto key = std::make_pair(inst->get_addr_name(), inst->get_tag_id());
             bool finished = _tma.get_tag_finish(inst->subgraph_id, key);
             if (finished) {
+              _tma.mark_tag_used(inst->subgraph_id, key);
               finish_instruction(inst);
             } else {
               _tma.register_tag_waiter(inst->subgraph_id, key, inst);
             }
-            spdlog::trace("[Core {}][{}] {} ISSUED", _id, _core_cycle,
-                          opcode_to_string(inst->get_opcode()));
+            spdlog::trace("[Core {}][{}] {} ISSUED,  addr_name: {} tag_id: {} tag_idx_list: {} tag_stride_list: {}", _id, _core_cycle,
+                            opcode_to_string(inst->get_opcode()), inst->get_addr_name(),
+                            fmt::format("[{}]", fmt::join(inst->get_tag_id(), ", ")),
+                            fmt::format("[{}]", fmt::join(inst->get_tag_idx_list(), ", ")),
+                            fmt::format("[{}]", fmt::join(inst->get_tag_stride_list(), ", ")));
             issued = true;
           }
           break;

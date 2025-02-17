@@ -25,18 +25,45 @@ class TMA {
   bool empty() { return _current_inst==nullptr; }
   void register_tag(int subgraph_id, const std::pair<std::string, std::vector<int>>& key) {
     if (tag_table.find(subgraph_id) == tag_table.end()) {
-      tag_table[subgraph_id] = std::map<std::pair<std::string, std::vector<int>>, bool>();
+      tag_table[subgraph_id] = std::map<std::pair<std::string, std::vector<int>>, uint32_t>();
       waiters[subgraph_id] = std::map<std::pair<std::string, std::vector<int>>, std::vector<std::shared_ptr<Instruction>>>();
     }
-    tag_table[subgraph_id][key] = false;
+    tag_table[subgraph_id][key] = 0;
     waiters[subgraph_id][key] = std::vector<std::shared_ptr<Instruction>>();
   }
   void set_tag_finish(int subgraph_id, const std::pair<std::string, std::vector<int>>& key) {
     if (tag_table.find(subgraph_id) == tag_table.end()) {
       throw std::runtime_error("Subgraph does not exist in tag_table");
     }
-    tag_table[subgraph_id][key] = true;
+    tag_table[subgraph_id][key] = 1;
   }
+
+  void mark_tag_used(int subgraph_id, const std::pair<std::string, std::vector<int>>& key) {
+    if (tag_table.find(subgraph_id) == tag_table.end()) {
+      throw std::runtime_error("Subgraph does not exist in tag_table");
+    } else if (!tag_table[subgraph_id][key]) {
+      throw std::runtime_error("Tag is not ready but freed");
+    }
+    tag_table[subgraph_id][key] += 1;
+  }
+
+  void check_table() {
+    for (const auto& entry: tag_table) {
+      auto subgraph_id = entry.first;
+      for (const auto& tag_key: tag_table[subgraph_id]) {
+        const auto& tag_pair = tag_key.first;
+        const std::string& tag_name = tag_pair.first;
+        const std::vector<int>& tag_values = tag_pair.second;
+        uint32_t value = tag_key.second;
+
+        if (value == 1) {
+          spdlog::warn("[Tag Table][{}] Unused tag found: (name={}, key={}, val={})",
+            subgraph_id, tag_name, fmt::format("[{}]", fmt::join(tag_values, ", ")), value);
+        }
+      }
+    }
+  }
+
   bool tag_key_exist(int subgraph_id, const std::pair<std::string, std::vector<int>>& key) {
     auto subgraph_it = tag_table.find(subgraph_id);
     if (subgraph_it == tag_table.end())
@@ -97,7 +124,7 @@ class TMA {
   size_t _tile_idx_stride=1;
   uint32_t _tile_idx;
   bool _finished=true;
-  std::map<int, std::map<std::pair<std::string, std::vector<int>>, bool>> tag_table;
+  std::map<int, std::map<std::pair<std::string, std::vector<int>>, uint32_t>> tag_table;
   std::map<int, std::map<std::pair<std::string, std::vector<int>>, std::vector<std::shared_ptr<Instruction>>>> waiters;
 };
 #endif

@@ -97,7 +97,7 @@ class TileGraphParser {
   std::map<std::string, std::vector<uint32_t>> _arg_numa_stride;
   std::map<std::string, std::tuple<int, int, LoopType>> _loop_size_map;
   std::map<std::string, std::string> _tog_meta;
-  std::map<std::pair<std::string, std::vector<int>>, bool> _tag_table;
+  std::map<std::pair<std::string, std::vector<int>>, uint32_t> _tag_table;
 };
 
 class TileComputeNode : public TileNode {

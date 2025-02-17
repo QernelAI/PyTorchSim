@@ -14,7 +14,7 @@
 class Core {
  public:
   Core(uint32_t id, SimulationConfig config);
-  ~Core() = default;
+  ~Core()=default;
   virtual bool running();
   virtual bool can_issue(const std::shared_ptr<Tile>& op);
   virtual void issue(std::shared_ptr<Tile> tile);
@@ -27,6 +27,7 @@ class Core {
   virtual void pop_memory_request();
   virtual mem_fetch* top_memory_request() { return _request_queue.front(); }
   virtual void push_memory_response(mem_fetch* response);
+  void check_tag() { _tma.check_table(); }
 
   std::queue<std::shared_ptr<Instruction>>& get_compute_pipeline(int compute_type);
   enum {

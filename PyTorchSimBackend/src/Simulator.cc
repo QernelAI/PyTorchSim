@@ -23,7 +23,8 @@ Simulator::Simulator(SimulationConfig config)
   _cores.resize(_n_cores);
   for (int core_index = 0; core_index < _n_cores; core_index++) {
     if (config.core_type == CoreType::WS_MESH) {
-      spdlog::info("[Config/Core] Core {}: {} MHz, Spad size: {} KB", core_index, config.core_freq , config.sram_size);
+      spdlog::info("[Config/Core] Core {}: {} MHz, Spad size: {} KB, Systolic array per core: {}",
+        core_index, config.core_freq , config.sram_size, config.num_systolic_array_per_core);
       _cores.at(core_index) = std::make_unique<Core>(core_index, _config);
     } else if (config.core_type == CoreType::STONNE) {
       spdlog::info("[Config/Core] Core {}: {} MHz, Stonne Core selected", core_index, config.core_freq);
@@ -207,6 +208,9 @@ void Simulator::cycle() {
       icnt_cycle();
   }
   spdlog::info("Simulation Finished");
+  for (auto &core: _cores) {
+    core->check_tag();
+  }
 }
 
 bool Simulator::running() {
