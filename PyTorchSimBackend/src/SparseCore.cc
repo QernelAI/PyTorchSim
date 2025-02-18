@@ -40,12 +40,15 @@ bool SparseCore::can_issue(const std::shared_ptr<Tile>& op) {
 }
 
 void SparseCore::cycle() {
+  _core_cycle++;
   stonneCore->cycle();
 
   /* Send Memory Request */
   while (SimpleMem::Request* req = stonneCore->popRequest()) {
+    uint64_t target_addr =  (req->getAddress() / _config.dram_req_size) * _config.dram_req_size;
     mem_access_type acc_type;
     mf_type type;
+
     switch(req->getcmd()) {
       case SimpleMem::Request::Read:
         acc_type = mem_access_type::GLOBAL_ACC_R;
@@ -59,21 +62,49 @@ void SparseCore::cycle() {
         spdlog::error("[SparseCore] Invalid request type from core");
         return;
     }
-    mem_fetch* req_wrapper = new mem_fetch(req->getAddress(), acc_type, type, _config.dram_req_size, -1, req);
-    _request_queue.push(req_wrapper);
+    req->request_time = _core_cycle;
+    std::tuple<uint64_t, mem_access_type, mf_type> key = std::make_tuple(target_addr, acc_type, type);
+    if (request_merge_table.find(key) == request_merge_table.end())
+      request_merge_table[key] = new std::vector<SimpleMem::Request*> ();
+    request_merge_table[key]->push_back(req);
   }
 
-  /* Send Memory Response */
-  while (!_response_queue.empty()) {
+  int nr_request = 0;
+  for (auto& req_pair : request_merge_table) {
+    uint64_t address;
+    mem_access_type acc_type;
+    mf_type type;
+    std::tie(address, acc_type, type) = req_pair.first;
+    mem_fetch* req_wrapper = new mem_fetch(address, acc_type, type, _config.dram_req_size, -1, req_pair.second);
+    _request_queue.push(req_wrapper);
+    request_merge_table.erase(req_pair.first);
+
+    if (nr_request++ > r_port_nr);
+      break;
+  }
+
+  // Send Memory Response
+  if (!_response_queue.empty()) {
     mem_fetch* resp_wrapper = _response_queue.front();
-    SimpleMem::Request* resp = static_cast<SimpleMem::Request*>(resp_wrapper->get_custom_data());
+    std::vector<SimpleMem::Request*>* resps = static_cast<std::vector<SimpleMem::Request*>*>(resp_wrapper->get_custom_data());
+
+    SimpleMem::Request* resp = resps->front();
+
+    spdlog::debug("[SparseCore][{}] Round Trip Cycle: {}, Address: {:#x}, Access Type: {}, Request Type: {}, DRAM Req Size: {}", \
+             _core_cycle, _core_cycle - resp->request_time, resp->getAddress(), int(resp_wrapper->get_access_type()), int(resp_wrapper->get_type()), _config.dram_req_size);
+
     resp->setReply();
     stonneCore->pushResponse(resp);
-    _response_queue.pop();
-    delete resp_wrapper;
+    resps->erase(resps->begin());
+    if (resps->empty()) {
+      delete resps;
+      delete resp_wrapper;
+      _response_queue.pop();
+    }
   }
 
   if (stonneCore->isFinished()) {
+    stonneCore->finish();
     std::shared_ptr<Tile> target_tile = _tiles.front();
     target_tile->set_status(Tile::Status::FINISH);
     _finished_tiles.push(target_tile);

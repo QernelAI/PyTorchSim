@@ -3,12 +3,13 @@ import subprocess
 import math
 import struct
 import torch
+import numpy as np
 from torch._inductor.select_algorithm import ExternKernelChoice
 from AsmParser.tog_generator import tog_generator
 from torch._inductor.codecache import write
 from PyTorchSimFrontend.extension_codecache import get_write_path
 from PyTorchSimFrontend import extension_config
-from Simulator.simulator import BackendSimulator
+from Simulator.simulator import BackendSimulator, TORCH_TO_NUMPY
 
 class MLIRExternKernelChoice(ExternKernelChoice):
     def call_name(self):
@@ -115,7 +116,12 @@ def flexagon_frontend(a, b, out):
         print(f"File does not exist: {value_path}")
 
     dram_a_address, dram_b_address, dram_c_address = generate_outer_product_matrix(a, b, M, K, N)
-
+    mem_init = os.path.join(extension_config.CONFIG_TORCHSIM_DIR, 'PyTorchSimBackend/extern/stonneCore/tests/outerproduct/outerproduct_gemm_mem.ini')
+    a_row_init = os.path.join(extension_config.CONFIG_TORCHSIM_DIR, 'PyTorchSimBackend/extern/stonneCore/tests/outerproduct/outerproduct_gemm_rowpointerA.in')
+    a_col_init = os.path.join(extension_config.CONFIG_TORCHSIM_DIR, 'PyTorchSimBackend/extern/stonneCore/tests/outerproduct/outerproduct_gemm_colpointerA.in')
+    b_row_init = os.path.join(extension_config.CONFIG_TORCHSIM_DIR, 'PyTorchSimBackend/extern/stonneCore/tests/outerproduct/outerproduct_gemm_rowpointerB.in')
+    b_col_init = os.path.join(extension_config.CONFIG_TORCHSIM_DIR, 'PyTorchSimBackend/extern/stonneCore/tests/outerproduct/outerproduct_gemm_colpointerB.in')
+    c_result = os.path.join(extension_config.CONFIG_TORCHSIM_DIR, 'PyTorchSimBackend/extern/stonneCore/tests/outerproduct/result.out')
     graph = {
         0: {
             "node_id": 0,
@@ -155,7 +161,7 @@ def flexagon_frontend(a, b, out):
 
             # Memory Initialization & File Paths
             "stonne_mem_init": os.path.join(extension_config.CONFIG_TORCHSIM_DIR, 'PyTorchSimBackend/extern/stonneCore/tests/outerproduct/outerproduct_gemm_mem.ini'),
-            "stonne_mem_matrix_c_file_name": os.path.join(extension_config.CONFIG_TORCHSIM_DIR, 'PyTorchSimBackend/extern/stonneCore/tests/outerproduct/result.out'),
+            "stonne_mem_matrix_c_file_name": c_result,
 
             # Memory Addresses
             "stonne_matrix_a_dram_address": dram_a_address,
@@ -163,10 +169,10 @@ def flexagon_frontend(a, b, out):
             "stonne_matrix_c_dram_address": dram_c_address,
 
             # CSR & Bitmap Initialization
-            "stonne_rowpointer_matrix_a_init": os.path.join(extension_config.CONFIG_TORCHSIM_DIR, 'PyTorchSimBackend/extern/stonneCore/tests/outerproduct/outerproduct_gemm_rowpointerA.in'),
-            "stonne_colpointer_matrix_a_init": os.path.join(extension_config.CONFIG_TORCHSIM_DIR, 'PyTorchSimBackend/extern/stonneCore/tests/outerproduct/outerproduct_gemm_colpointerA.in'),
-            "stonne_rowpointer_matrix_b_init": os.path.join(extension_config.CONFIG_TORCHSIM_DIR, 'PyTorchSimBackend/extern/stonneCore/tests/outerproduct/outerproduct_gemm_rowpointerB.in'),
-            "stonne_colpointer_matrix_b_init": os.path.join(extension_config.CONFIG_TORCHSIM_DIR, 'PyTorchSimBackend/extern/stonneCore/tests/outerproduct/outerproduct_gemm_colpointerB.in'),
+            "stonne_rowpointer_matrix_a_init": a_row_init,
+            "stonne_colpointer_matrix_a_init": a_col_init,
+            "stonne_rowpointer_matrix_b_init": b_row_init,
+            "stonne_colpointer_matrix_b_init": b_col_init,
         }
     }
     source_code = "graph = " + str(graph)
@@ -188,7 +194,12 @@ def flexagon_frontend(a, b, out):
     backsim = BackendSimulator(backend_path, stonne_config_path)
     result_path = backsim.simulation(onnx_path)
     result = BackendSimulator.get_result_from_file(result_path)
-    out.copy_(torch.matmul(a.cpu(), b.cpu()))
+
+    # Load result data
+    with open(c_result, 'rb') as f:
+        np_array = np.fromfile(f, dtype=TORCH_TO_NUMPY[out.dtype])
+        src_tensor = torch.as_strided(torch.from_numpy(np_array), out.size(), out.stride())
+        out.copy_(src_tensor.to(dtype=out.dtype))
 
 custom_lib.define("_sparse_mm(Tensor a, Tensor b, Tensor out) -> Tensor")
 custom_lib.impl("_sparse_mm", flexagon_frontend, "PrivateUse1")
