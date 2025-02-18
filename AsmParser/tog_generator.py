@@ -198,8 +198,9 @@ class tog_generator:
             connect_nodes(prev_node, end_node)
             prev_node = end_node
 
-    def generate_tile_graph(self, name="tile_graph", cycle_list=list, offset=int, vector_lane=int, stonneGraph=False):
+    def generate_tile_graph(self, name="tile_graph", cycle_list=list, x_offset=int, w_offset=int, vector_lane=int, stonneGraph=False):
         node_list = list(self.node_dict.values())[1:]
+        is_preload = True # FIXME: first systolic array node is preload
         if len(node_list):
             node_list[0].set_parent([])
             for iter_node in self.node_dict.values():
@@ -211,7 +212,9 @@ class tog_generator:
                         iter_node.torchsim_cycle = 10
                     # FIXME.
                     if iter_node.torchsim_compute_type == 1:
-                        iter_node.torchsim_overlapping_cycle = iter_node.torchsim_cycle - offset
+                        offset = w_offset if is_preload else x_offset
+                        is_preload = False
+                        iter_node.torchsim_overlapping_cycle = max(iter_node.torchsim_cycle - offset, 0)
 
         origin_info = "_".join(map(str, self.origins))
         onnx_node_list = [node.to_onnx() for node in node_list] # Exclude root node

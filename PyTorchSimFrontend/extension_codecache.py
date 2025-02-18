@@ -200,15 +200,19 @@ class MLIRCodeCache:
         cycle_list = cyclesim.compile_and_simulate(os.path.join(write_path, cycle_binary_name), " ".join(array_size), vectorlane_size)
 
         # Create TOG
-        offset = vectorlane_size
+        w_offset, x_offset = vectorlane_size, vectorlane_size
         if kwargs['loop_size'] is not None and kwargs['loop_size'][-3] < vectorlane_size:
-            offset = kwargs['loop_size'][-3]
+            x_offset = kwargs['loop_size'][-3]
+        if kwargs['loop_size'] is not None and kwargs['loop_size'][-1] < vectorlane_size:
+            w_offset = kwargs['loop_size'][-1]
+        w_offset -= x_offset
         tile_graph_generator = tog_generator(origins)
         tile_graph_generator.load_file(raw_tog_path)
         tile_graph_generator.generate_tile_graph(
             os.path.join(write_path, "tile_graph.onnx"),
             cycle_list=cycle_list,
-            offset=offset, # FIXME.
+            x_offset=x_offset, # FIXME.
+            w_offset=w_offset, # FIXME.
             vector_lane=vectorlane_size
         )
         return key
