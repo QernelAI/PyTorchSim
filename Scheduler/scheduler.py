@@ -245,9 +245,11 @@ class ExecutionEngine:
         result = self.select_kernel(partion_idx)
         if result == self.SELECT_NOTHING:
             return None
-
         kernel, inputs = result
-        onnx_path, attribute_path = self.prepare_launch_kernel(kernel, inputs)
+        if not isinstance(kernel, str):
+            onnx_path, attribute_path = self.prepare_launch_kernel(kernel, inputs)
+        else:
+            onnx_path, attribute_path = kernel, inputs
         self.partition_state[partion_idx] = self.PARTITION_BUSY
         return self.backend_simulator.launch(onnx_path, attribute_path, current_cycle, partion_idx)
 
@@ -266,6 +268,10 @@ class FIFOExecutionEngine(ExecutionEngine):
             req, target_model = next(iter(target_dict[partition_idx].items()))
             try:
                 kernel, inputs = next(target_model)
+
+                # For extern call
+                if isinstance(kernel, str):
+                    return kernel, inputs
 
                 # For convolution...
                 if not hasattr(kernel, "future"):
@@ -331,7 +337,7 @@ class RRExecutionEngine(ExecutionEngine):
 class Scheduler:
     FIFO_ENGINE = 0
     RR_ENGINE = 1
-    def __init__(self, num_request_queue=1, engine_select=FIFO_ENGINE) -> None:
+    def __init__(self, num_request_queue=1, engine_select=FIFO_ENGINE, backend_config=extension_config.CONFIG_TORCHSIM_BACKEND_CONFIG) -> None:
         self.current_time = 0
         self.max_batch = 1
         self.num_request_queue = num_request_queue
@@ -341,7 +347,7 @@ class Scheduler:
         self.finish_queue : List[Request] = []
 
         backend_path = os.path.join(extension_config.CONFIG_TORCHSIM_DIR, "PyTorchSimBackend")
-        self.backend_simulator = BackendSimulator(backend_path, extension_config.CONFIG_TORCHSIM_BACKEND_CONFIG)
+        self.backend_simulator = BackendSimulator(backend_path, backend_config)
         self.backend_simulator.interactive_simulation()
         if engine_select == Scheduler.FIFO_ENGINE:
             self.execution_engine = FIFOExecutionEngine(self.backend_simulator, self.num_request_queue)

@@ -14,7 +14,7 @@ from Simulator.simulator import BackendSimulator, TORCH_TO_NUMPY
 
 class MLIRExternKernelChoice(ExternKernelChoice):
     def call_name(self):
-        return f"torch.ops.extension_op.{self.name}"
+        return f"yield from flexagon_frontend"
 
 custom_lib = torch.library.Library("extension_op", "DEF")
 
@@ -80,7 +80,6 @@ def generate_outer_product_matrix(a, b, M, K, N):
     return 0, address_matrix_b, address_matrix_c
 
 def flexagon_frontend(a, b, out):
-    print("FLEXAGON FRONTEND")
     M = a.shape[0]
     N = b.shape[1]
     K = b.shape[0]
@@ -190,11 +189,12 @@ def flexagon_frontend(a, b, out):
         vector_lane=0
     )
 
+    onnx_path = os.path.join(write_path, "tile_graph.onnx")
     is_dryrun = int(os.environ.get('BACKENDSIM_DRYRUN', default=False))
     if is_dryrun:
+        yield (onnx_path, "")
         return
 
-    onnx_path = os.path.join(write_path, "tile_graph.onnx")
     #attribute_path = os.path.join(extension_config.CONFIG_TORCHSIM_DUMP_PATH, "tmp", hash_prefix(key), "attribute")
     backend_path = os.path.join(extension_config.CONFIG_TORCHSIM_DIR, "PyTorchSimBackend")
     stonne_config_path = f'{extension_config.CONFIG_TORCHSIM_DIR}/PyTorchSimBackend/configs/stonne_c1_simple_noc_tpuv3.json'

@@ -1,5 +1,5 @@
 {
-  "core_type" : "stonne",
+  "core_type" : ["stonne"],
   "stonne_config_path" : "/workspace/PyTorchSim/PyTorchSimBackend/extern/stonneCore/tests/sparseflex_op_128mses_128_bw.cfg",
   "num_cores" : 1,
   "core_freq" : 940,
@@ -23,9 +23,8 @@
 
   "precision" : 4,
   "scheduler" : "simple",
-  "num_partition" : 2,
+  "num_partition" : 1,
   "partition": {
-    "core_0":0,
-    "core_1":0
+    "core_0":0
   }
 }

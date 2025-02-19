@@ -12,7 +12,8 @@ from test_sparse_core import MLP as model1
 target_model1 = model1(16, 16, 16).eval()
 
 # Init scheduler
-scheduler = Scheduler(num_request_queue=2, engine_select=Scheduler.FIFO_ENGINE)
+scheduler = Scheduler(num_request_queue=2, engine_select=Scheduler.FIFO_ENGINE,
+                      backend_config="/workspace/PyTorchSim/PyTorchSimBackend/configs/stonne_c1_simple_noc_tpuv3.json")
 # Register compiled model
 
 opt_model1 = torch.compile(target_model1.to(device=scheduler.execution_engine.module.custom_device()))
