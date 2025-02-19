@@ -12,7 +12,6 @@ Simulator::Simulator(SimulationConfig config)
   _slot_id = 0;
   _max_slot = 2;
   _n_cores = config.num_cores;
-  _n_sp_cores = config.num_sp_cores;
   _n_memories = config.dram_channels;
   _memory_req_size = config.dram_req_size;
   _noc_node_per_core = config.icnt_node_per_core;
@@ -23,13 +22,16 @@ Simulator::Simulator(SimulationConfig config)
   // Create core objects
   _cores.resize(_n_cores);
   for (int core_index = 0; core_index < _n_cores; core_index++) {
-    if (core_index < _n_cores-_n_sp_cores) {
+    if (config.core_type[core_index] == CoreType::WS_MESH) {
       spdlog::info("[Config/Core] Core {}: {} MHz, Spad size: {} KB, Systolic array per core: {}",
         core_index, config.core_freq , config.sram_size, config.num_systolic_array_per_core);
       _cores.at(core_index) = std::make_unique<Core>(core_index, _config);
-    } else {
+    } else if(config.core_type[core_index] == CoreType::STONNE) {
       spdlog::info("[Config/Core] Core {}: {} MHz, Stonne Core selected", core_index, config.core_freq);
       _cores.at(core_index) = std::make_unique<SparseCore>(core_index, _config);
+    } else {
+      throw std::runtime_error(fmt::format("Not implemented Core type {} ",
+                                          (int)config.core_type[core_index]));
     }
   }
 
