@@ -11,7 +11,7 @@ target_model1 = model1().eval()
 # Init scheduler
 scheduler = Scheduler(num_request_queue=1, max_batch=4, engine_select=Scheduler.FIFO_ENGINE)
 # Register compiled model
-opt_model1 = torch.compile(target_model1.to(device=scheduler.execution_engine.module.custom_device(), memory_format=torch.channels_last))
+opt_model1 = torch.compile(target_model1.to(device=scheduler.execution_engine.module.custom_device(), memory_format=torch.channels_last), dynamic=False)
 SchedulerDNNModel.register_model("resnet18", opt_model1)
 
 # Generate time stamp

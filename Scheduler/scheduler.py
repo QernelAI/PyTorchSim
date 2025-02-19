@@ -59,9 +59,6 @@ class Request:
         Request.request_id += 1
         return allocated_id
 
-    def is_arrived(self, current_time):
-        return current_time >= self.arrival_time
-
     def set_start(self, start_time):
         self.state = self.RUNNING
         self.start_time.append(start_time)
@@ -351,7 +348,7 @@ class Scheduler:
     FIFO_ENGINE = 0
     RR_ENGINE = 1
     def __init__(self, num_request_queue=1, max_batch=1, engine_select=FIFO_ENGINE, backend_config=extension_config.CONFIG_TORCHSIM_BACKEND_CONFIG) -> None:
-        self.current_time = 0
+        self.current_cycle = 0
         self.max_batch = max_batch
         self.num_request_queue = num_request_queue
         self.request_queue : List[List[Request]] = []
@@ -372,7 +369,7 @@ class Scheduler:
 
     def add_request(self, request: Request, request_time=-1):
         """register model at timestamp time"""
-        request_time = self.current_time if request_time == -1 else request_time
+        request_time = self.current_time() if request_time == -1 else request_time
         request.arrival_time = request_time
         self.request_queue[request.request_queue_idx].append(request)
 
@@ -385,7 +382,8 @@ class Scheduler:
         if not self.request_queue[request_queue_idx]:
             return candidate_req
         for req in self.request_queue[request_queue_idx]:
-            if req.is_arrived(self.current_time) and req.state == Request.QUEUED:
+
+            if self.msec_to_cycle(req.arrival_time) <= self.current_cycle and req.state == Request.QUEUED:
                 candidate_req.append(req)
 
                 # Stop batching
@@ -413,7 +411,7 @@ class Scheduler:
         return nearest_req, nearest_arrival_time
 
     def finish_request(self, req : Request):
-        req.set_finished(self.current_time)
+        req.set_finished(self.current_time())
 
         # Free resources
         req.free_memory()
@@ -431,13 +429,14 @@ class Scheduler:
         if not request_list:
             return False
 
+        print(f"[Request issue] partition: {request_queue_idx} batch size: {len(request_list)}")
         for req in request_list:
-            req.set_start(self.current_time)
-
+            req.set_start(self.current_time())
+            print(f"[Request-{req.id} issue] partition: {req.request_queue_idx} "
+                f"arrival_time: {req.arrival_time} start_time: {req.start_time[0]}")
         # Submit batched request
         self.execution_engine.submit(request_list, request_queue_idx)
-        print(f"[Request-{req.id} issue] partition: {req.request_queue_idx} "
-              f"arrival_time: {req.arrival_time} start_time: {req.start_time[0]}")
+
         return True
 
     def check_finish_request(self):
@@ -462,7 +461,7 @@ class Scheduler:
         # Need to forward the time until next_arrival_time
         if self.execution_engine.is_idle():
             reason = self.backend_simulator.until(self.msec_to_cycle(next_time))
-            self.current_time = self.cycle_to_msec(self.backend_simulator.cycle())
+            self.current_cycle = self.backend_simulator.cycle()
         else:
             self.run(next_time)
         return
@@ -471,7 +470,7 @@ class Scheduler:
         def execute_cycle():
             for i in range(self.execution_engine.num_partion):
                 if self.execution_engine.partition_state[i] == ExecutionEngine.PARTITION_IDLE:
-                    ret = self.execution_engine.launch_kernel(self.msec_to_cycle(self.current_time), i)
+                    ret = self.execution_engine.launch_kernel(self.current_cycle, i)
 
             self.check_finish_request()
             # Check if the stop condition is met
@@ -480,13 +479,16 @@ class Scheduler:
 
             # Schedule jobs and update the current time
             result = self.backend_simulator.until(self.msec_to_cycle(until_time))
-            self.current_time = self.cycle_to_msec(self.backend_simulator.cycle())
+            self.current_cycle = self.backend_simulator.cycle()
 
             if result != -1:
                 # Kernel is finished. So set idle state
                 self.execution_engine.partition_state[result] = ExecutionEngine.PARTITION_IDLE
 
             return result
+
+        if self.current_cycle >= self.msec_to_cycle(until_time):
+            until_time = -1
 
         if until_time == -1:
             while not self.execution_engine.is_idle():
@@ -496,7 +498,7 @@ class Scheduler:
                     break
 
         else:
-            while self.current_time <= until_time and not self.execution_engine.is_idle():
+            while self.current_cycle <= self.msec_to_cycle(until_time) and not self.execution_engine.is_idle():
                 result = execute_cycle()
                 # if result is not -1, schedule new request
                 if result == -1:
@@ -511,6 +513,9 @@ class Scheduler:
 
     def is_finished(self):
         return self.is_request_queue_empty() and self.execution_engine.is_idle()
+
+    def current_time(self):
+        return self.cycle_to_msec(self.current_cycle)
 
     def cycle_to_msec(self, cycle):
         freq = self.backend_simulator.get_core_freq()
