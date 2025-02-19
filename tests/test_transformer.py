@@ -93,7 +93,7 @@ def test_DecoderBlock(device):
 
     test_result("Decoder Block Forwrad", res, cpu_res)
 
-def test_Attention(device):
+def test_Attention(device, head=16, seq=512, d_k=64):
     def attention(query, key, value):
         import math
         d_k = query.size(-1)
@@ -102,9 +102,9 @@ def test_Attention(device):
         return torch.matmul(p_attn, value), p_attn
 
     torch.manual_seed(0)
-    query = torch.randn(16, 128).to(device=device)
-    key = torch.randn(16, 128).to(device=device)
-    value = torch.randn(16, 128).to(device=device)
+    query = torch.randn(head, seq, d_k).to(device=device)
+    key = torch.randn(head, seq, d_k).to(device=device)
+    value = torch.randn(head, seq, d_k).to(device=device)
 
     opt_fn = torch.compile(dynamic=False)(attention)
     res, p_attn = opt_fn(query, key, value)
@@ -133,3 +133,4 @@ if __name__ == "__main__":
     module = ExecutionEngine.setup_device()
     device = module.custom_device()
     test_DecoderBlock(device)
+    # test_Attention(device, head=16, seq=512, d_k=64)
