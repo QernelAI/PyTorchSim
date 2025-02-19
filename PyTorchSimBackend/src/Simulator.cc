@@ -12,6 +12,7 @@ Simulator::Simulator(SimulationConfig config)
   _slot_id = 0;
   _max_slot = 2;
   _n_cores = config.num_cores;
+  _n_sp_cores = config.num_sp_cores;
   _n_memories = config.dram_channels;
   _memory_req_size = config.dram_req_size;
   _noc_node_per_core = config.icnt_node_per_core;
@@ -22,16 +23,13 @@ Simulator::Simulator(SimulationConfig config)
   // Create core objects
   _cores.resize(_n_cores);
   for (int core_index = 0; core_index < _n_cores; core_index++) {
-    if (config.core_type == CoreType::WS_MESH) {
+    if (core_index < _n_cores-_n_sp_cores) {
       spdlog::info("[Config/Core] Core {}: {} MHz, Spad size: {} KB, Systolic array per core: {}",
         core_index, config.core_freq , config.sram_size, config.num_systolic_array_per_core);
       _cores.at(core_index) = std::make_unique<Core>(core_index, _config);
-    } else if (config.core_type == CoreType::STONNE) {
+    } else {
       spdlog::info("[Config/Core] Core {}: {} MHz, Stonne Core selected", core_index, config.core_freq);
       _cores.at(core_index) = std::make_unique<SparseCore>(core_index, _config);
-    } else {
-      spdlog::error("[Configuration] Invalid core type...!");
-      exit(EXIT_FAILURE);
     }
   }
 

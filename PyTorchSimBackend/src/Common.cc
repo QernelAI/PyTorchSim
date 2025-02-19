@@ -18,27 +18,33 @@ SimulationConfig initialize_config(json config) {
   SimulationConfig parsed_config;
 
   /* Core configs */
-  if (config.contains("core_type")) {
-    if ((std::string)config["core_type"] == "ws_mesh")
-      parsed_config.core_type = CoreType::WS_MESH;
-    else if ((std::string)config["core_type"] == "stonne"){
-      parsed_config.core_type = CoreType::STONNE;
-      if (config.contains("stonne_config_path"))
-        parsed_config.stonne_config_path = config["stonne_config_path"];
-      else
-        throw std::runtime_error("Stonne config path is missing");
-    } else
-      throw std::runtime_error(fmt::format("Not implemented dram type {} ",
-                                          (std::string)config["core_type"]));
-  } else {
-    parsed_config.core_type = CoreType::WS_MESH;
-  }
+  if (config.contains("num_sp_cores"))
+    parsed_config.num_sp_cores = config["num_sp_cores"];
+  else
+    parsed_config.num_sp_cores = 0;
   parsed_config.num_cores = config["num_cores"];
   parsed_config.core_freq = config["core_freq"];
   parsed_config.sram_size = config["sram_size"];
-  if (config.contains("num_systolic_array_per_core"))
+  if (config.contains("num_systolic_array_per_core")) {
     parsed_config.num_systolic_array_per_core = config["num_systolic_array_per_core"];
+    if (parsed_config.num_cores == parsed_config.num_sp_cores)
+      spdlog::warn("Systolic array is not used in sparse core");
+  }
   parsed_config.core_print_interval = get_config_value<uint32_t>(config, "core_print_interval");
+
+  if (parsed_config.num_sp_cores) {
+    parsed_config.core_type = CoreType::STONNE;
+    if (parsed_config.num_cores > parsed_config.num_sp_cores)
+      parsed_config.core_type = CoreType::HETEROGENEOUS;
+    else if (parsed_config.num_cores < parsed_config.num_sp_cores)
+      throw std::runtime_error("Core number should be larger or equal to sparse core number");
+
+    if (config.contains("stonne_config_path"))
+      parsed_config.stonne_config_path = config["stonne_config_path"];
+    else
+      throw std::runtime_error("Stonne config path is missing");
+  } else if (parsed_config.num_sp_cores == 0)
+    parsed_config.core_type = CoreType::WS_MESH;
 
   /* DRAM config */
   if ((std::string)config["dram_type"] == "simple")
