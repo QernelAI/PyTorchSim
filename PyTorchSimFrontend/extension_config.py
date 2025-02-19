@@ -34,9 +34,9 @@ CONFIG_TORCHSIM_CUSTOM_PASS_PATH = os.environ.get('TORCHSIM_CUSTOM_PASS_PATH',
 # Backendsim config
 CONFIG_TORCHSIM_BACKEND_CONFIG = os.environ.get('TORCHSIM_CONFIG',
                                         default=f'{CONFIG_TORCHSIM_DIR}/PyTorchSimBackend/configs/systolic_ws_128x128_c2_simple_noc_tpuv2.json')
-CONFIG_BACKENDSIM_SPIKE_ONLY = bool(os.environ.get("BACKENDSIM_SPIKE_ONLY", False))
-CONFIG_BACKENDSIM_EAGER_MODE = bool(os.environ.get("BACKENDSIM_EAGER_MODE", default=False))
-CONFIG_BACKENDSIM_DRYRUN = bool(int(os.environ.get('BACKENDSIM_DRYRUN', default=0)))
+CONFIG_BACKENDSIM_SPIKE_ONLY = int(os.environ.get("BACKENDSIM_SPIKE_ONLY", False))
+CONFIG_BACKENDSIM_EAGER_MODE = int(os.environ.get("BACKENDSIM_EAGER_MODE", default=False))
+CONFIG_BACKENDSIM_DRYRUN = int(os.environ.get('BACKENDSIM_DRYRUN', default=False))
 CONFIG_BACKENDSIM_DEBUG_LEVEL = os.environ.get("BACKENDSIM_DEBUG_LEVEL", "")
 
 # GEM5 config
