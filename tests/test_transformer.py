@@ -81,9 +81,9 @@ class DecoderBlock(torch.nn.Module):
         ffn2_result = self.ffn2(act_result)
         return self.layer_norm(ffn2_result + result)
 
-def test_DecoderBlock(device):
-    cpu_query = torch.randn(1, 512, 768)
-    decoder_block = DecoderBlock(768, 12)
+def test_DecoderBlock(device, head=12, embed_dim=768, input_seq=512):
+    cpu_query = torch.randn(1, input_seq, embed_dim)
+    decoder_block = DecoderBlock(embed_dim, head)
     cpu_res = decoder_block(cpu_query)
 
     query = cpu_query.clone().to(device=device)
@@ -112,9 +112,9 @@ def test_Attention(device, head=16, seq=512, d_k=64):
     cpu_res, cpu_p_attn = attention(query.cpu(), key.cpu(), value.cpu())
     test_result("Attention Forward", res, cpu_res)
 
-def test_MHA(device, num_heads=12, embed_dim=768):
+def test_MHA(device, num_heads=12, embed_dim=768, input_seq=512):
     MHA = my_MultiheadAttention(num_heads, embed_dim)
-    cpu_query = torch.randn(512, 768)
+    cpu_query = torch.randn(input_seq, embed_dim)
     cpu_res = MHA(cpu_query, cpu_query, cpu_query)
 
     query = cpu_query.clone().to(device=device)
@@ -134,3 +134,4 @@ if __name__ == "__main__":
     device = module.custom_device()
     test_DecoderBlock(device)
     # test_Attention(device, head=16, seq=512, d_k=64)
+    # test_MHA(device, num_heads=12, embed_dim=768)

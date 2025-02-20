@@ -24,6 +24,17 @@ def test_view3D_2D(device, size=(16, 8, 16), t_x=0, t_y=1):
     out = view3D_2D(cpu_input)
     test_result("view 3D->2D", res, out)
 
+def test_view2D_3D(device, size=(512, 768), h=12, d_k=64):
+    def view2D_3D(a):
+        return a.view(-1, h, d_k).transpose(0, 1).contiguous()
+    torch.manual_seed(0)
+    cpu_input = torch.randn(size)
+    input = cpu_input.clone().to(device=device)
+    opt_fn = torch.compile(dynamic=False)(view2D_3D)
+    res = opt_fn(input)
+    out = view2D_3D(cpu_input)
+    test_result("view 2D->3D", res, out)
+
 if __name__ == "__main__":
     import os
     import sys
@@ -34,4 +45,5 @@ if __name__ == "__main__":
     device = module.custom_device()
     test_view3D_2D(device)
     test_view3D_2D(device, [12, 512, 64])
+    test_view2D_3D(device, size=(512, 1024), h=16, d_k=64)
 
