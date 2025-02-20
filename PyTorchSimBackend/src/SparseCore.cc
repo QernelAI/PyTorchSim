@@ -19,9 +19,9 @@ SparseCore::SparseCore(uint32_t id, SimulationConfig config) : Core(id, config) 
 
   spdlog::info("[Config/StonneCore {}] Compute Throughput: {:.2f} GFLOPs/sec", id, compute_throughput);
   spdlog::info("[Config/StonneCore {}] Distribution Network Bandwidth: {:.2f} GB/s ({} ports x {} bits)",
-             id, dn_bandwidth, dn_bw, dn_width);
+             id, dn_bandwidth, r_port_nr, dn_width);
   spdlog::info("[Config/StonneCore {}] Reduction Network Bandwidth: {:.2f} GB/s ({} ports x {} bits)",
-             id, rn_bandwidth, rn_bw, rn_width);
+             id, rn_bandwidth, w_port_nr, rn_width);
 };
 
 SparseCore::~SparseCore() { delete stonneCore; }
@@ -72,17 +72,21 @@ void SparseCore::cycle() {
   }
 
   int nr_request = 0;
-  for (auto& req_pair : request_merge_table) {
-    uint64_t address;
-    mem_access_type acc_type;
-    mf_type type;
-    std::tie(address, acc_type, type) = req_pair.first;
-    mem_fetch* req_wrapper = new mem_fetch(address, acc_type, type, _config.dram_req_size, -1, req_pair.second);
-    _request_queue.push(req_wrapper);
-    request_merge_table.erase(req_pair.first);
+  while (!request_merge_table.empty() && nr_request <= r_port_nr) {
+    for (auto& req_pair : request_merge_table) {
+      uint64_t address;
+      mem_access_type acc_type;
+      mf_type type;
+      std::tie(address, acc_type, type) = req_pair.first;
+      mem_fetch* req_wrapper = new mem_fetch(address, acc_type, type, _config.dram_req_size, -1, req_pair.second);
+      _request_queue.push(req_wrapper);
+      request_merge_table.erase(req_pair.first);
 
-    if (nr_request++ > r_port_nr);
+      spdlog::debug("[SparseCore][{}] Address: {:#x}, Access Type: {}, Request Type: {}, DRAM Req Size: {}, nr_request: {}", \
+              _core_cycle, req_wrapper->get_addr(), int(req_wrapper->get_access_type()), int(req_wrapper->get_type()), _config.dram_req_size, nr_request);
+      nr_request++;
       break;
+    }
   }
 
   // Send Memory Response
@@ -93,8 +97,8 @@ void SparseCore::cycle() {
 
     SimpleMem::Request* resp = resps->front();
 
-    spdlog::debug("[SparseCore][{}] Round Trip Cycle: {}, Address: {:#x}, Access Type: {}, Request Type: {}, DRAM Req Size: {}", \
-             _core_cycle, _core_cycle - resp->request_time, resp->getAddress(), int(resp_wrapper->get_access_type()), int(resp_wrapper->get_type()), _config.dram_req_size);
+    spdlog::debug("[SparseCore][{}] Round Trip Cycle: {}, Address: {:#x}, Access Type: {}, Request Type: {}, DRAM Req Size: {}, nr_request: {}", \
+             _core_cycle, _core_cycle - resp->request_time, resp->getAddress(), int(resp_wrapper->get_access_type()), int(resp_wrapper->get_type()), _config.dram_req_size, nr_request);
 
     resp->setReply();
     stonneCore->pushResponse(resp);
@@ -104,7 +108,7 @@ void SparseCore::cycle() {
       delete resp_wrapper;
       _response_queue.pop();
     }
-    if (nr_request++ > r_port_nr);
+    if (nr_request++ > w_port_nr)
       break;
   }
 
