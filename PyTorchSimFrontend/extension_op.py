@@ -197,7 +197,7 @@ def flexagon_frontend(a, b, out):
     attribute_path = os.path.join(write_path, "attributes")
     is_dryrun = int(os.environ.get('BACKENDSIM_DRYRUN', default=False))
     if is_dryrun:
-        out.copy_(torch.matmul(b.cpu(), a.cpu()))
+        out.copy_(torch.matmul(a.cpu(), b.cpu()))
         yield (onnx_path, attribute_path)
         return
 

@@ -148,8 +148,10 @@ def sparse_addmm(*args, **kwargs):
     print("Custom sparse addmm")
     _, sp_mat1, sp_mat2 = args
     mat1_layout = sp_mat1.layout
+    out_range = args[0].data.data.data.ranges
+    size = [out_range[i] for i in args[0].data.dims]
     layout = ir.FlexibleLayout(
-            device=mat1_layout.device, dtype=mat1_layout.dtype, size=args[0].data.data.data.ranges  # FIXME: Example code for aten op overwrite by externkernel call
+            device=mat1_layout.device, dtype=mat1_layout.dtype, size=size  # FIXME: Example code for aten op overwrite by externkernel call
         )
     return aten_spmm.bind((sp_mat1, sp_mat2), layout).output_node()
 

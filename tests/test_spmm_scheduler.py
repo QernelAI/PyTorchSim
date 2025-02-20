@@ -15,9 +15,9 @@ args = sys.argv
 #     exit(1)
 
 batch_size = 16
-input_size = 16
-hidden_size = 16
-output_size = 16
+input_size = 32
+hidden_size = 64
+output_size = 128
 w1_sparsity = 0.1
 w2_sparsity = 0.7
 
@@ -32,18 +32,20 @@ sys.path.append(os.environ.get('TORCHSIM_DIR', default='/workspace/PyTorchSim'))
 
 from Scheduler.scheduler import Scheduler, SchedulerDNNModel, Request
 
-from test_sparse_core import MLP as model1
+from test_sparse_core import SparseMLP as model1
 from test_transformer import DecoderBlock as model2
 
 with torch.no_grad():
-    target_model1 = model1(input_size, hidden_size, output_size, w1_sparsity, w2_sparsity).eval()
-    target_model2 = model2(768, 12).eval()
+
 
     # Init scheduler
     scheduler = Scheduler(num_request_queue=2, engine_select=Scheduler.FIFO_ENGINE,
                         backend_config="/root/workspace/PyTorchSim/PyTorchSimBackend/configs/heterogeneous_c2_simple_noc.json")
-    # Register compiled model
 
+    target_model1 = model1(input_size, hidden_size, output_size, w1_sparsity, w2_sparsity, scheduler.execution_engine.module.custom_device()).eval()
+    target_model2 = model2(768, 12).eval()
+
+    # Register compiled model
     opt_model1 = torch.compile(target_model1.to(device=scheduler.execution_engine.module.custom_device()))
     opt_model2 = torch.compile(target_model2.to(device=scheduler.execution_engine.module.custom_device()))
     SchedulerDNNModel.register_model("mlp", opt_model1)

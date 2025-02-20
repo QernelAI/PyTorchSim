@@ -28,13 +28,43 @@ class MLP(nn.Module):
         prune.remove(self.fc2, "weight")
 
     def forward(self, x):
-        x = torch.sparse.mm(x, self.fc1.weight.T)
-        x = torch.sparse.mm(x, self.fc2.weight.T)
+        x = torch.sparse.mm(x, self.fc1.weight)
+        x = torch.sparse.mm(x, self.fc2.weight)
         return x
 
-def test_sparse_mlp(device, batch_size=32, input_size=128, hidden_size=128, output_size=128, bias_shift=0):
+class SparseMLP(nn.Module):
+    def __init__(self, input_size=16, hidden_size=16, output_size=16, sparsity_fc1=0, sparsity_fc2=0, device="cpu"):
+        super(SparseMLP, self).__init__()
+
+        self.weight1 = torch.empty(input_size, hidden_size, requires_grad=False)
+        self.weight2 = torch.empty(hidden_size, output_size, requires_grad=False)
+
+        nn.init.xavier_uniform_(self.weight1)
+        nn.init.xavier_uniform_(self.weight2)
+
+        self._apply_pruning(self.weight1, sparsity_fc1)
+        self._apply_pruning(self.weight2, sparsity_fc2)
+
+        self.weight1 = self.weight1.to(device=device)
+        self.weight2 = self.weight2.to(device=device)
+
+        print(f"WEIGHT1 SHAPE > {self.weight1.shape}")  # (input_size, hidden_size)
+        print(f"WEIGHT2 SHAPE > {self.weight2.shape}")  # (hidden_size, output_size)
+
+    def _apply_pruning(self, tensor, sparsity):
+        mask = torch.rand_like(tensor) > sparsity
+        tensor *= mask
+
+    def forward(self, x):
+        x = torch.sparse.mm(x, self.weight1)
+        x = torch.sparse.mm(x, self.weight2)
+        return x
+
+
+def test_sparse_mlp(device, batch_size=32, input_size=128, hidden_size=128, output_size=128):
     torch.manual_seed(0)
-    mlp = MLP(input_size, hidden_size, output_size, bias_shift)
+    # mlp = MLP(input_size, hidden_size, output_size)
+    mlp = SparseMLP(input_size, hidden_size, output_size, device)
     mlp = mlp.to(device=device)
     input = torch.randn(batch_size, input_size)
     x1 = input.to(device=device)
@@ -50,4 +80,5 @@ if __name__ == "__main__":
 
     module = ExecutionEngine.setup_device()
     device = module.custom_device()
-    test_sparse_mlp(device)
+    test_sparse_mlp(device, batch_size=8, input_size=16, hidden_size=32, output_size=64)
+    
