@@ -93,12 +93,12 @@ def flexagon_frontend(a, b, out):
         sparsity_ratio = zero_elements / total_elements * 100
         return math.ceil(sparsity_ratio.item())
 
-    x_sparsity = calculate_sparsity(a)
-    w_sparsity = calculate_sparsity(b)
+    w_sparsity = calculate_sparsity(a)
+    x_sparsity = calculate_sparsity(b)
+    print(f"A Sparsity: {w_sparsity}")
+    print(f"B Sparsity: {x_sparsity}")
     assert(x_sparsity >= 0 and x_sparsity < 100)
     assert(w_sparsity >= 0 and w_sparsity < 100)
-    print(f"A Sparsity: {x_sparsity}")
-    print(f"B Sparsity: {w_sparsity}")
 
     # Generating inputs
     dir_path = os.path.join(
@@ -197,6 +197,7 @@ def flexagon_frontend(a, b, out):
     attribute_path = os.path.join(write_path, "attributes")
     is_dryrun = int(os.environ.get('BACKENDSIM_DRYRUN', default=False))
     if is_dryrun:
+        out.copy_(torch.matmul(b.cpu(), a.cpu()))
         yield (onnx_path, attribute_path)
         return
 
