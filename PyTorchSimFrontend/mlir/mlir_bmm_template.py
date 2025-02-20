@@ -31,7 +31,7 @@ func.func @{{ KERNEL_NAME }}{{kernel.def_kernel(inputs=[X, W, Bias], outputs=[Y]
   %tag0 = memref.alloc() : memref<1xi32>
   %tag1 = memref.alloc() : memref<1xi32>
   %tag2 = memref.alloc() : memref<1xi32>{% if not Bias %}
-  %v0 = arith.constant dense<0.0> : vector<{{ TILE_M * TILE_N // kernel.vector_lane }}xf32>{% endif %}
+  %v0 = arith.constant dense<0.0> : vector<{{ kernel.get_spad_size_per_lane(TILE_M, TILE_N) }}xf32>{% endif %}
   %c0 = arith.constant 0 : index
   {{- kernel.def_local_vars() }}
   affine.for %b=0 to {{ B }} {
@@ -45,16 +45,16 @@ func.func @{{ KERNEL_NAME }}{{kernel.def_kernel(inputs=[X, W, Bias], outputs=[Y]
         {%- if Bias_rank == 2 -%} axis {%- else -%} c0 {%- endif -%}
           , %vstride : memref<
         {%- if Bias_rank == 2 -%} {{ M * N }} {%- else -%} {{ N }} {%- endif -%}
-          xf32>, memref<{{ TILE_M }}x{{ TILE_N }}xf32, 1>, memref<1xi32> { subtile_size=[{{ kernel.vector_lane }}, {{ kernel.vector_lane }}], async=1, sram_stride=[{{ kernel.vector_lane }}, 1] }
+          xf32>, memref<{{ TILE_M }}x{{ TILE_N }}xf32, 1>, memref<1xi32> { subtile_size=[{{ SUB_TILE_M }}, {{ SUB_TILE_N }}], async=1, sram_stride=[1 , {{ TILE_M }}] }
         {%- else -%}
-        affine.vector_store %v0, %Y_buffer[0, 0] : memref<{{ TILE_M }}x{{ TILE_N }}xf32, 1>, vector<{{ TILE_M * TILE_N // kernel.vector_lane }}xf32>{% endif %}
+        affine.vector_store %v0, %Y_buffer[0, 0] : memref<{{ TILE_M }}x{{ TILE_N }}xf32, 1>, vector<{{ kernel.get_spad_size_per_lane(TILE_M, TILE_N) }}xf32>{% endif %}
         affine.for %t_k = 0 to {{ K }} step {{ TILE_K }} {
           %index0 = affine.apply #map0(%b, %t_m, %t_k)
           %index1 = affine.apply #map1(%b, %t_k, %t_n)
           memref.dma_start %X[%index0], %X_buffer[%c0, %c0], %c_mvin, %tag1[%c0], %axis, %vstride
-             : memref<{{ B * M * K }}xf32>, memref<{{ TILE_M }}x{{ TILE_K }}xf32, 1>, memref<1xi32> { subtile_size=[{{ kernel.vector_lane }}, {{ TILE_K }}], async=1, sram_stride=[1, {{ TILE_M }}]}
+             : memref<{{ B * M * K }}xf32>, memref<{{ TILE_M }}x{{ TILE_K }}xf32, 1>, memref<1xi32> { subtile_size=[{{ SUB_TILE_M }}, {{ TILE_K }}], async=1, sram_stride=[1, {{ TILE_M }}]}
           memref.dma_start %W[%index1], %W_buffer[%c0, %c0], %c_mvin2, %tag2[%c0], %axis, %vstride
-             : memref<{{ B * K * N }}xf32>, memref<{{ TILE_K }}x{{ TILE_N }}xf32, 1>, memref<1xi32> { subtile_size=[{{ TILE_K }}, {{ kernel.vector_lane }}], async=1, sram_stride=[1, 1]}
+             : memref<{{ B * K * N }}xf32>, memref<{{ TILE_K }}x{{ TILE_N }}xf32, 1>, memref<1xi32> { subtile_size=[{{ TILE_K }}, {{ SUB_TILE_N }}], async=1, sram_stride=[1, {{ TILE_K }}]}
           linalg.matmul ins(%X_buffer, %W_buffer : memref<{{ TILE_M }}x{{ TILE_K }}x{{ DATA_STYPE }}, 1>, memref<{{ TILE_K }}x{{ TILE_N }}x{{ DATA_STYPE }}, 1>)
                   outs(%Y_buffer : memref<{{ TILE_M }}x{{ TILE_N }}x{{ DATA_STYPE }}, 1>)
         } { accumulation_loop=true }
@@ -97,6 +97,8 @@ class MLIRBMMTemplate(MLIRTemplate):
         B, M, N, K = X.get_size()[0], X.get_size()[1], W.get_size()[2], X.get_size()[2]
         TILE_M, TILE_N, TILE_K = kernel.gemm_combination_mapping(M, N, K)
         kernel.loop_size = [TILE_M, TILE_N, TILE_K]
+        SUB_TILE_M = TILE_M if TILE_M < kernel.vector_lane else kernel.vector_lane
+        SUB_TILE_N = TILE_N if TILE_N < kernel.vector_lane else kernel.vector_lane
 
         W_transposed = self.is_transposed(W)
         X_transposed = self.is_transposed(X)
@@ -111,6 +113,8 @@ class MLIRBMMTemplate(MLIRTemplate):
             TILE_M=TILE_M,
             TILE_N=TILE_N,
             TILE_K=TILE_K,
+            SUB_TILE_M=SUB_TILE_M,
+            SUB_TILE_N=SUB_TILE_N,
             DATA_STYPE="f32",
             DATA_SIZE=4,
             X = X,
