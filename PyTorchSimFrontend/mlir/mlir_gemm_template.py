@@ -110,7 +110,8 @@ class MLIRGemmTemplate(MLIRTemplate):
         else:
             TILE_M, TILE_N, TILE_K = kernel.gemm_combination_mapping(M, N, K)
             template = GEMM_TEMPLATE
-        kernel.loop_size =[TILE_M, TILE_N, TILE_K]
+        TOG_latency = M if TILE_M > M else TILE_M
+        kernel.loop_size =[TOG_latency, TILE_N, TILE_K]
         SUB_TILE_M = TILE_M if TILE_M < kernel.vector_lane else kernel.vector_lane
         SUB_TILE_N = TILE_N if TILE_N < kernel.vector_lane else kernel.vector_lane
 
