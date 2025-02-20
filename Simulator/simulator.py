@@ -256,7 +256,7 @@ class BackendSimulator():
         if self.process:
             try:
                 if not extension_config.CONFIG_BACKENDSIM_DRYRUN:
-                    print(command)
+                    print(command, flush=True)
                 self.process.stdin.write(command + '\n')
                 self.process.stdin.flush()
                 ret = self.process.stderr.readline().strip()

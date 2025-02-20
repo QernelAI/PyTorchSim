@@ -425,15 +425,19 @@ class Scheduler:
               f"response time: {response_time} tbt_time: {tbt_time}")
 
     def per_schedule(self, request_queue_idx):
+        # Wait partition is idle
+        if not self.execution_engine.is_partition_idle(request_queue_idx):
+            return False
+
         request_list = self.select(request_queue_idx)
         if not request_list:
             return False
 
-        print(f"[Request issue] partition: {request_queue_idx} batch size: {len(request_list)}")
+        print(f"[Request issue] partition: {request_queue_idx} batch size: {len(request_list)}", flush=True)
         for req in request_list:
             req.set_start(self.current_time())
             print(f"[Request-{req.id} issue] partition: {req.request_queue_idx} "
-                f"arrival_time: {req.arrival_time} start_time: {req.start_time[0]}")
+                f"arrival_time: {req.arrival_time} start_time: {req.start_time[0]}", flush=True)
         # Submit batched request
         self.execution_engine.submit(request_list, request_queue_idx)
 
