@@ -6,6 +6,7 @@ import argparse
 
 sys.path.append(os.environ.get('TORCHSIM_DIR', default='/workspace/PyTorchSim'))
 from Scheduler.scheduler import Scheduler, SchedulerDNNModel, Request, poisson_request_generator
+CONFIG_TORCHSIM_DIR = os.environ.get('TORCHSIM_DIR', default='/workspace/PyTorchSim')
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Poisson Request Generator (ms)")
@@ -16,7 +17,7 @@ if __name__ == "__main__":
     target_model1 = model1().eval()
 
     # Init scheduler
-    scheduler = Scheduler(num_request_queue=1, max_batch=4, engine_select=Scheduler.FIFO_ENGINE, backend_config="/workspace/PyTorchSim/PyTorchSimBackend/configs/systolic_ws_128x128_c2_simple_noc_tpuv2.json")
+    scheduler = Scheduler(num_request_queue=1, max_batch=32, engine_select=Scheduler.FIFO_ENGINE, backend_config=f"{CONFIG_TORCHSIM_DIR}/PyTorchSimBackend/configs/systolic_ws_128x128_c2_simple_noc_tpuv2.json")
     # Register compiled model
     opt_model1 = torch.compile(target_model1.to(device=scheduler.execution_engine.module.custom_device(), memory_format=torch.channels_last), dynamic=False)
     SchedulerDNNModel.register_model("resnet18", opt_model1)
