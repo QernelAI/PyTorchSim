@@ -1,23 +1,6 @@
 #!/bin/bash
+python3 ../tests/test_hetro.py --M 1024 --N 1024 --K 1024 --sparsity 0.9 --config stonne_big_c1_simple_noc.json --mode 0 > hetero/big_sparse.log
+python3 ../tests/test_hetro.py --M 1024 --N 1024 --K 1024 --sparsity 0.9 --config systolic_ws_128x128_c1_simple_noc_tpuv2_half.json --mode 1 > hetero/big.log
+python3 ../tests/test_hetro.py --M 1024 --N 1024 --K 1024 --sparsity 0.9 --config heterogeneous_c2_simple_noc.json --mode 2 > hetero/hetero.log
 
-BATCH_SIZE=128
-INPUT_SIZE=128
-HIDDEN_SIZE=128
-OUTPUT_SIZE=128
-OUTPUT_DIR="sparse_mt_results"
-
-mkdir -p "$OUTPUT_DIR"
-
-for w1 in $(seq 0.1 0.3 1.0); do
-    OUTPUT_FILE="${OUTPUT_DIR}/flops_w1_${w1}_w2_${w1}.txt"
-    echo "Started: w1=$w1, w2=$w1 (Output: $OUTPUT_FILE)"
-    python3 ${TORCHSIM_DIR}/tests/test_spmm_scheduler.py \
-        --batch_size $BATCH_SIZE \
-        --input_size $INPUT_SIZE \
-        --hidden_size $HIDDEN_SIZE \
-        --output_size $OUTPUT_SIZE \
-        --w1_sparsity $w1 \
-        --w2_sparsity $w1 > "$OUTPUT_FILE"
-done
-wait
 echo "All processes completed!"

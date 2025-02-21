@@ -1,7 +1,7 @@
 {
-  "core_type" : ["stonne"],
+  "core_type" : ["stonne", "ws_mesh"],
   "stonne_config_path" : "/workspace/PyTorchSim/PyTorchSimBackend/extern/stonneCore/tests/sparseflex_op_128mses_128_bw.cfg",
-  "num_cores" : 1,
+  "num_cores" : 2,
   "core_freq" : 700,
   "sram_size" : 65536,
   "core_print_interval" : 10000,
@@ -10,7 +10,7 @@
 
   "dram_type" : "ramulator2",
   "dram_freq" : 700,
-  "dram_channels": 8,
+  "dram_channels": 16,
   "dram_req_size": 32,
   "dram_latency" : 10,
   "dram_nbl" : 1,
@@ -24,8 +24,9 @@
 
   "precision" : 4,
   "scheduler" : "simple",
-  "num_partition" : 1,
+  "num_partition" : 2,
   "partition": {
-    "core_0":0
+    "core_0":0,
+    "core_1":1
   }
 }
