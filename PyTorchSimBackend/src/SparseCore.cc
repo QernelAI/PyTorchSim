@@ -5,10 +5,11 @@ SparseCore::SparseCore(uint32_t id, SimulationConfig config) : Core(id, config) 
   nr_cores = config.num_stonne_per_core;
   coreBusy.resize(nr_cores);
   percore_tiles.resize(nr_cores);
+  stonneCores.resize(nr_cores);
   for (int i=0; i<nr_cores; i++) {
     SST_STONNE::sstStonne* core = new SST_STONNE::sstStonne(config.stonne_config_path);
-    core->init(1);
-    stonneCores.push_back(core);
+    stonneCores.at(i) = core;
+    stonneCores.at(i)->init(1);
     coreBusy.at(i) = false;
     percore_tiles.at(i) = std::vector<std::shared_ptr<Tile>>();
   }
@@ -58,6 +59,11 @@ void SparseCore::issue(std::shared_ptr<Tile> tile) {
     spdlog::error("[StonneCore {}] Faield to issue tile", _id);
     exit(1);
   }
+  //delete stonneCores.at(selected_core_idx);
+  //SST_STONNE::sstStonne* core = new SST_STONNE::sstStonne(_config.stonne_config_path);
+  //stonneCores.at(selected_core_idx) = core;
+  stonneCores.at(selected_core_idx)->init(1);
+
   spdlog::info("[StonneCore {}][{}] issued new tile", _id, selected_core_idx);
   SST_STONNE::StonneOpDesc *opDesc = static_cast<SST_STONNE::StonneOpDesc*>(tile->get_custom_data());
   stonneCores.at(selected_core_idx)->setup(*opDesc, 0x1000000 * selected_core_idx); // FIXME. To avoid same address
@@ -159,8 +165,9 @@ void SparseCore::cycle() {
     if (nr_request++ > w_port_nr)
       break;
   }
-
-
+  if(_config.core_print_interval && _core_cycle % _config.core_print_interval == 0) {
+    print_current_stats();
+  }
 }
 
 bool SparseCore::has_memory_request() {
@@ -176,8 +183,19 @@ void SparseCore::push_memory_response(mem_fetch* response) {
 }
 
 void SparseCore::print_stats() {
-  for (auto stonneCore : stonneCores)
-    stonneCore->printStats();
+  //for (auto stonneCore : stonneCores)
+  //  stonneCore->printStats();
+  MSwitchStats accum;
+  spdlog::info("========= Sparse Core stat =========");
+  spdlog::info("Stonne Core [{}] : Total cycle {}", _id, _core_cycle);
+  for (size_t i = 0; i < stonneCores.size(); ++i) {
+    MSwitchStats stats = stonneCores.at(i)->getMSStats();
+    accum += stats;
+    spdlog::info("Stonne Core [{}][{}] : n_multiplications: {} ",
+                 _id, i, stats.n_multiplications);
+  }
+  spdlog::info("Stonne Core [{}] : total_multiplications: {} ",
+                 _id, accum.n_multiplications);
 }
 
 void SparseCore::print_current_stats() {
