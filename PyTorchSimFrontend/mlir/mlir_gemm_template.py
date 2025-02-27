@@ -86,6 +86,9 @@ class MLIRGemmTemplate(MLIRTemplate):
             if node.layout.stride != node.data.layout.stride:
                 if node.layout.stride[-2] == node.data.layout.stride[-1] and node.layout.stride[-1] == node.data.layout.stride[-2]:
                     return True
+                elif len(node.layout.stride) < len(node.data.layout.stride) and node.layout.stride == node.data.layout.stride[-len(node.layout.stride):]:
+                    # Squeezed case
+                    return False
                 else:
                     raise NotImplementedError("If the stride is not equal to the original stride, it should have been transposed.")
         return False
