@@ -80,18 +80,18 @@ jobs:
             -e TORCHSIM_DUMP_PATH=/dump \
             ghcr.io/psal-postech/torchsim-ci:${GITHUB_SHA} python3 PyTorchSim/tests/test_add.py
 
-  test_relu:
-    name: Run test_relu.py
+  test_activation:
+    name: Run test_activation.py
     runs-on: self-hosted
     needs: build
     steps:
-      - name: Run test_relu.py
+      - name: Run test_activation.py
         run: |
-          echo "Running test_relu.py"
+          echo "Running test_activation.py"
           docker run --rm \
             -v /tmp/torchsim-ci/${GITHUB_SHA}:/dump \
             -e TORCHSIM_DUMP_PATH=/dump \
-            ghcr.io/psal-postech/torchsim-ci:${GITHUB_SHA} python3 PyTorchSim/tests/test_relu.py
+            ghcr.io/psal-postech/torchsim-ci:${GITHUB_SHA} python3 PyTorchSim/tests/test_activation.py
 
   test_batchnorm:
     name: Run test_batchnorm.py
@@ -361,7 +361,7 @@ jobs:
             test_matmul, test_reduce, test_softmax,
             test_transpose2D, test_view3D_2D, test_layernorm,
             test_mlp, test_resnet, test_transformer, test_transpose3D,
-            test_sparsity, test_relu, test_pool, test_perceptron,
+            test_sparsity, test_activation, test_pool, test_perceptron,
             test_fusion, test_moe]
     steps:
       - name: Checkout code
