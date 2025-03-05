@@ -91,7 +91,7 @@ class ExtensionWrapperCodegen(wrapper.WrapperCodeGen):
 
                 from torch import device, empty, empty_strided
                 from {extension_codecache.__name__} import CustomAsyncCompile
-                from PyTorchSimFrontend.extension_op import flexagon_frontend
+                from PyTorchSimFrontend.extension_op import sparse_mm_dummy_stonne_outer
                 from torch._inductor.select_algorithm import extern_kernels
 
                 aten = torch.ops.aten
