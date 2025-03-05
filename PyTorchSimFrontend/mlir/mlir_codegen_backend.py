@@ -278,7 +278,7 @@ class ExtensionOverrides(common.OpOverrides):
         tile_size = op_type[0]
         dtype = op_type[1]
         shape = f"vector<{tile_size}x{dtype}>" if tile_size > 1 else dtype
-        return f'math.erf %{x} : {shape}', [tile_size, dtype] # TODO: erf lowering pass is not implemented
+        return f'math.erf %{x} : {shape}', [tile_size, dtype]
 
     @staticmethod
     def tanh(operand, *args, var_info=None, **kwargs):

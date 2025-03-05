@@ -87,5 +87,5 @@ if __name__ == "__main__":
     test_sigmoid(device, (128, 128))
     test_SiLU(device, (128, 128))
     test_SwiGLU(device, (128, 128))
-    # test_GeLU(device, (128, 128))
-    # test_GeLU(device, (128, 128), approximate='tanh')
+    test_GeLU(device, (128, 128))
+    test_GeLU(device, (128, 128), approximate='tanh')
