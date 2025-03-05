@@ -4,6 +4,8 @@ SparseCore::SparseCore(uint32_t id, SimulationConfig config) : Core(id, config) 
   /* Init stonne cores*/
   nr_cores = config.num_stonne_per_core;
   coreBusy.resize(nr_cores);
+  traceCoreStatus.resize(nr_cores);
+  traceCoreCycle.resize(nr_cores);
   percore_tiles.resize(nr_cores);
   stonneCores.resize(nr_cores);
   for (int i=0; i<nr_cores; i++) {
@@ -11,12 +13,14 @@ SparseCore::SparseCore(uint32_t id, SimulationConfig config) : Core(id, config) 
     stonneCores.at(i) = core;
     stonneCores.at(i)->init(1);
     coreBusy.at(i) = false;
+    traceCoreStatus.at(i) = 0;
+    traceCoreCycle.at(i) = 0;
     percore_tiles.at(i) = std::vector<std::shared_ptr<Tile>>();
   }
 
   Config stonneConfig = stonneCores.at(0)->getStonneConfig();
   unsigned int core_freq = config.core_freq; // MHz;
-  unsigned int num_ms = stonneConfig.m_MSNetworkCfg.ms_size;
+  num_ms = stonneConfig.m_MSNetworkCfg.ms_size;
   r_port_nr = config.num_stonne_port;
   w_port_nr = config.num_stonne_port;
 
@@ -85,6 +89,17 @@ void SparseCore::cycle() {
   uint32_t stonne_core_id = 0;
   for (auto& stonneCore : stonneCores) {
     stonneCore->cycle();
+    int new_status = stonneCore->getMCFSMStats();
+    int compute_cycle = stonneCore->getMSStats().n_multiplications;
+    if (traceCoreStatus.at(stonne_core_id) != new_status) {
+      spdlog::trace("Stonne Core [{}][{}] status transition {} -> {}, Load/Store: {}/{}, compute_cycle: {}",
+        _id, _core_cycle, traceCoreStatus.at(stonne_core_id), new_status,
+        traceLoadTraffic.size(), traceStoreTraffic.size(), (compute_cycle - traceCoreCycle.at(stonne_core_id))/num_ms);
+      traceCoreStatus.at(stonne_core_id) = new_status;
+      traceCoreCycle.at(stonne_core_id) = compute_cycle;
+      traceLoadTraffic.clear();
+      traceStoreTraffic.clear();
+    }
 
     /* Send Memory Request */
     while (SimpleMem::Request* req = stonneCore->popRequest()) {
@@ -96,10 +111,12 @@ void SparseCore::cycle() {
         case SimpleMem::Request::Read:
           acc_type = mem_access_type::GLOBAL_ACC_R;
           type = mf_type::READ_REQUEST;
+          traceLoadTraffic.insert(target_addr);
           break;
         case SimpleMem::Request::Write:
           acc_type = mem_access_type::GLOBAL_ACC_W;
           type = mf_type::WRITE_REQUEST;
+          traceStoreTraffic.insert(target_addr);
           break;
         default:
           spdlog::error("[SparseCore] Invalid request type from core");

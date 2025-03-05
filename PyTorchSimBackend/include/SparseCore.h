@@ -20,12 +20,17 @@ public:
   void print_stats() override;
   void print_current_stats() override;
   std::shared_ptr<Tile> pop_finished_tile() override;
+  uint32_t num_ms = 1;
   uint32_t r_port_nr = 1;
   uint32_t w_port_nr = 1;
   uint32_t nr_cores = 1;
 private:
   uint32_t rr_idx = 0;
   std::vector<bool> coreBusy;
+  std::vector<int> traceCoreStatus;
+  std::vector<int> traceCoreCycle;
+  std::set<uint64_t> traceLoadTraffic; // To trace dma traffic
+  std::set<uint64_t> traceStoreTraffic; // To trace dma traffic
   std::vector<SST_STONNE::sstStonne*> stonneCores;
   std::vector<std::vector<std::shared_ptr<Tile>>> percore_tiles;
   /* Interconnect queue */
