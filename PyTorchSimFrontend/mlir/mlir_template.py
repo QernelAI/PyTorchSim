@@ -115,9 +115,11 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
 
         return inner_I, inner_J, inner_K
 
-    def gemm_combination_mapping(self, M, N, K):
-        spad_size = self.spad_info["spad_size"] * self.vector_lane
+    def gemm_combination_mapping(self, M, N, K, n_extra_node=0):
+        spad_size_per_lane = self.spad_info["spad_size"]
+        spad_size = spad_size_per_lane * self.vector_lane
         max_spad_size = spad_size // 2 # double buffer
+        max_spad_per_lane = spad_size_per_lane // 2 # double buffer
         m_pad_factor = self.vector_lane if M > self.vector_lane else 8
         n_pad_factor = self.vector_lane if N > self.vector_lane else 8
         k_pad_factor = self.vector_lane if K > self.vector_lane else 8
@@ -139,8 +141,12 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
                 tile_N = j * self.vector_lane if N > self.vector_lane else N_padded
                 for i in tile_M_range:
                     tile_M = i * self.vector_lane if M > self.vector_lane else M_padded
-                    used_spad_size = (tile_M * tile_K + tile_K * tile_N + tile_M * tile_N) * self.precision
-                    if used_spad_size < max_spad_size and max_used_spad_size < used_spad_size and maximize_i_j <= tile_M * tile_N:
+                    used_spad_size = (tile_M * tile_K + tile_K * tile_N + tile_M * tile_N * (1 + n_extra_node)) * self.precision
+                    weight_size_per_lane = self.get_spad_size_per_lane(tile_K, tile_N)
+                    input_size_per_lane = self.get_spad_size_per_lane(tile_M, tile_K)
+                    output_size_per_lane = self.get_spad_size_per_lane(tile_M * (1 + n_extra_node), tile_N)
+                    used_spad_size_per_lane = (weight_size_per_lane + input_size_per_lane + output_size_per_lane) * self.precision
+                    if used_spad_size < max_spad_size and max_used_spad_size < used_spad_size and used_spad_size_per_lane < max_spad_per_lane and maximize_i_j <= tile_M * tile_N:
                         max_used_spad_size = used_spad_size
                         maximize_i_j = tile_M * tile_N
                         mapping = (tile_M, tile_N, tile_K)

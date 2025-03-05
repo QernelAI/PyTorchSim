@@ -108,11 +108,12 @@ class MLIRGemmTemplate(MLIRTemplate):
         Bias = None if len(self.input_nodes) == 2 else self.input_nodes[2]
 
         M, N, K = X.get_size()[0], W.get_size()[1], X.get_size()[1]
+        n_extra_node = len(epilogue_nodes) if epilogue_nodes is not None else 0
         if (M == 0) or (N == 0) or (K == 0):
             TILE_M, TILE_N, TILE_K = 0, 0, 0
             template = EMPTY_TEMPLATE
         else:
-            TILE_M, TILE_N, TILE_K = kernel.gemm_combination_mapping(M, N, K)
+            TILE_M, TILE_N, TILE_K = kernel.gemm_combination_mapping(M, N, K, n_extra_node)
             template = GEMM_TEMPLATE
         TILE_M = min(extension_config.CONFIG_FORCE_TILE_M, TILE_M)
         TILE_N = min(extension_config.CONFIG_FORCE_TILE_N, TILE_N)
