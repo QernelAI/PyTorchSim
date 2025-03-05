@@ -439,6 +439,8 @@ class BaseMLIRKernel(common.Kernel, BaseMLIRHardwareInfo):
         with self as kernel:
             for node in nodes:
                 node.run(vars, reduction_vars)
+        V.graph.removed_buffers |= self.removed_buffers
+        # V.graph.inplaced_to_remove |= self.inplaced_to_remove
         src_code = self.codegen_kernel(kernel_name=kernel_name)
         self.meta_kernel()
         return src_code

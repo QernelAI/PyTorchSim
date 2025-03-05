@@ -68,14 +68,9 @@ class MLIRScheduling(BaseScheduling):
             for write_buf in template_node.read_writes.writes:
                 has_depedency = has_depedency or (write_buf in act_node.read_writes.reads)
             return has_depedency
-        return False
-        # TODO. Support elementwise fusion
+
         # Check elementwise fusion
         if vars1 == vars2 and reduce1 == reduce2:
-            vertical_buf = (node1.read_writes.writes & node2.read_writes.reads) | (node2.read_writes.writes & node1.read_writes.reads)
-            for vbuf in vertical_buf:
-                # FIXME. Assume that all the users are fusioned.
-                V.graph.removed_buffers.add(vbuf.name)
             return True
         return False
 

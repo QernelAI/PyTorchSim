@@ -851,12 +851,12 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
             value = ops.to_dtype(value, mlir_dtype, var_info=self.var_info)
 
         line = f"{operation} %{value}, %{sram_var}[{sram_index_var}] : {tile_shape}{shape}"
-        self.cse.generate(self.stores, line, assignment = False)
+        self.stores.writeline(common.DeferredLine(name, line))
 
         # Generate DMA instruction
         code = self.get_dma_code("MVOUT", vlane_split_axis, vlane_stride, mlir_dtype, dram_var, index_var, sram_var, sram_index_var,
                                  f"{name}_tag", dram_shape, tile_shape, tile_stride)
-        self.cse.generate(self.stores, code, assignment = False)
+        self.stores.writeline(common.DeferredLine(name, code))
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
         argmax_or_argmin = reduction_type in {"argmax", "argmin"}
@@ -1012,14 +1012,14 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
             shape = f", {shape}" if self.buffer_types[name][1] > 1 else ""
 
         line = f"{operation} %{value}, %{sram_var}[{sram_index_var}] : {tile_shape}{shape}"
-        self.cse.generate(self.reductions_suffix, line, assignment = False)
+        self.reductions_suffix.writeline(common.DeferredLine(name, line))
 
         # MVOUT Encoding
 
         # Generate DMA instruction
         code = self.get_dma_code("MVOUT", vlane_split_axis, vlane_stride, mlir_dtype, dram_var, index_var, sram_var, sram_index_var,
                                  f"{name}_tag", dram_shape, tile_shape, tile_stride)
-        self.cse.generate(self.reductions_suffix, code, assignment = False)
+        self.reductions_suffix.writeline(common.DeferredLine(name, code))
 
     def codegen_global_init(self):
         return self.global_vars
