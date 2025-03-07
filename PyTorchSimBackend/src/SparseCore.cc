@@ -12,6 +12,8 @@ SparseCore::SparseCore(uint32_t id, SimulationConfig config) : Core(id, config) 
   percore_tiles.resize(nr_cores);
   stonneCores.resize(nr_cores);
   traceMode.resize(nr_cores);
+  percore_stat.resize(nr_cores);
+  percore_total_stat.resize(nr_cores);
   for (int i=0; i<nr_cores; i++) {
     SST_STONNE::sstStonne* core = new SST_STONNE::sstStonne(config.stonne_config_path);
     stonneCores.at(i) = core;
@@ -20,6 +22,8 @@ SparseCore::SparseCore(uint32_t id, SimulationConfig config) : Core(id, config) 
     traceCoreStatus.at(i) = 0;
     traceCoreCycle.at(i) = 0;
     percore_tiles.at(i) = std::vector<std::shared_ptr<Tile>>();
+    percore_stat.at(i).reset();
+    percore_total_stat.at(i).reset();
   }
 
   Config stonneConfig = stonneCores.at(0)->getStonneConfig();
@@ -70,7 +74,6 @@ void SparseCore::issue(std::shared_ptr<Tile> tile) {
   stonneCores.at(selected_core_idx)->init(1);
   traceNodeList.at(selected_core_idx).clear();
 
-  spdlog::info("[StonneCore {}][{}] issued new tile", _id, selected_core_idx);
   SST_STONNE::StonneOpDesc *opDesc = static_cast<SST_STONNE::StonneOpDesc*>(tile->get_custom_data());
   bool is_trace_mode = true;
   if (opDesc) {
@@ -81,6 +84,7 @@ void SparseCore::issue(std::shared_ptr<Tile> tile) {
   setTraceMode(selected_core_idx, is_trace_mode);
   percore_tiles.at(selected_core_idx).push_back(tile);
   coreBusy.at(selected_core_idx) = true;
+  spdlog::info("[StonneCore {}][{}] issued new tile (trace_mode: {})", _id, selected_core_idx, is_trace_mode);
 };
 
 bool SparseCore::can_issue(const std::shared_ptr<Tile>& op) {
@@ -104,8 +108,8 @@ void SparseCore::checkStatus(uint32_t subcore_id) {
       load_node.setAddress(traceLoadTraffic.at(subcore_id));
       traceNodeList.at(subcore_id).push_back(load_node);
     }
-    if ((compute_cycle - traceCoreCycle.at(subcore_id))/num_ms) {
-      TraceNode compute_node = TraceNode(traceNodeList.at(subcore_id).size()+2, "compute", TraceNode::StonneTraceCompute, (compute_cycle - traceCoreCycle.at(subcore_id))/num_ms);
+    if (_core_cycle - traceCoreCycle.at(subcore_id)) {//((compute_cycle - traceCoreCycle.at(subcore_id))/num_ms) {
+      TraceNode compute_node = TraceNode(traceNodeList.at(subcore_id).size()+2, "compute", TraceNode::StonneTraceCompute, _core_cycle - traceCoreCycle.at(subcore_id));
       traceNodeList.at(subcore_id).push_back(compute_node);
     }
     if (traceStoreTraffic.at(subcore_id).size()) {
@@ -115,7 +119,7 @@ void SparseCore::checkStatus(uint32_t subcore_id) {
     }
 
     traceCoreStatus.at(subcore_id) = new_status;
-    traceCoreCycle.at(subcore_id) = compute_cycle;
+    traceCoreCycle.at(subcore_id) = _core_cycle;
     traceLoadTraffic.at(subcore_id).clear();
     traceStoreTraffic.at(subcore_id).clear();
   }
@@ -188,9 +192,12 @@ void SparseCore::subCoreCycle(uint32_t subcore_id) {
 
     /* Check finished computation */
     auto& target_pipeline = get_compute_pipeline(0);
-    if (!target_pipeline.empty() && target_pipeline.front()->finish_cycle <= _core_cycle) {
-      finish_instruction(target_pipeline.front());
-      target_pipeline.pop();
+    if (!target_pipeline.empty()) {
+      if (target_pipeline.front()->finish_cycle <= _core_cycle) {
+        finish_instruction(target_pipeline.front());
+        target_pipeline.pop();
+      }
+      percore_stat.at(subcore_id).n_multiplications += num_ms;
     }
 
     /* Check finished dma operation */
@@ -220,7 +227,7 @@ void SparseCore::subCoreCycle(uint32_t subcore_id) {
         {
           auto acc_type = mem_access_type::GLOBAL_ACC_R;
           auto type = mf_type::READ_REQUEST;
-          spdlog::info("[StonneCore {}][{}][{}] {} ISSUED", _id, subcore_id, _core_cycle,
+          spdlog::trace("[StonneCore {}][{}][{}] {} ISSUED", _id, subcore_id, _core_cycle,
                         opcode_to_string(inst->get_opcode()));
           for (auto addr : inst->get_trace_address()) {
             inst->inc_waiting_request();
@@ -240,7 +247,7 @@ void SparseCore::subCoreCycle(uint32_t subcore_id) {
         {
           auto acc_type = mem_access_type::GLOBAL_ACC_W;
           auto type = mf_type::WRITE_REQUEST;
-          spdlog::info("[StonneCore {}][{}][{}] {} ISSUED", _id, subcore_id, _core_cycle,
+          spdlog::trace("[StonneCore {}][{}][{}] {} ISSUED", _id, subcore_id, _core_cycle,
                         opcode_to_string(inst->get_opcode()));
           for (auto addr : inst->get_trace_address()) {
             inst->inc_waiting_request();
@@ -264,7 +271,7 @@ void SparseCore::subCoreCycle(uint32_t subcore_id) {
             inst->finish_cycle = _core_cycle + inst->get_compute_cycle();
           else
             inst->finish_cycle = target_pipeline.back()->finish_cycle + inst->get_compute_cycle();
-          spdlog::info("[Core {}][{}][{}] {} ISSUED, finsh at {}", _id, subcore_id, _core_cycle,
+          spdlog::trace("[Core {}][{}][{}] {} ISSUED, finsh at {}", _id, subcore_id, _core_cycle,
                           opcode_to_string(inst->get_opcode()), inst->finish_cycle);
           target_pipeline.push(inst);
           issued = true;
@@ -293,9 +300,9 @@ void SparseCore::cycle() {
     for (auto& req_pair : request_merge_table) {
       _request_queue.push(req_pair.second);
       request_merge_table.erase(req_pair.first);
-
       spdlog::debug("[SparseCore][{}][{}] Address: {:#x}, Access Type: {}, Request Type: {}, DRAM Req Size: {}, nr_request: {}", \
-              _core_cycle, _id, req_pair.second->get_addr(), int(req_pair.second->get_access_type()), int(req_pair.second->get_type()), _config.dram_req_size, nr_request);
+              _core_cycle, _id, req_pair.second->get_addr(), int(req_pair.second->get_access_type()), int(req_pair.second->get_type()),
+              _config.dram_req_size, nr_request);
       nr_request++;
       break;
     }
@@ -306,15 +313,13 @@ void SparseCore::cycle() {
   while (!_response_queue.empty()) {
     mem_fetch* resp_wrapper = _response_queue.front();
     auto* callbacks = static_cast<std::vector<std::function<void()>>*>(resp_wrapper->get_custom_data());
-    if (callbacks->empty()) {
-      delete callbacks;
-      delete resp_wrapper;
-      _response_queue.pop();
-    } else {
-      (*callbacks).at(0)();
-      callbacks->erase(callbacks->begin());
+    for (int i=0; i<callbacks->size(); i++) {
+      (*callbacks).at(i)();
     }
-    if (nr_request++ > w_port_nr)
+    delete callbacks;
+    delete resp_wrapper;
+    _response_queue.pop();
+    if (++nr_request > w_port_nr)
       break;
   }
 
@@ -335,24 +340,39 @@ void SparseCore::push_memory_response(mem_fetch* response) {
   _response_queue.push(response);
 }
 
-void SparseCore::print_stats() {
-  //for (auto stonneCore : stonneCores)
-  //  stonneCore->printStats();
-  MSwitchStats accum;
+void SparseCore::print_current_stats() {
   spdlog::info("========= Sparse Core stat =========");
-  spdlog::info("Stonne Core [{}] : Total cycle {}", _id, _core_cycle);
   for (size_t i = 0; i < stonneCores.size(); ++i) {
-    MSwitchStats stats = stonneCores.at(i)->getMSStats();
-    accum += stats;
-    spdlog::info("Stonne Core [{}][{}] : n_multiplications: {} ",
-                 _id, i, stats.n_multiplications);
+    if (!isTraceMode(i)) {
+      MSwitchStats stats = stonneCores.at(i)->getMSStats();
+      stats -= percore_total_stat.at(i);
+      percore_stat.at(i) = stats;
+      percore_total_stat.at(i) = stonneCores.at(i)->getMSStats();
+    } else {
+      percore_total_stat.at(i) += percore_stat.at(i);
+    }
+    cycle_type nr_mul = percore_stat.at(i).n_multiplications;
+    percore_stat.at(i).reset();
+    spdlog::info("Stonne Core [{}][{}] : nr_multiplications: {}", _id, i, nr_mul);
   }
-  spdlog::info("Stonne Core [{}] : total_multiplications: {} ",
-                 _id, accum.n_multiplications);
+  spdlog::info("Stonne Core [{}] : Total cycle {}", _id, _core_cycle);
 }
 
-void SparseCore::print_current_stats() {
-  print_stats();
+void SparseCore::print_stats() {
+  spdlog::info("========= Sparse Core stat =========");
+  for (size_t i = 0; i < stonneCores.size(); ++i) {
+    if (!isTraceMode(i)) {
+      MSwitchStats stats = stonneCores.at(i)->getMSStats();
+      stats -= percore_total_stat.at(i);
+      percore_stat.at(i) = stats;
+      percore_total_stat.at(i) = stats;
+    } else {
+      percore_total_stat.at(i) += percore_stat.at(i);
+    }
+    cycle_type nr_mul = percore_total_stat.at(i).n_multiplications;
+    spdlog::info("Stonne Core [{}][{}] : nr_multiplications: {}", _id, i, nr_mul);
+  }
+  spdlog::info("Stonne Core [{}] : Total cycle {}", _id, _core_cycle);
 }
 
 std::shared_ptr<Tile> SparseCore::pop_finished_tile() {
@@ -373,10 +393,10 @@ void SparseCore::finish_instruction(std::shared_ptr<Instruction>& inst) {
   inst->finish_instruction();
   static_cast<Tile*>(inst->get_owner())->inc_finished_inst();
   if (inst->get_opcode() == Opcode::COMP) {
-    spdlog::trace("[StonneCore {}][{}] {} FINISHED",
+    spdlog::info("[StonneCore {}][{}] {} FINISHED",
       _id, _core_cycle, opcode_to_string(inst->get_opcode()));
   } else if (inst->get_opcode() == Opcode::MOVIN || inst->get_opcode() == Opcode::MOVOUT) {
-    spdlog::trace("[StonneCore {}][{}] {} FINISHED, free_sram_size: {}", _id, _core_cycle,
+    spdlog::info("[StonneCore {}][{}] {} FINISHED, free_sram_size: {}", _id, _core_cycle,
       opcode_to_string(inst->get_opcode()), inst->get_free_sram_size());
   }
 }
@@ -416,7 +436,7 @@ void SparseCore::dumpTrace(int stonne_core_id, const std::string& path) {
           << "    \"children\": [2],\n"
           << "    \"loop_index\": \"loop_arg000\",\n"
           << "    \"loop_start\": 0,\n"
-          << "    \"loop_end\": 8,\n"
+          << "    \"loop_end\": 1,\n"
           << "    \"loop_step\": 1,\n"
           << "    \"loop_type\": \"outer_loop\""
           << "  },\n";

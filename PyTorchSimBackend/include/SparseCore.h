@@ -77,11 +77,13 @@ private:
   std::vector<std::vector<TraceNode>> traceNodeList;
   std::vector<std::set<uint64_t>> traceLoadTraffic; // To trace dma traffic
   std::vector<std::set<uint64_t>> traceStoreTraffic; // To trace dma traffic
-  std::vector<SST_STONNE::sstStonne*> stonneCores;
   std::vector<std::vector<std::shared_ptr<Tile>>> percore_tiles;
+  std::vector<SST_STONNE::sstStonne*> stonneCores;
   /* Interconnect queue */
   std::queue<mem_fetch*> _request_queue;
   std::queue<mem_fetch*> _response_queue;
   std::map<std::tuple<uint64_t, mem_access_type, mf_type>, mem_fetch*> request_merge_table;
+  std::vector<MSwitchStats> percore_stat;
+  std::vector<MSwitchStats> percore_total_stat;
 };
 

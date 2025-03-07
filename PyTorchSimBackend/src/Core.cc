@@ -422,20 +422,18 @@ void Core::print_stats() {
 void Core::print_current_stats() {
   std::vector<float> sa_utilization;
   for (int i=0; i<_num_systolic_array_per_core; i++)
-    sa_utilization.push_back(static_cast<float>(_stat_sa_compute_cycle.at(i) * 100) / _core_cycle);
+    sa_utilization.push_back(static_cast<float>(_stat_sa_compute_cycle.at(i) * 100) / _config.core_print_interval);
   auto level = spdlog::level::info;
   if(_id != 0)
     level = spdlog::level::debug;
 
   spdlog::info("========= Core stat =========");
   for (int i=0; i<_num_systolic_array_per_core; i++)
-    sa_utilization.push_back(static_cast<float>(_stat_sa_compute_cycle.at(i) * 100) / _core_cycle);
-  for (int i=0; i<_num_systolic_array_per_core; i++)
     spdlog::info("Core [{}] : Systolic array [{}] Utilization(%) {:.2f}, active cycle {}, idle cycle {}", _id, i, sa_utilization.at(i),
       _stat_sa_compute_cycle.at(i), _stat_sa_compute_idle_cycle.at(i));
   spdlog::info("Core [{}] : TMA active cycle {} TMA idle cycle {}", _id, _stat_tma_cycle, _stat_tma_idle_cycle);
   spdlog::info("Core [{}] : Vector Unit Utilization(%) {:.2f}, active cycle {}, idle_cycle {}", _id,
-    static_cast<float>(_stat_vu_compute_cycle * 100) / _core_cycle, _stat_vu_compute_cycle, _stat_vu_compute_idle_cycle);
+    static_cast<float>(_stat_vu_compute_cycle * 100) / _config.core_print_interval, _stat_vu_compute_cycle, _stat_vu_compute_idle_cycle);
   spdlog::info("Core [{}] : Total cycle {}", _id, _core_cycle);
   update_stats();
 }

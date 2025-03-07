@@ -54,7 +54,7 @@ class Tile {
   size_t _nr_finished_insts = 0;
   std::deque<std::shared_ptr<Instruction>> _instructions;
   std::vector<std::shared_ptr<Tile>> _child_tiles;
-  void *_custom_data;
+  void *_custom_data=NULL;
   bool _stonne_tile=false;
 };
 
