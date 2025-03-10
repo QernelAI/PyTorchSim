@@ -145,7 +145,6 @@ def custom_maxpool(
     return mlir_template.generate().output_node(), x # FIXME: x is dummy IRNode, indices are not used in our case
 
 def sparse_addmm(*args, **kwargs):
-    print("Custom sparse addmm")
     _, sp_mat1, sp_mat2 = args
     mat1_layout = sp_mat1.layout
     out_range = args[0].data.data.data.ranges
