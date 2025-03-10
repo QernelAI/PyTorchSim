@@ -83,7 +83,7 @@ class LLVMKernelCallerCodeGen():
         self.writeline(self.newline)
 
     def generate_load_dump_fn(self):
-        self.writeline(f'{self.newline}int load_arg(void *arg, int size, const char *path) {self.open_bracket}')
+        self.writeline(f'{self.newline}int load_arg(void *arg, size_t size, const char *path) {self.open_bracket}')
         with self.code.indent():
             self.writeline(f'int fd = open(path, 0x00000000){self.ending}')
             self.writeline(f'if (fd == -1) {self.open_bracket}')
@@ -99,7 +99,7 @@ class LLVMKernelCallerCodeGen():
             self.writeline(f'return 0{self.ending}')
         self.writeline(self.closed_bracket)
 
-        self.writeline(f'{self.newline}int dump_arg(void *arg, int size, const char *path) {self.open_bracket}')
+        self.writeline(f'{self.newline}int dump_arg(void *arg, size_t size, const char *path) {self.open_bracket}')
         with self.code.indent():
             self.writeline(f'int fd = open(path, 0x00000001 | 0x00000040, 0644){self.ending}')
             self.writeline(f'if (fd == -1) {self.open_bracket}')

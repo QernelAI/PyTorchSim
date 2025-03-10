@@ -4,7 +4,7 @@ from PyTorchSimFrontend import extension_config
 from PyTorchSimFrontend.mlir.mlir_codegen_backend import MLIRKernel
 
 from torch._inductor import config
-from torch._inductor.scheduler import BaseScheduling, FusedSchedulerNode
+from torch._inductor.scheduler import BaseScheduling, FusedSchedulerNode, SchedulerNode
 from torch._inductor.utils import IndentedBuffer
 from torch._inductor.virtualized import V
 
