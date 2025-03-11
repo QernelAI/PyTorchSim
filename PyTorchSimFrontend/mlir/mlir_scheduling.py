@@ -155,8 +155,6 @@ class MLIRScheduling(BaseScheduling):
                 if isinstance(partial_code, str)
                 else partial_code.finalize()
             )
-            src_code = kernel.add_extra_global_vars(src_code)
-            src_code = kernel.add_extra_local_vars(src_code)
         return src_code
 
     def codegen_template(self, template_node, epilogue_nodes):

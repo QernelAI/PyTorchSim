@@ -16,6 +16,7 @@ BMM_TEMPLATE = r"""
 memref.global @X_spad : memref<{{ TILE_M }}x{{ TILE_K }}xf32, 1>
 memref.global @W_spad : memref<{{ TILE_K }}x{{ TILE_N }}xf32, 1>
 memref.global @Y_spad : memref<{{ TILE_M }}x{{ TILE_N }}xf32, 1>
+{{kernel.def_global_vars()}}
 
 func.func @{{ KERNEL_NAME }}{{kernel.def_kernel(inputs=[X, W, Bias], outputs=[Y], names_str="X, W, Bias, Y", input_reorder=input_reorder)}} {
   %c_mvin = arith.constant 2 : index
@@ -33,7 +34,7 @@ func.func @{{ KERNEL_NAME }}{{kernel.def_kernel(inputs=[X, W, Bias], outputs=[Y]
   %tag2 = memref.alloc() : memref<1xi32>{% if not Bias %}
   %v0 = arith.constant dense<0.0> : vector<{{ kernel.get_spad_size_per_lane(TILE_M, TILE_N) }}xf32>{% endif %}
   %c0 = arith.constant 0 : index
-  {{- kernel.def_local_vars() }}
+{{ kernel.def_local_vars() }}
   affine.for %b=0 to {{ B }} {
     affine.for %t_m = 0 to {{ M }} step {{ TILE_M }} {
       affine.for %t_n = 0 to {{ N }} step {{ TILE_N }} {
@@ -74,10 +75,13 @@ class MLIRBMMTemplate(MLIRTemplate):
         if isinstance(node, ReinterpretView):
             # if node.layout.stride != node.data.layout.stride:
             if node.layout.stride[-1] != node.data.layout.stride[-1] or node.layout.stride[-2] != node.data.layout.stride[-2]:
+                squeezed_layout = [s for s in node.layout.stride if s]
                 if node.layout.stride[-2] == node.data.layout.stride[-1] and node.layout.stride[-1] == node.data.layout.stride[-2]:
                     return True
+                elif squeezed_layout == node.data.layout.stride[len(node.data.layout.stride)-len(squeezed_layout):]:
+                    return False
                 else:
-                  raise NotImplementedError("If the stride is not equal to the original stride, it should have been transposed.")
+                    raise NotImplementedError("If the stride is not equal to the original stride, it should have been transposed.")
         return False
 
     def render(self,

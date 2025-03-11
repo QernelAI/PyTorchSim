@@ -4,6 +4,7 @@ import textwrap
 import re
 import math
 import sympy
+from collections import OrderedDict
 
 from typing import List, Optional
 from unittest.mock import patch
@@ -43,7 +44,7 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
         self.outer_func_name = outer_func_name
         self.outer_func_render = outer_func_render
         self.kernel_arg_attributes = kernel_arg_attributes
-        self.render_hooks = dict()
+        self.render_hooks = OrderedDict()
         self.buffer_names = dict()
         self.render_options = dict()
         self.tile_size = []
@@ -355,6 +356,7 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
 
         assert "<STORE_OUTPUT>" not in self.render_hooks
         self.render_hooks["<STORE_OUTPUT>"] = hook
+        self.render_hooks.move_to_end("<STORE_OUTPUT>", last=False) # Force order to be triggered first
         return "<STORE_OUTPUT>"
 
     def def_function(self):
@@ -365,30 +367,28 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
             return None, None
 
     def def_global_vars(self):
-        return "<GLOBAL_VARS>"
-
-    def replace_global_vars(self):
-        return textwrap.indent(self.global_vars.getvalue(), "").strip()
-
-    def add_extra_global_vars(self, code):
         key = "<GLOBAL_VARS>"
-        return code.replace(key, self.replace_global_vars())
+        def hook():
+            return textwrap.indent(self.global_vars.getvalue(), "").strip()
+
+        assert key not in self.render_hooks
+        self.render_hooks[key] = hook
+        return key
 
     def def_local_vars(self):
-        return "<LOCAL_VARS>"
-
-    def replace_local_vars(self):
-        code = IndentedBuffer()
-        code.tabwidth = 2
-        code.splice("\n")
-        with code.indent():
-            code.splice(self.const_buffer)
-            code.splice(self.alloc_buffer)
-        return code.getvalue()
-
-    def add_extra_local_vars(self, code):
         key = "<LOCAL_VARS>"
-        return code.replace(key, self.replace_local_vars())
+        def hook():
+            code = IndentedBuffer()
+            code.tabwidth = 2
+            code.splice("\n")
+            with code.indent():
+                code.splice(self.const_buffer)
+                code.splice(self.alloc_buffer)
+            return code.getvalue()
+
+        assert key not in self.render_hooks
+        self.render_hooks[key] = hook
+        return key
 
     def render(self, template, kwargs):
         # self.render_hooks = {}

@@ -52,6 +52,7 @@ CONV_TEMPLATE = r"""
 memref.global @X_spad : memref<{{ TILE_I_H }}x{{ TILE_I_W }}x{{ TILE_M }}x{{ TILE_K }}xf32, 1>
 memref.global @W_spad : memref<{{ TILE_K_H }}x{{ TILE_K_W }}x{{ TILE_K }}x{{ TILE_N }}xf32, 1>
 memref.global @Y_spad : memref<{{ TILE_O_H }}x{{ TILE_O_W }}x{{ TILE_M }}x{{ TILE_N }}xf32, 1>
+{{kernel.def_global_vars()}}
 
 func.func @{{ KERNEL_NAME }}({{ KERNEL_DEF }}) {
   %c_mvin = arith.constant 2 : index
@@ -73,7 +74,7 @@ func.func @{{ KERNEL_NAME }}({{ KERNEL_DEF }}) {
   %c0 = arith.constant 0 : index
   %c1 = arith.constant 1 : index
   %c2 = arith.constant 2 : index
-
+{{ kernel.def_local_vars() }}
   affine.for %o_h = 0 to {{ O_H }} step {{ TILE_O_H }} {
     affine.for %o_w = 0 to {{ O_W }} step {{ TILE_O_W }} {
       affine.for %tile_m = 0 to {{ BATCH }} step {{ TILE_M }} {

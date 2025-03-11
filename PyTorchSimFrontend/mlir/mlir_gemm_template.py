@@ -35,7 +35,7 @@ func.func @{{ KERNEL_NAME }}{{kernel.def_kernel(inputs=[X, W, Bias], outputs=[Y]
   %tag2 = memref.alloc() : memref<1xi32>{% if not Bias %}
   %v0 = arith.constant dense<0.0> : vector<{{ kernel.get_spad_size_per_lane(TILE_M, TILE_N) }}xf32>{% endif %}
   %c0 = arith.constant 0 : index
-  {{- kernel.def_local_vars() }}
+{{ kernel.def_local_vars() }}
 
   affine.for %t_m = 0 to {{ M }} step {{ TILE_M }} {
     affine.for %t_n = 0 to {{ N }} step {{ TILE_N }} {
