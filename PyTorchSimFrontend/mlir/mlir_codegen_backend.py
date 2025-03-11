@@ -253,8 +253,6 @@ class ExtensionOverrides(common.OpOverrides):
         # if value represented by e notation, convert to float (ex 1e-3 -> 1.0e-3)
         if "e" in str(value):
             value = float(value)
-        if value == float("-inf"):
-            value = "0xFF800000"
         elif src_type[0] == "f":
             value = format(value, ".20f")
         elif src_type[0] == "i":
@@ -538,20 +536,42 @@ class ExtensionOverrides(common.OpOverrides):
 
 
     @staticmethod
-    def logical_and(operand, *args, var_info=None, **kwargs):
-        raise NotImplementedError("logical_and")
+    def logical_and(operand1, operand2, *args, var_info=None, **kwargs):
+        op_type = var_info[operand1]
+        # Type check & auto cast
+        if op_type[1] != "i1":
+            raise NotImplementedError("Logical operation with not bool data type")
+        return ExtensionOverrides.and_(operand1, operand2, *args, var_info=var_info, **kwargs)
 
     @staticmethod
     def logical_not(operand, *args, var_info=None, **kwargs):
-        raise NotImplementedError("logical_not")
+        op_type = var_info[operand]
+        # Type check & auto cast
+        if op_type[1] != "i1":
+            raise NotImplementedError("Logical operation with not bool data type")
+
+        ret_type = op_type[1]
+        tile_size = op_type[0]
+        shape = f"vector<{tile_size}x{ret_type}>" if tile_size > 1 else ret_type
+        const_one = ops.constant(0, "i1")
+        const_one = ops.broadcast(const_one, operand, var_info=var_info)
+        return f'arith.xori %{operand}, %{const_one} : {shape}', [tile_size, ret_type]
 
     @staticmethod
-    def logical_or(operand, *args, var_info=None, **kwargs):
-        raise NotImplementedError("logical_not")
+    def logical_or(operand1, operand2, *args, var_info=None, **kwargs):
+        op_type = var_info[operand1]
+        # Type check & auto cast
+        if op_type[1] != "i1":
+            raise NotImplementedError("Logical operation with not bool data type")
+        return ExtensionOverrides.or_(operand1, operand2, *args, var_info=var_info, **kwargs)
 
     @staticmethod
-    def logical_xor(operand, *args, var_info=None, **kwargs):
-        raise NotImplementedError("logical_not")
+    def logical_xor(operand1, operand2, *args, var_info=None, **kwargs):
+        op_type = var_info[operand1]
+        # Type check & auto cast
+        if op_type[1] != "i1":
+            raise NotImplementedError("Logical operation with not bool data type")
+        return ExtensionOverrides.xor(operand1, operand2, *args, var_info=var_info, **kwargs)
 
     @staticmethod
     def relu(operand, *args, var_info=None, **kwargs):
@@ -939,6 +959,12 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         return ret_var
 
     def store_reduction(self, name, index, value):
+        # Note: Change cse temporaily
+        # Store reduction can't share cached value stored in cse,
+        # since it is not innermost loop body.
+        tmp_cse = self.cse
+        self.cse = self.reduction_cse
+
         dram_var = self.kernel_group.args.output(name)
         dtype = V.graph.get_dtype(name)
         mlir_dtype = mlir_common.DTYPE_TO_MLIR[dtype]
@@ -1002,6 +1028,9 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         code = self.get_dma_code("MVOUT", vlane_split_axis, vlane_stride, mlir_dtype, dram_var, index_var, sram_var, sram_index_var,
                                  f"{name}_tag", dram_shape, tile_shape, tile_stride)
         self.reductions_suffix.writeline(common.DeferredLine(name, code))
+
+        # Restore origin cse
+        self.cse = tmp_cse
 
     def index_expr(self, index, dtype):
         # Todo. To support index_expr, we have to custom instructions

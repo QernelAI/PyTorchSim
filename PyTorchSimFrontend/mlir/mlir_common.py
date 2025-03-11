@@ -60,6 +60,17 @@ DTYPE_LOWP_FP = [
     torch.float16,
 ]
 
+MLIR_INF = {
+    "inf" : {
+        "f32" : 0x7F800000,
+        "f64" : 0x7FF0000000000000
+    },
+    "-inf" : {
+        "f32" : 0xFF800000,
+        "f64" : 0xFFF0000000000000
+    }
+}
+
 class ParallelLoopBuffer(IndentedBuffer):
     def indent(self, offset=1, outer_loop=True):
         @contextlib.contextmanager

@@ -147,6 +147,8 @@ class MLIRScheduling(BaseScheduling):
                 tile_desc = kernel.compute_tile_size(epilogue_nodes, vars, reduction_vars)
                 kernel.kernel_group.set_tile_info(tile_desc)
                 kernel.adjust_tile_size()
+            # Flush created varaibles, since template fusion doen't share variable
+            kernel.cse.cache.clear()
             for node in epilogue_nodes:
                 node.codegen((vars, reduction_vars))
         with V.set_kernel_handler(kernel):
