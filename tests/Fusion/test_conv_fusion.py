@@ -63,4 +63,12 @@ if __name__ == "__main__":
     from Scheduler.scheduler import ExecutionEngine
     module = ExecutionEngine.setup_device()
     device = module.custom_device()
-    test_conv_residual(device, batch_size=1, in_channels=8, out_channels=32, input_size=32, kernel_size=3, stride=1, padding=1)
+
+    # Vanila test
+    # test_conv_residual(device, batch_size=3, in_channels=64, out_channels=64, input_size=28, kernel_size=3, stride=1, padding=1)
+
+    # Multi-tile test
+    # test_conv_residual(device, batch_size=1, in_channels=3, out_channels=32, input_size=32, kernel_size=3, stride=1, padding=1)
+
+    # Single batch test
+    test_conv_residual(device, batch_size=1, in_channels=64, out_channels=64, input_size=28, kernel_size=3, stride=1, padding=1)

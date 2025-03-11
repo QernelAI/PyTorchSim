@@ -593,6 +593,7 @@ class MLIRConvTemplate(MLIRTemplate):
         X, W = self.input_nodes[0], self.input_nodes[1]
         Y = self.output_node
         Bias = None if len(self.input_nodes) == 2 else self.input_nodes[2]
+        n_extra_node = len(epilogue_nodes) if epilogue_nodes is not None else 0
 
         BATCH = X.layout.size[0]
         I_C = X.layout.size[1]
@@ -602,7 +603,7 @@ class MLIRConvTemplate(MLIRTemplate):
         O_H = Y.layout.size[2] if template_buffer_node is None else template_buffer_node.layout.size[2]
         O_W = Y.layout.size[3] if template_buffer_node is None else template_buffer_node.layout.size[3]
 
-        TILE_K_H, TILE_K_W, TILE_O_H, TILE_O_W, TILE_M, TILE_N, TILE_K = kernel.conv_combination_mapping(BATCH, O_C, I_C, K_H, K_W, O_H, O_W, self.stride, self.dilation)
+        TILE_K_H, TILE_K_W, TILE_O_H, TILE_O_W, TILE_M, TILE_N, TILE_K = kernel.conv_combination_mapping(BATCH, O_C, I_C, K_H, K_W, O_H, O_W, self.stride, self.dilation, n_extra_node)
         SUB_TILE_M = TILE_M if TILE_M < kernel.vector_lane else kernel.vector_lane
         SUB_TILE_N = TILE_N if TILE_N < kernel.vector_lane else kernel.vector_lane
         TILE_I_H = 1 + (TILE_O_H - 1) * self.stride[0] + (TILE_K_H - 1) * self.dilation[0]
@@ -618,7 +619,7 @@ class MLIRConvTemplate(MLIRTemplate):
         TOG_latency = BATCH if TILE_M > BATCH else TILE_M
         if self.is_single_batch(BATCH) and self.stride[0] != 1:
           conv_template = SINGLE_BATCH_CONV_STRIDE_TEMPLATE
-          TILE_K_H, TILE_K_W, TILE_O_H, TILE_O_W, TILE_M, TILE_N, TILE_K = kernel.conv_single_batch_mapping(BATCH, O_C, I_C, K_H, K_W, O_H, O_W, self.stride, self.dilation) # TODO: implement K_W
+          TILE_K_H, TILE_K_W, TILE_O_H, TILE_O_W, TILE_M, TILE_N, TILE_K = kernel.conv_single_batch_mapping(BATCH, O_C, I_C, K_H, K_W, O_H, O_W, self.stride, self.dilation, n_extra_node) # TODO: implement K_W
           TILE_I_H = 1 + (TILE_O_H - 1) * self.stride[0] + (TILE_K_H - 1) * self.dilation[0]
           x_spad_size_per_lane = kernel.get_spad_size_per_lane(TILE_K_W * TILE_I_H * TILE_M, TILE_K)
           y_spad_size_per_lane = kernel.get_spad_size_per_lane(TILE_O_H * TILE_M, TILE_N)
@@ -629,7 +630,7 @@ class MLIRConvTemplate(MLIRTemplate):
           TOG_latency = O_W if TILE_M > O_W else TILE_M
         elif self.is_multi_tile(I_C):
           conv_template = MULTI_TILE_CONV_TEMPLATE
-          TILE_K_H, TILE_K_W, TILE_O_H, TILE_O_W, TILE_M, TILE_N, TILE_K = kernel.conv_multi_tile_mapping(BATCH, O_C, I_C, K_H, K_W, O_H, O_W, self.stride, self.dilation)
+          TILE_K_H, TILE_K_W, TILE_O_H, TILE_O_W, TILE_M, TILE_N, TILE_K = kernel.conv_multi_tile_mapping(BATCH, O_C, I_C, K_H, K_W, O_H, O_W, self.stride, self.dilation, n_extra_node)
           TILE_I_W = 1 + (TILE_O_W - 1) * self.stride[1]
           TILE_I_H = 1 + (TILE_O_H - 1) * self.stride[0] + (TILE_K_H - 1) * self.dilation[0]
           x_spad_size_per_lane = kernel.get_spad_size_per_lane(TILE_I_W * TILE_I_H * TILE_M, TILE_K)
@@ -640,10 +641,9 @@ class MLIRConvTemplate(MLIRTemplate):
           y_spad_size = TILE_O_H * TILE_O_W * TILE_M * TILE_N
         elif self.is_single_batch(BATCH) and self.stride[0] == 1:
           conv_template = SINGLE_BATCH_CONV_TEMPLATE
-          TILE_K_H, TILE_K_W, TILE_O_H, TILE_O_W, TILE_M, TILE_N, TILE_K = kernel.conv_single_batch_mapping(BATCH, O_C, I_C, K_H, 1, O_H, O_W, self.stride, self.dilation) # TODO: implement K_W
-          TILE_N = 32
-          TILE_K = 32
-          TILE_O_H = 8
+          TILE_K_H, TILE_K_W, TILE_O_H, TILE_O_W, TILE_M, TILE_N, TILE_K = kernel.conv_single_batch_mapping(BATCH, O_C, I_C, K_H, 1, O_H, O_W, self.stride, self.dilation, n_extra_node) # TODO: implement K_W
+          if TILE_O_W > O_W:  # FIXME: Temporal solution for single batch fusion
+            TILE_O_W = O_W
           TILE_I_H = 1 + (TILE_O_H - 1) * self.stride[0] + (TILE_K_H - 1) * self.dilation[0]
           TILE_I_W = 1 + (TILE_O_W - 1) * self.stride[1] + (TILE_K_W - 1) * self.dilation[1]
           SUB_TILE_M = TILE_I_W if TILE_I_W < kernel.vector_lane else kernel.vector_lane

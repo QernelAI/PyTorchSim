@@ -154,14 +154,14 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
                         mapping = (tile_M, tile_N, tile_K)
         return mapping
 
-    def conv_combination_mapping(self, M, N, K, K_H, K_W, O_H, O_W, stride, dilation):
+    def conv_combination_mapping(self, M, N, K, K_H, K_W, O_H, O_W, stride, dilation, n_extra_node=0):
         spad_size_per_lane = self.spad_info["spad_size"]
         spad_size = spad_size_per_lane * self.vector_lane
         max_spad_size = spad_size // 2 # double buffer
         max_spad_per_lane = spad_size_per_lane // 2 # double buffer
 
         max_used_spad_size = 0
-        M, N, K = self.gemm_combination_mapping(M, N, K)
+        M, N, K = self.gemm_combination_mapping(M, N, K, n_extra_node)
         max_k_h_w = 1 # maximize kernel size
         for o_h in sympy.divisors(O_H):
             for o_w in sympy.divisors(O_W):
@@ -172,10 +172,10 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
                         weight_size = k_w * k_h * K * N
                         input_size = i_w * i_h * M * K
                         output_size = o_w * o_h * M * N
-                        used_spad_size = (weight_size + input_size + output_size) * self.precision
+                        used_spad_size = (weight_size + input_size + output_size * (1 + n_extra_node)) * self.precision
                         weight_size_per_lane = self.get_spad_size_per_lane(k_w * k_h * K, N)
                         input_size_per_lane = self.get_spad_size_per_lane(i_w * i_h * M, K)
-                        output_size_per_lane = self.get_spad_size_per_lane(o_w * o_h * M, N)
+                        output_size_per_lane = self.get_spad_size_per_lane(o_w * o_h * M  * (1 + n_extra_node), N)
                         used_spad_size_per_lane = (weight_size_per_lane + input_size_per_lane + output_size_per_lane) * self.precision
                         if used_spad_size < max_spad_size and max_used_spad_size < used_spad_size and used_spad_size_per_lane < max_spad_per_lane and max_k_h_w <= k_h * k_w:
                             max_used_spad_size = used_spad_size
@@ -185,14 +185,14 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
             raise RuntimeError("Cannot find a valid mapping")
         return mapping
 
-    def conv_multi_tile_mapping(self, M, N, K, K_H, K_W, O_H, O_W, stride, dilation):
+    def conv_multi_tile_mapping(self, M, N, K, K_H, K_W, O_H, O_W, stride, dilation, n_extra_node=0):
         spad_size_per_lane = self.spad_info["spad_size"]
         spad_size = spad_size_per_lane * self.vector_lane
         max_spad_size = spad_size // 2
         max_spad_per_lane = spad_size_per_lane // 2
 
         max_used_spad_size = 0
-        M, N, K = self.gemm_combination_mapping(M, N, K * K_W)
+        M, N, K = self.gemm_combination_mapping(M, N, K * K_W, n_extra_node)
         max_k_h_w = K_W
         for o_h in sympy.divisors(O_H):
             for o_w in sympy.divisors(O_W):
@@ -202,10 +202,10 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
                     weight_size = 1 * k_h * K * N
                     input_size = i_w * i_h * M * K
                     output_size = o_w * o_h * M * N
-                    used_spad_size = (weight_size + input_size + output_size) * self.precision
+                    used_spad_size = (weight_size + input_size + output_size * (1 + n_extra_node)) * self.precision
                     weight_size_per_lane = self.get_spad_size_per_lane(1 * k_h * K, N)
                     input_size_per_lane = self.get_spad_size_per_lane(i_w * i_h * M, K)
-                    output_size_per_lane = self.get_spad_size_per_lane(o_w * o_h * M, N)
+                    output_size_per_lane = self.get_spad_size_per_lane(o_w * o_h * M  * (1 + n_extra_node), N)
                     used_spad_size_per_lane = (weight_size_per_lane + input_size_per_lane + output_size_per_lane) * self.precision
                     if used_spad_size < max_spad_size and max_used_spad_size < used_spad_size and used_spad_size_per_lane < max_spad_per_lane and max_k_h_w <= k_h:
                         max_used_spad_size = used_spad_size
@@ -215,14 +215,14 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
             raise RuntimeError("Cannot find a valid mapping")
         return mapping
 
-    def conv_single_batch_mapping(self, M, N, K, K_H, K_W, O_H, O_W, stride, dilation):
+    def conv_single_batch_mapping(self, M, N, K, K_H, K_W, O_H, O_W, stride, dilation, n_extra_node=0):
         spad_size_per_lane = self.spad_info["spad_size"]
         spad_size = spad_size_per_lane * self.vector_lane
         max_spad_size = spad_size // 2
         max_spad_per_lane = spad_size_per_lane // 2
 
         max_used_spad_size = 0
-        M, N, K = self.gemm_combination_mapping(O_W, N, K)
+        M, N, K = self.gemm_combination_mapping(O_W, N, K, n_extra_node)
         max_k_h_w = 1
         for o_h in sympy.divisors(O_H):
             for k_h in sympy.divisors(K_H):
@@ -232,10 +232,10 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
                     weight_size = k_w * k_h * K * N
                     input_size = i_w * i_h * k_w * K
                     output_size = M * o_h * N
-                    used_spad_size = (weight_size + input_size + output_size) * self.precision
+                    used_spad_size = (weight_size + input_size + output_size * (1 + n_extra_node)) * self.precision
                     weight_size_per_lane = self.get_spad_size_per_lane(k_w * k_h * K, N)
                     input_size_per_lane = self.get_spad_size_per_lane(i_w * i_h * k_w, K)
-                    output_size_per_lane = self.get_spad_size_per_lane(M * o_h, N)
+                    output_size_per_lane = self.get_spad_size_per_lane(M * o_h  * (1 + n_extra_node), N)
                     used_spad_size_per_lane = (weight_size_per_lane + input_size_per_lane + output_size_per_lane) * self.precision
                     if used_spad_size < max_spad_size and max_used_spad_size < used_spad_size and used_spad_size_per_lane < max_spad_per_lane and max_k_h_w <= k_h * k_w:
                         max_used_spad_size = used_spad_size
