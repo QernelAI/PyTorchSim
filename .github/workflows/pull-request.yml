@@ -354,6 +354,19 @@ jobs:
             -e TORCHSIM_DUMP_PATH=/dump \
             ghcr.io/psal-postech/torchsim-ci:${GITHUB_SHA} python3 PyTorchSim/tests/MoE/test_moe.py
 
+  test_mistral:
+    name: Run test_mistral
+    runs-on: self-hosted
+    needs: build
+    steps:
+      - name: Run test_mistral.py
+        run: |
+          echo "Running test_mistral.py"
+          docker run --rm \
+            -v /tmp/torchsim-ci/${GITHUB_SHA}:/dump \
+            -e TORCHSIM_DUMP_PATH=/dump \
+            ghcr.io/psal-postech/torchsim-ci:${GITHUB_SHA} python3 PyTorchSim/tests/Mixtral_8x7B/test_attention.py
+
   test_cleanup:
     name: Clean test cases
     runs-on: self-hosted
@@ -362,7 +375,7 @@ jobs:
             test_transpose2D, test_view3D_2D, test_layernorm,
             test_mlp, test_resnet, test_transformer, test_transpose3D,
             test_sparsity, test_activation, test_pool, test_perceptron,
-            test_fusion, test_moe]
+            test_fusion, test_mistral, test_moe]
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
