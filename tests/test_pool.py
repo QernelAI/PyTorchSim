@@ -13,14 +13,11 @@ def test_result(name, out, cpu_out, rtol=1e-4, atol=1e-4):
         print("cpu out: ", cpu_out)
         exit(1)
 
-def test_maxpool(device):
+def test_maxpool(device, b=1, c=64, h=112, w=112):
     torch.manual_seed(0)
-    model = torch.nn.MaxPool2d(kernel_size=2, stride=2, padding=1).eval()
+    model = torch.nn.MaxPool2d(kernel_size=3, stride=2, padding=1).eval()
     model.to(device=device)
-    input = torch.randn(1, 2, 5, 2).to(device=device)
-    input = torch.arange(2*5*2, 0, -1, dtype=torch.float32)
-    input = input.reshape(1,2,5,2)
-    input = input.to(device=device)
+    input = torch.randn(b, c, h, w).to(device=device)
     x1 = input.to(device=device)
     x2 = input.to("cpu")
     opt_fn = torch.compile(dynamic=False)(model)
@@ -49,5 +46,5 @@ if __name__ == "__main__":
     from Scheduler.scheduler import ExecutionEngine
     module = ExecutionEngine.setup_device()
     device = module.custom_device()
-    test_maxpool(device)
+    test_maxpool(device, b=1, c=8, h=16, w=16)
     test_avgpool(device)

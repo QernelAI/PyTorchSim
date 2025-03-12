@@ -543,7 +543,7 @@ class BaseMLIRKernel(common.Kernel, BaseMLIRHardwareInfo):
                         buf_bounds = self.node_to_bounds.get(
                             fx_node, ValueRanges.unknown()
                         )
-                    code, ret_info = getattr(parent_handler, name)(*args, var_info=self.var_info, tile_desc=self.kernel_group.tile_desc)
+                    code, ret_info = getattr(parent_handler, name)(*args, var_info=self.var_info)
                     csevar = self.cse.generate(
                         self.compute,
                         code,
@@ -604,6 +604,10 @@ class BaseMLIRKernel(common.Kernel, BaseMLIRHardwareInfo):
             @staticmethod
             def reduction(dtype, src_dtype, reduction_type, value):
                 return self.reduction(dtype, src_dtype, reduction_type, value)
+
+            @staticmethod
+            def index_expr(index, dtype):
+                return self.index_expr(index, dtype)
 
             @staticmethod
             def bucketize(

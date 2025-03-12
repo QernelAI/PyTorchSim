@@ -50,6 +50,7 @@ def mlir_compile_command(filename, vectorlane_size, vlen=256):
             {extension_config.CONFIG_TORCHSIM_LLVM_PATH}/mlir-opt \
             -test-loop-padding \
             -dma-fine-grained='systolic-array-size={vectorlane_size}' \
+            -global-idx='vlen={vlen}' \
             -test-pytorchsim-to-vcix='systolic-array-size={vectorlane_size} vlen={vlen}' \
             -test-memref-to-gemmini="vectorlane={vectorlane_size}" \
             -convert-linalg-to-loops \
@@ -84,6 +85,7 @@ def mlir_gem5_compile_command(filename, sample_filename, tog_file, vectorlane_si
             {extension_config.CONFIG_TORCHSIM_LLVM_PATH}/mlir-opt \
             -test-loop-padding='timing_mode=1' \
             -dma-fine-grained='systolic-array-size={vectorlane_size}' \
+            -global-idx='vlen={vlen}' \
             -test-pytorchsim-to-vcix='systolic-array-size={vectorlane_size} vlen={vlen}' \
             -test-tile-operation-graph='vectorlane={vectorlane_size}' \
             -test-memref-to-gemmini="vectorlane={vectorlane_size} timing=1" \

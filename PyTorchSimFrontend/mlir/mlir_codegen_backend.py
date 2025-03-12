@@ -252,9 +252,11 @@ class ExtensionOverrides(common.OpOverrides):
         # if value represented by e notation, convert to float (ex 1e-3 -> 1.0e-3)
         if "e" in str(value):
             value = float(value)
-        if src_type[0] == "f":
+        if value == float("-inf"):
+            value = "0xFF800000"
+        elif src_type[0] == "f":
             value = format(value, ".20f")
-        if src_type[0] == "i":
+        elif src_type[0] == "i":
             value = int(value)
         return f'arith.constant {value} : {src_type}', [1, src_type]
 
@@ -585,63 +587,39 @@ class ExtensionOverrides(common.OpOverrides):
     @staticmethod
     def masked(mask, body, other, *args, var_info=None, tile_size=16, dtype="f32", ninf_declared=False, **kwargs):
         result = body()
-        val = ops.constant(0.0, "f32", *args, **kwargs)
+        val = ops.constant(other, dtype, *args, **kwargs)
         result = ops.where(mask, result, val)
         return result, var_info[result]
 
     @staticmethod
-    def _index_expr(tile_size, buffer, renamed_expression, vec_size, *args, var_info=None, **kwargs):
-        strides = [1] * len(tile_size)
-        for i in range(len(tile_size) - 2, -1, -1):
-            strides[i] = strides[i + 1] * tile_size[i + 1]
-
-        linear_expression = []
-        for i, stride in enumerate(strides):
-            linear_expression.append(f"d{i}*{stride}")
+    def _index_expr(tile_size, buffer, renamed_expression, index, *args, var_info=None, **kwargs):
+        str_tile_size = [str(dim) for dim in tile_size]
+        shape = "x".join(str_tile_size)
 
         dim = ["%d"+str(i) for i in range(len(tile_size))]
         sym_dim = ["d"+str(i) for i in range(len(tile_size))]
         start_dim = [str(0) for i in tile_size]
         end_dim = [str(i) for i in tile_size]
+        indices = [str(i) for i in index.free_symbols]
 
         affine_map_str = "(" + ", ".join(sym_dim) + ") -> ("
         affine_map_str += sympy.printing.ccode(renamed_expression) + ")"
+        affine_offset_map = "(d0, d1) -> (d0 + d1)"
+        affine_offset_var = ""
+        offset_vars = dim.copy()
+        for idx in indices:
+            i = int(idx[5:])
+            affine_offset_var += f"%offset{i} = affine.apply affine_map<{affine_offset_map}>(%{idx}, {dim[i]})\n"
+            offset_vars[i] = f"%offset{i}"
 
-        affine_map_str2 = "(" + ", ".join(sym_dim) + ") -> ("
-        affine_map_str2 += "+".join(linear_expression) + ")"
-
-        apply_map_var = f"%index_var = affine.apply affine_map<{affine_map_str}>({', '.join(dim)})\n"
-        linear_index_var = f"%buffer_index_var = affine.apply affine_map<{affine_map_str2}>({', '.join(dim)})\n"
+        apply_map_var = f"%index_var = affine.apply affine_map<{affine_map_str}>({', '.join(offset_vars)}) {{global_idx=1}}\n"
         broadcast_var = f"%broadcast_var = vector.broadcast %index_var : index to vector<2xindex>\n"
-        affine_store_var = f"affine.vector_store %broadcast_var, %{buffer}[%buffer_index_var] : memref<{vec_size}xindex>, vector<2xindex>\n"
+        broadcast_i64 = f"%broadcast_i64 = arith.index_cast %broadcast_var : vector<2xindex> to vector<2xi64>\n"
+        affine_store_var = f"affine.vector_store %broadcast_i64, %{buffer}[{','.join(dim)}] : memref<{shape}xi64, 1>, vector<2xi64>\n"
 
         result = f"affine.parallel ({','.join(dim)}) = ({','.join(start_dim)}) to ({','.join(end_dim)}) {{\n" + \
-            apply_map_var + linear_index_var + broadcast_var + affine_store_var + f"}}"
+            affine_offset_var + apply_map_var + broadcast_var + broadcast_i64 + affine_store_var + f"}}"
         return result, [None, None]
-
-    @staticmethod
-    def index_expr(operand, *args, var_info=None, tile_desc=None, **kwargs):
-        # Todo. To support index_expr, we have to custom instructions
-        tile_size = tile_desc.get_tile_size()
-        if tile_desc.get_used_vlane() != 1:
-            raise NotImplementedError("Currently index operation is only executable on single vectorlane configuration")
-
-        vec_size = 1
-        for ds in tile_size:
-            vec_size *= ds
-
-        buffer = ops.alloc(vec_size, "index")
-        ret_type = [vec_size, "index"]
-
-        renamed_symbols = {symbol: "d"+str(symbol)[5:] for symbol in operand.free_symbols}
-        renamed_expression = operand.subs(renamed_symbols)
-        if operand not in ExtensionOverrides.index_set:
-            # Register this operand
-            ExtensionOverrides.index_set.add(operand)
-            ops._index_expr(tile_size, buffer, renamed_expression, vec_size)
-
-        result = f"affine.vector_load %{buffer}[0] : memref<{vec_size}xindex>, vector<{vec_size}xindex> // {renamed_expression}"
-        return result, ret_type
 
     @staticmethod
     def index_cast(operand, target_type, *args, var_info=None, **kwrags):
@@ -735,6 +713,9 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
             for op in ops:
                 if "exp" in op.name: # exponential reduciton case
                     return 1
+        # for op in ops: # TODO: padding has some problem in the case of max_pool
+        #     if "max_pool" in op.args[0].name:
+        #         return 1
         return 0
 
     def convert_index(self, expr, buffer):
@@ -1020,6 +1001,31 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         code = self.get_dma_code("MVOUT", vlane_split_axis, vlane_stride, mlir_dtype, dram_var, index_var, sram_var, sram_index_var,
                                  f"{name}_tag", dram_shape, tile_shape, tile_stride)
         self.reductions_suffix.writeline(common.DeferredLine(name, code))
+
+    def index_expr(self, index, dtype):
+        # Todo. To support index_expr, we have to custom instructions
+        tile_desc = self.kernel_group.tile_desc
+        tile_size = tile_desc.get_tile_size_per_lane()
+        mlir_dtype = mlir_common.DTYPE_TO_MLIR[dtype]
+        tile_numel_per_lane = tile_desc.get_numel_per_lane()
+        str_tile_size = [str(dim) for dim in tile_size]
+        shape = "x".join(str_tile_size)
+        tile_shape = f"memref<{shape}xi64, 1>"
+
+        # Define scratch pad buffer
+        sram_var, _, _ = self.get_scratchpad_buffer(dtype, "index_buffer", tile_numel_per_lane, tile_shape, self.loads, None, "index_expr") # use same index for reuse spad
+
+        renamed_symbols = {symbol: "d"+str(symbol)[5:] for symbol in index.free_symbols}
+        renamed_expression = index.subs(renamed_symbols)
+        if index not in ExtensionOverrides.index_set:
+            # Register this operand
+            ExtensionOverrides.index_set.add(index)
+            ops._index_expr(tile_size, sram_var, renamed_expression, index)
+
+        line = f"affine.vector_load %{sram_var}[0, 0, 0] : {tile_shape}, vector<{tile_numel_per_lane}x{mlir_dtype}> // {renamed_expression}"
+        out = self.cse.generate(self.compute, line)
+        self.register_var_info(out, [tile_numel_per_lane, mlir_dtype])
+        return out
 
     def codegen_global_init(self):
         return self.global_vars
