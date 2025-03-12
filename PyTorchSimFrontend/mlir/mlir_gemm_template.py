@@ -80,17 +80,26 @@ class MLIRGemmTemplate(MLIRTemplate):
 
     def is_transposed(self, node):
         if isinstance(node, ReinterpretView):
+            unsqueezed_layout_stride = [s for s, size in zip(node.layout.stride, node.layout.size) if size > 1]
+            unsqueezed_data_stride = [s for s, size in zip(node.data.layout.stride, node.data.layout.size) if size > 1]
+
             if 0 in node.layout.stride: # [MoE] Temporary solution
                 if node.layout.stride[1] == 0:
                     return True
-            if node.layout.stride != node.data.layout.stride:
+            if len(node.layout.stride) == len(node.data.layout.stride):
                 if node.layout.stride[-2] == node.data.layout.stride[-1] and node.layout.stride[-1] == node.data.layout.stride[-2]:
                     return True
-                elif len(node.layout.stride) < len(node.data.layout.stride) and node.layout.stride == node.data.layout.stride[-len(node.layout.stride):]:
-                    # Squeezed case
-                    return False
                 else:
                     raise NotImplementedError("If the stride is not equal to the original stride, it should have been transposed.")
+            elif len(node.layout.stride) < len(node.data.layout.stride):
+                # Squeezed case
+                if node.layout.stride == node.data.layout.stride[-len(node.layout.stride):]:
+                    return False
+                if len(unsqueezed_layout_stride) < len(unsqueezed_data_stride):
+                    if unsqueezed_layout_stride == unsqueezed_data_stride[-len(unsqueezed_layout_stride):]:
+                        return False
+                raise NotImplementedError("If the stride is not equal to the original stride, it should have been transposed.")
+
         return False
 
     def render(self,
