@@ -557,9 +557,10 @@ class ExtensionOverrides(common.OpOverrides):
         ret_type = op_type[1]
         tile_size = op_type[0]
         shape = f"vector<{tile_size}x{ret_type}>" if tile_size > 1 else ret_type
-        const_one = ops.constant(0, "i1")
+        const_one = ops.constant(1, "i1")
         const_one = ops.broadcast(const_one, operand, var_info=var_info)
-        return f'arith.xori %{operand}, %{const_one} : {shape}', [tile_size, ret_type]
+        ret = ops.eq(operand,const_one)
+        return ret, [tile_size, var_info[ret]]
 
     @staticmethod
     def logical_or(operand1, operand2, *args, var_info=None, **kwargs):
@@ -1192,7 +1193,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         elif len(local_dims) == 3:
             is_reduction = self.reduction_depth < 3 and not store_reduction
             if is_reduction:
-                local_tile_desc.set_tile_size([kg_tile_desc.get_dim_size(dim) for dim in local_dims], [2, 1, 0])
+                local_tile_desc.set_tile_size([kg_tile_desc.get_dim_size(dim) for dim in local_dims], [1, 2, 0])
                 local_tile_desc.vlane_split_axis = local_vlane_split_axis
                 local_tile_desc.vlane_stride = kg_tile_desc.vlane_stride
             else:
