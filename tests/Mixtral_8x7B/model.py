@@ -168,8 +168,9 @@ class Attention(nn.Module):
         v = v.view(bsz, seqlen, self.n_local_heads, self.head_dim)
 
         # Todo.
-        q = apply_rotary_emb(q, freqs_cis)
-        k = apply_rotary_emb(k, freqs_cis)
+        if freqs_cis is not None:
+            q = apply_rotary_emb(q, freqs_cis)
+            k = apply_rotary_emb(k, freqs_cis)
 
         q, k, v = map(lambda x: x.transpose(1, 2), (q, k, v))
 
