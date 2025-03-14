@@ -38,7 +38,7 @@ DTYPE_TO_MLIR = {
     torch.int16: "i16",
     torch.int8: "i8",
     torch.uint8: "i8",
-    torch.bool: "i1",
+    torch.bool: "i8",
     torch.bfloat16: "bf16",
 }
 

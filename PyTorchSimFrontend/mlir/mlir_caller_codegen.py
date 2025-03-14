@@ -77,7 +77,7 @@ class MLIRKernelCallerCodeGen(LLVMKernelCallerCodeGen):
             else:
                 self.generate_args_define()
 
-            func_arguments = [f"c_{arg_name}, c_{arg_name}, 0, {arg_shape}, 1" if arg_type != torch.bool else f"c_{arg_name}, c_{arg_name}, 0, {(arg_shape + 7) // 8}, 1" for arg_name, (_, arg_type, arg_shape, _, _) in self.arg_attributes]
+            func_arguments = [f"c_{arg_name}, c_{arg_name}, 0, {arg_shape}, 1" for arg_name, (_, arg_type, arg_shape, _, _) in self.arg_attributes]
             self.writeline(f"wrapper_{self.kernel_name}({', '.join(func_arguments)}){self.ending}{self.newline}")
 
             if self.validation:

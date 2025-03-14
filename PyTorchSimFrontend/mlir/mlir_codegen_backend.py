@@ -550,14 +550,11 @@ class ExtensionOverrides(common.OpOverrides):
     @staticmethod
     def logical_not(operand, *args, var_info=None, **kwargs):
         op_type = var_info[operand]
-        # Type check & auto cast
-        if op_type[1] != "i1":
-            raise NotImplementedError("Logical operation with not bool data type")
 
         ret_type = op_type[1]
         tile_size = op_type[0]
         shape = f"vector<{tile_size}x{ret_type}>" if tile_size > 1 else ret_type
-        const_one = ops.constant(1, "i1")
+        const_one = ops.constant(0, ret_type)
         const_one = ops.broadcast(const_one, operand, var_info=var_info)
         ret = ops.eq(operand,const_one)
         return ret, [tile_size, var_info[ret]]
@@ -1314,10 +1311,6 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
 
         if buffer is None:
             buffer = self.loads
-
-        if dtype == torch.bool and not is_template:
-            mapping = self.map_cse.generate(self.global_vars, f"affine_map<({indices}) -> ({indices} floordiv 8)>")
-            indices = self.cse.generate(buffer, f"affine.apply #{mapping}(%{indices})") # FIXME. Only loads?
 
         if name not in self.global_vars_dict:
             self.global_vars_dict[name] = list()
