@@ -16,7 +16,7 @@ from Simulator.simulator import FunctionalSimulator, CycleSimulator, BackendSimu
 LOCK_TIMEOUT = 600
 
 def hash_prefix(hash_value):
-    return hash_value[1:5]
+    return hash_value[1:12]
 
 def get_write_path(src_code):
     return os.path.join(extension_config.CONFIG_TORCHSIM_DUMP_PATH, "tmp", hash_prefix(get_hash(src_code.strip())))
