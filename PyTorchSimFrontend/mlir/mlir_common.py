@@ -613,6 +613,10 @@ class BaseMLIRKernel(common.Kernel, BaseMLIRHardwareInfo):
                 return self.reduction(dtype, src_dtype, reduction_type, value)
 
             @staticmethod
+            def _index_expr(tile_size, buffer, renamed_expression, index):
+                return self._index_expr(tile_size, buffer, renamed_expression, index)
+
+            @staticmethod
             def index_expr(index, dtype):
                 return self.index_expr(index, dtype)
 

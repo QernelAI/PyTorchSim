@@ -160,6 +160,7 @@ class MinorVecConfig(MinorFU):
     opClasses = minorMakeOpClassSet(
         [
             "SimdConfig",
+            "CustomVlaneIdx",
         ]
     )
     opLat = 1
