@@ -105,7 +105,6 @@ class ExtensionWrapperCodegen(wrapper.WrapperCodeGen):
         )
 
 class ExtensionOverrides(common.OpOverrides):
-    index_set = set()
     # Binary element wise operations
     @staticmethod
     def custom_cast(operand, target_type, *args, var_info=None, **kwargs):
@@ -550,16 +549,14 @@ class ExtensionOverrides(common.OpOverrides):
     @staticmethod
     def logical_not(operand, *args, var_info=None, **kwargs):
         op_type = var_info[operand]
-        # Type check & auto cast
-        if op_type[1] != "i1":
-            raise NotImplementedError("Logical operation with not bool data type")
 
         ret_type = op_type[1]
         tile_size = op_type[0]
         shape = f"vector<{tile_size}x{ret_type}>" if tile_size > 1 else ret_type
-        const_one = ops.constant(0, "i1")
+        const_one = ops.constant(0, ret_type)
         const_one = ops.broadcast(const_one, operand, var_info=var_info)
-        return f'arith.xori %{operand}, %{const_one} : {shape}', [tile_size, ret_type]
+        ret = ops.eq(operand,const_one)
+        return ret, [tile_size, var_info[ret]]
 
     @staticmethod
     def logical_or(operand1, operand2, *args, var_info=None, **kwargs):
@@ -700,7 +697,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         self.welford_reduce_out = None
         self.reduce_iterator = {}
         self.is_template_kernel = False
-
+        self.index_set = set()
     # padding type 0: zero-padding 1: negative-padding(-inf) ...
     def get_padding_type(self):
         ops = self.current_node.node.origins
@@ -1053,9 +1050,9 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
 
         renamed_symbols = {symbol: "d"+str(symbol)[5:] for symbol in index.free_symbols}
         renamed_expression = index.subs(renamed_symbols)
-        if index not in ExtensionOverrides.index_set:
+        if index not in self.index_set:
             # Register this operand
-            ExtensionOverrides.index_set.add(index)
+            self.index_set.add(index)
             ops._index_expr(tile_size, sram_var, renamed_expression, index)
 
         line = f"affine.vector_load %{sram_var}[0, 0, 0] : {tile_shape}, vector<{tile_numel_per_lane}x{mlir_dtype}> // {renamed_expression}"
@@ -1192,7 +1189,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         elif len(local_dims) == 3:
             is_reduction = self.reduction_depth < 3 and not store_reduction
             if is_reduction:
-                local_tile_desc.set_tile_size([kg_tile_desc.get_dim_size(dim) for dim in local_dims], [2, 1, 0])
+                local_tile_desc.set_tile_size([kg_tile_desc.get_dim_size(dim) for dim in local_dims], [1, 2, 0])
                 local_tile_desc.vlane_split_axis = local_vlane_split_axis
                 local_tile_desc.vlane_stride = kg_tile_desc.vlane_stride
             else:
@@ -1313,10 +1310,6 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
 
         if buffer is None:
             buffer = self.loads
-
-        if dtype == torch.bool and not is_template:
-            mapping = self.map_cse.generate(self.global_vars, f"affine_map<({indices}) -> ({indices} floordiv 8)>")
-            indices = self.cse.generate(buffer, f"affine.apply #{mapping}(%{indices})") # FIXME. Only loads?
 
         if name not in self.global_vars_dict:
             self.global_vars_dict[name] = list()

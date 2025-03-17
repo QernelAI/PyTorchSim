@@ -35,8 +35,6 @@ class FunctionalSimulator():
         # path = os.path.join(dump_path, arg_name, f'{n_call}.raw')
         with open(path, 'rb') as f:
             np_array = np.fromfile(f, dtype=TORCH_TO_NUMPY[arg.dtype])
-            if (arg.dtype == torch.bool):
-                np_array = np.unpackbits(np_array)
             src_tensor = torch.as_strided(torch.from_numpy(np_array), arg.size(), arg.stride())
             arg.copy_(src_tensor.to(dtype=arg.dtype))
 
@@ -52,8 +50,6 @@ class FunctionalSimulator():
             data_path = os.path.join(dump_path, f'{index}.raw')
             tensor = arg.cpu()
             t_arr = tensor.numpy().flatten()
-            if (tensor.dtype == torch.bool):
-                t_arr = np.packbits(t_arr)
             t_arr.tofile(data_path)
         else:
             assert(0)
