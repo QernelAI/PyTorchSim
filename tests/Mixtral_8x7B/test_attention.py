@@ -42,10 +42,6 @@ def test_decode(device, prompt_length, nr_tokens):
     kv_caches = [KVCache(max_batch, max_seq, args.n_head, head_dim, torch.float32) for i in range(args.n_layer)]
     cpu_kv_caches = copy.deepcopy(kv_caches)
     kv_caches = [kv.to(device=device) for kv in kv_caches]
-    for idx, b in enumerate(model.layers):
-        b.attention.kv_cache = kv_caches[idx]
-    for idx, b in enumerate(cpu_model.layers):
-        b.attention.kv_cache = cpu_kv_caches[idx]
 
     for i in range(nr_tokens):
         input_pos = torch.arange(0, T)
@@ -62,8 +58,8 @@ def test_decode(device, prompt_length, nr_tokens):
         freqs_cis = freqs_cis.to(device=device)
 
         # Run models
-        res = opt_fn(prompt, mask, freqs_cis, input_pos)
-        cpu_res = cpu_model(cpu_prompt, cpu_mask, cpu_freqs_cis, cpu_input_pos)
+        res = opt_fn(prompt, mask, freqs_cis, input_pos, kv_caches)
+        cpu_res = cpu_model(cpu_prompt, cpu_mask, cpu_freqs_cis, cpu_input_pos, cpu_kv_caches)
         new_token = sample(cpu_res.cpu())[0]
         print(new_token)
         new_token = cpu_model.tok_embeddings(new_token).unsqueeze(1)
@@ -147,7 +143,7 @@ if __name__ == "__main__":
     from Scheduler.scheduler import ExecutionEngine
     module = ExecutionEngine.setup_device()
     device = module.custom_device()
-    test_decode(device, 32, 2)
+    test_decode(device, 33, 3)
     #test_concat(device, size1=(1, 8, 32, 64), size2=(1,8,1,64), dim=2)
     #test_attention(device)
     #test_ffn(device)

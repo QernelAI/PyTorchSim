@@ -4,7 +4,7 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, List
 
 import torch
 import torch.nn as nn
@@ -116,9 +116,9 @@ class Transformer(nn.Module):
         #for b in self.layers:
         #    b.attention.kv_cache = KVCache(max_batch_size, max_seq_length, self.config.n_local_heads, head_dim)
 
-    def forward(self, x: Tensor, mask, freqs_cis: Tensor, input_pos: Optional[Tensor] = None) -> Tensor:
+    def forward(self, x: Tensor, mask, freqs_cis: Tensor, input_pos: Optional[Tensor] = None, kv_cache: List[KVCache] = None) -> Tensor:
         for i, layer in enumerate(self.layers):
-            x = layer(x, input_pos, freqs_cis, mask)
+            x = layer(x, input_pos, freqs_cis, mask, kv_cache[i])
         x = self.norm(x)
         logits = self.output(x)
         return logits
@@ -136,8 +136,8 @@ class TransformerBlock(nn.Module):
         self.ffn_norm = RMSNorm(config.dim, config.norm_eps)
         self.attention_norm = RMSNorm(config.dim, config.norm_eps)
 
-    def forward(self, x: Tensor, input_pos: Tensor, freqs_cis: Tensor, mask: Tensor) -> Tensor:
-        h = x + self.attention(self.attention_norm(x), freqs_cis, mask, input_pos)
+    def forward(self, x: Tensor, input_pos: Tensor, freqs_cis: Tensor, mask: Tensor, kv_cache: KVCache = None) -> Tensor:
+        h = x + self.attention(self.attention_norm(x), freqs_cis, mask, input_pos, kv_cache)
         out = h + self.ffn(self.ffn_norm(h))
         return out
 
@@ -150,14 +150,13 @@ class Attention(nn.Module):
         # key, query, value projections for all heads, but in a batch
         self.wqkv = nn.Linear(config.dim, total_head_dim, bias=False)
         self.wo = nn.Linear(config.dim, config.dim, bias=False)
-        self.kv_cache = None
 
         self.n_head = config.n_head
         self.head_dim = config.head_dim
         self.n_local_heads = config.n_local_heads
         self.dim = config.dim
 
-    def forward(self, x: Tensor, freqs_cis: Tensor, mask: Tensor, input_pos: Optional[Tensor] = None) -> Tensor:
+    def forward(self, x: Tensor, freqs_cis: Tensor, mask: Tensor, input_pos: Optional[Tensor] = None, kv_cache: KVCache = None) -> Tensor:
         bsz, seqlen, _ = x.shape
 
         kv_size = self.n_local_heads * self.head_dim
@@ -174,8 +173,8 @@ class Attention(nn.Module):
 
         q, k, v = map(lambda x: x.transpose(1, 2), (q, k, v))
 
-        if self.kv_cache is not None:
-            k, v = self.kv_cache.update(k, v)
+        if kv_cache is not None:
+            k, v = kv_cache.update(k, v)
 
         k = k.repeat_interleave(self.n_head // self.n_local_heads, dim=1)
         v = v.repeat_interleave(self.n_head // self.n_local_heads, dim=1)
