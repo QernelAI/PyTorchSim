@@ -340,6 +340,13 @@ jobs:
             -v /tmp/torchsim-ci/${GITHUB_SHA}:/dump \
             -e TORCHSIM_DUMP_PATH=/dump \
             ghcr.io/psal-postech/torchsim-ci:${GITHUB_SHA} python3 PyTorchSim/tests/Fusion/test_matmul_scalar.py
+      - name: Run test_conv_fusion.py
+        run: |
+          echo "Running test_conv_fusion.py"
+          docker run --rm \
+            -v /tmp/torchsim-ci/${GITHUB_SHA}:/dump \
+            -e TORCHSIM_DUMP_PATH=/dump \
+            ghcr.io/psal-postech/torchsim-ci:${GITHUB_SHA} python3 PyTorchSim/tests/Fusion/test_conv_fusion.py
 
   test_moe:
     name: Run test_moe
