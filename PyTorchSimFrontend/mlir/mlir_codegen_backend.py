@@ -1031,12 +1031,11 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
             cast_i64 = f"arith.index_cast %{broadcast_var} : vector<2xindex> to vector<2xi64>"
             cast_i64_var = self.cse.generate(self.loads, cast_i64)
             affine_store = f"affine.vector_store %{cast_i64_var}, %{buffer}[{','.join(dim)}] : memref<{shape}xi64, 1>, vector<2xi64>"
-            res = self.cse.generate(self.loads, affine_store, assignment=False)
+            self.cse.generate(self.loads, affine_store, assignment=False)
         self.loads.writeline("}")
-        return res
+        return buffer
 
     def index_expr(self, index, dtype):
-        # Todo. To support index_expr, we have to custom instructions
         tile_desc = self.kernel_group.tile_desc
         tile_size = tile_desc.get_tile_size_per_lane()
         mlir_dtype = mlir_common.DTYPE_TO_MLIR[dtype]

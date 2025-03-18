@@ -397,8 +397,8 @@ class BaseMLIRKernel(common.Kernel, BaseMLIRHardwareInfo):
         # Dummy tile size
         tile_size = [1] * (len(vars) + len(reduction_vars))
         if len(tile_size) == 2:
-            tile_size[-1] = 128
-            tile_size[-2] = 128
+            tile_size[-1] = 512
+            tile_size[-2] = 512
         elif len(tile_size) == 0: # Scalar
             tile_size = [1]
             self.ranges = [1]
@@ -412,6 +412,7 @@ class BaseMLIRKernel(common.Kernel, BaseMLIRHardwareInfo):
             raise NotImplementedError("dummy tile size fail!")
 
         vlane_stride = 8 # TODO: VCIX widening is not implemented
+        vlane_split_axis = len(vars) - 1 # Set split_axis as a last normal loop not reduction loop
         # Adjust tile size to avoid too much paddings
         for i in range(1, len(tile_size)+1):
             target_range = self.ranges[-i]
@@ -428,14 +429,17 @@ class BaseMLIRKernel(common.Kernel, BaseMLIRHardwareInfo):
             vlane_stride = 1
             tile_size[0] = 1
         # Adjust tile size
-        used_vlane = min((tile_size[len(vars) - 1] + vlane_stride - 1) // vlane_stride, self.vector_lane)
+        for i in range(len(vars)):
+            if tile_size[i] >= self.vector_lane: # maximize used vector lane
+                vlane_split_axis = i
+        used_vlane = min((tile_size[vlane_split_axis] + vlane_stride - 1) // vlane_stride, self.vector_lane)
         padded_size = used_vlane * vlane_stride
-        tile_size[len(vars) - 1] = ((tile_size[len(vars) - 1] + padded_size - 1) // padded_size) * padded_size
+        tile_size[vlane_split_axis] = ((tile_size[vlane_split_axis] + padded_size - 1) // padded_size) * padded_size
 
         # Select tile info.
         # Note: Kernel Group have to share same tile desc for fusion
         tile_desc = MLIRMultiDimTile(tile_size, self.vector_lane)
-        tile_desc.vlane_split_axis = len(vars) - 1 # Set split_axis as a last normal loop not reduction loop
+        tile_desc.vlane_split_axis = vlane_split_axis
         tile_desc.vlane_stride = vlane_stride
         tile_desc.implicit_dim_size = implicit_dim_size
         return tile_desc
