@@ -287,12 +287,16 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
             tile_stride = self.store_info['tile_stride']
             code = self.get_dma_code("MVOUT", vlane_split_axis, vlane_stride, mlir_dtype, dram_var, index_var, sram_var, sram_index_var,
                                  tag_var, dram_shape, tile_shape, tile_stride)
-            self.cse.generate(self.stores, code, assignment = False)
+            self.cse.generate(self.dma_stores, code, assignment = False)
+        self.body.splice(self.spad_buffer)
+        self.body.splice(self.applys)
+        self.body.splice(self.dma_loads)
         self.body.splice(self.loads)
         self.body.splice(self.compute)
         if len(self.stores._lines) == 0:
             template_store()
         self.body.splice(self.stores)
+        self.body.splice(self.dma_stores)
         self.loads.clear()
         self.compute.clear()
         self.stores.clear()
@@ -495,11 +499,11 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
             dram_shape = mlir_common.MLIRKernelArgs.get_mlir_shape(self.buffer_types[name])
             tile_shape = self.kernel_group.tile_desc.get_mlir_shape(mlir_dtype)
             tile_stride = self.store_info['tile_stride']
-            sram_var, index_var, sram_index_var = self.get_scratchpad_buffer(dtype, name, tile_numel_per_lane, tile_shape, self.loads, index_var, index)
+            sram_var, index_var, sram_index_var = self.get_scratchpad_buffer(dtype, name, tile_numel_per_lane, tile_shape, index_var, index)
             self.buffer_names[name] = sram_var
             code = self.get_dma_code("MVIN", vlane_split_axis, vlane_stride, mlir_dtype, dram_var, index_var, sram_var, sram_index_var,
                                      f"{name}_tag", dram_shape, tile_shape, tile_stride)
-            self.cse.generate(self.loads, code, assignment = False)
+            self.cse.generate(self.dma_loads, code, assignment = False)
 
         # Load vector from sram
         sram_var = self.buffer_names[name]
@@ -527,7 +531,7 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
         vshape = f", {vshape}" if tile_numel_per_lane > 1 else ""
 
         if name not in self.buffer_names:
-            sram_var, index_var, sram_index_var = self.get_scratchpad_buffer(dtype, name, tile_numel_per_lane, tile_shape, self.stores, index_var, index)
+            sram_var, index_var, sram_index_var = self.get_scratchpad_buffer(dtype, name, tile_numel_per_lane, tile_shape, index_var, index)
             self.buffer_names[name] = sram_var
         else:
             zero_cse = self.get_const_cse(0)
@@ -548,10 +552,10 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
         self.cse.generate(self.stores, line, assignment = False)
         code = self.get_dma_code("MVOUT", vlane_split_axis, vlane_stride, mlir_dtype, dram_var, index_var, sram_var, sram_index_var,
                                  f"{name}_tag", dram_shape, tile_shape, tile_stride)
-        self.cse.generate(self.stores, code, assignment = False)
+        self.cse.generate(self.dma_stores, code, assignment = False)
 
-    def get_scratchpad_buffer(self, dtype, name, tile_size_per_lane, dram_tile_shape, code_buffer, index_var, raw_index):
-        return super().get_scratchpad_buffer(dtype, name, tile_size_per_lane, dram_tile_shape, code_buffer, index_var, raw_index, True)
+    def get_scratchpad_buffer(self, dtype, name, tile_size_per_lane, dram_tile_shape, index_var, raw_index):
+        return super().get_scratchpad_buffer(dtype, name, tile_size_per_lane, dram_tile_shape, index_var, raw_index, True)
 
 class MLIRTemplateCaller(CUDATemplateCaller):
     def __str__(self):
