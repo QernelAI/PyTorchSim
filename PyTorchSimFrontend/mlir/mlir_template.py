@@ -10,7 +10,7 @@ from typing import List, Optional
 from unittest.mock import patch
 
 from torch._inductor.codegen.common import Kernel, KernelTemplate, ChoiceCaller, OpOverrides, CSE
-from torch._inductor.ir import Buffer, IRNode, TemplateBuffer
+from torch._inductor.ir import Buffer, IRNode, TemplateBuffer, Pointwise
 from torch._inductor.select_algorithm import PartialRender
 from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
 from torch._inductor.autotune_process import TensorMeta
@@ -485,8 +485,8 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
         dram_var = self.kernel_group.args.input(name)
         dtype = V.graph.get_dtype(name)
         mlir_dtype = mlir_common.DTYPE_TO_MLIR[dtype]
-        vlane_split_axis = self.kernel_group.tile_desc.vlane_split_axis if len(load_dim) != 1 else 0
-        vlane_stride = self.kernel_group.tile_desc.vlane_stride if len(load_dim) != 1 else 1
+        vlane_split_axis = self.kernel_group.tile_desc.vlane_split_axis if len(load_dim) != 1 else 0    # FIXME: Fixed split axis for 1d load dim
+        vlane_stride = self.kernel_group.tile_desc.vlane_stride if len(load_dim) != 1 else 1    # FIXME: Fixed stride for 1d load dim
         tile_numel_per_lane = self.kernel_group.tile_desc.get_numel_per_lane()
         # layout = V.graph.graph_inputs[name].layout
         if name not in self.buffer_names:

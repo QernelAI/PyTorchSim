@@ -426,8 +426,9 @@ SINGLE_BATCH_CONV_STRIDE_TEMPLATE = r"""
 memref.global @X_spad : memref<{{ TILE_I_H }}x{{ TILE_K_W }}x{{ TILE_M }}x{{ TILE_K }}xf32, 1>
 memref.global @W_spad : memref<{{ TILE_K_H }}x{{ TILE_K_W }}x{{ TILE_K }}x{{ TILE_N }}xf32, 1>
 memref.global @Y_spad : memref<{{ 1 }}x{{ TILE_O_H }}x{{ TILE_M }}x{{ TILE_N }}xf32, 1>
+{{kernel.def_global_vars()}}
 
-func.func @{{ KERNEL_NAME }}({{ KERNEL_DEF }}) {
+func.func @{{ KERNEL_NAME }}{{kernel.def_conv_kernel(inputs=[X, W, BIAS], outputs=[Y], names_str="X, W, Bias, Y", padded_input_size=PADDED_INPUT_SIZE, input_reorder=input_reorder)}} {
   %c_mvin = arith.constant 2 : index
   %c_mvin2 = arith.constant 1 : index
   %c_mvin3 = arith.constant 14 : index
@@ -447,6 +448,7 @@ func.func @{{ KERNEL_NAME }}({{ KERNEL_DEF }}) {
   %c0 = arith.constant 0 : index
   %c1 = arith.constant 1 : index
   %c2 = arith.constant 2 : index
+  {{- kernel.def_local_vars() }}
 
   affine.for %o_h = 0 to {{ O_H }} step {{ TILE_O_H }} {
     affine.for %tile_m = 0 to {{ O_W }} step {{ TILE_M }} {
@@ -492,8 +494,7 @@ func.func @{{ KERNEL_NAME }}({{ KERNEL_DEF }}) {
           } { accumulation_loop=true }
         } { accumulation_loop=true }
         // Store output matrix
-        memref.dma_start %output_buffer[%c0, %c0, %c0, %c0], %Y[%index0], %c_mvout, %tag3[%c0], %input_axis, %vstride
-            : memref<{{ 1 }}x{{ TILE_O_H }}x{{ TILE_M }}x{{ TILE_N }}xf32, 1>, memref<{{ BATCH * O_C * O_H * O_W }}xf32>, memref<1xi32> {padding=0, sram_stride=[{{ TILE_O_W * TILE_M * TILE_N }}, {{ TILE_M * TILE_N }}, 1, {{ TILE_M }}]}
+        {{kernel.store_output(indent_size=8)}}
       } { outer_loop=true }
     } { outer_loop=true }
   } { outer_loop=true }
@@ -531,9 +532,9 @@ def {{ FUNC_NAME }}{{kernel.def_wrapper()}}:
     {{ name }} = {{ name }}
       {%- else %}
         {%- if SINGLE_BATCH %}
-    {{ name }} = {{ name }}.permute(0, 2, 3, 1).contiguous() # (BATCH, O_C, O_H, O_W) -> (BATCH, O_H, O_W, O_C)
+    {{ name }} = {{ name }}.permute(0, 2, 3, 1).contiguous()  if {{ name }}.dim() == 4 else {{ name }} # (BATCH, O_C, O_H, O_W) -> (BATCH, O_H, O_W, O_C)
         {%- else %}
-    {{ name }} = {{ name }}.permute(2, 3, 0, 1).contiguous() # (BATCH, O_C, O_H, O_W) -> (O_H, O_W, BATCH, O_C)
+    {{ name }} = {{ name }}.permute(2, 3, 0, 1).contiguous()  if {{ name }}.dim() == 4 else {{ name }} # (BATCH, O_C, O_H, O_W) -> (O_H, O_W, BATCH, O_C)
         {%- endif %}
       {%- endif %}
     {%- endfor %}
@@ -611,7 +612,14 @@ class MLIRConvTemplate(MLIRTemplate):
         X, W = self.input_nodes[0], self.input_nodes[1]
         Y = self.output_node
         Bias = None if len(self.input_nodes) == 2 else self.input_nodes[2]
-        n_extra_node = len(epilogue_nodes) if epilogue_nodes is not None else 0
+
+        if epilogue_nodes is not None:
+          extra_node_rw = {
+            item.name for epilogue_node in epilogue_nodes
+            for item in epilogue_node.read_writes.reads | epilogue_node.read_writes.writes
+            if item.name != Y.name
+          }
+        n_extra_node = len(extra_node_rw) if epilogue_nodes is not None else 0
 
         BATCH = X.layout.size[0]
         I_C = X.layout.size[1]
