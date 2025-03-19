@@ -779,6 +779,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         dram_shape = mlir_common.MLIRKernelArgs.get_mlir_shape(self.buffer_types[name])
         tile_shape = local_tile_desc.get_mlir_shape(mlir_dtype)
         tile_stride = local_tile_desc.get_tile_stride()
+        vshape = local_tile_desc.get_mlir_vshape(mlir_dtype)
 
         # Define scratch pad buffer
         sram_var, index_var, sram_index_var = self.get_scratchpad_buffer(dtype, name, tile_numel_per_lane, tile_shape, self.loads, index_var, index)
@@ -789,9 +790,12 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         self.cse.generate(self.loads, code, assignment = False) # FIXME: assignment = False does not support caching
 
         # Generate vector load instruction
-        operation = "affine.vector_load" if tile_numel_per_lane > 1 else "affine.load"
-        shape = f", vector<{tile_numel_per_lane}x{mlir_dtype}>" if tile_numel_per_lane > 1 else ""
-        line = f"{operation} %{sram_var}[{sram_index_var}] : {tile_shape}{shape}"
+        if tile_numel_per_lane > 1:
+            operation = "affine.vector_load"
+            line = f"{operation} %{sram_var}[{sram_index_var}] : {tile_shape}, {vshape}"
+        else:
+            operation = "affine.load"
+            line = f"{operation} %{sram_var}[{sram_index_var}] : {tile_shape}"
         out = self.cse.generate(self.compute, line)
         self.register_var_info(out, [tile_numel_per_lane, mlir_dtype])
         return out
@@ -812,18 +816,22 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         dram_shape = mlir_common.MLIRKernelArgs.get_mlir_shape(self.buffer_types[name])
         tile_shape = local_tile_desc.get_mlir_shape(mlir_dtype)
         tile_stride = local_tile_desc.get_tile_stride()
+        vshape = local_tile_desc.get_mlir_vshape(mlir_dtype)
 
         # Define scratch pad buffer
         sram_var, index_var, sram_index_var = self.get_scratchpad_buffer(dtype, name, tile_numel_per_lane, tile_shape, self.stores, index_var, index)
 
         # Generate vector store instruction
         store_size, operand_type = self.var_info[value]
-        operation = "affine.vector_store" if tile_numel_per_lane > 1 and store_size > 1 else "affine.store"
-        shape = f", vector<{tile_numel_per_lane}x{mlir_dtype}>" if tile_numel_per_lane > 1 and store_size > 1 else ""
         if mlir_dtype != operand_type:
             value = ops.to_dtype(value, mlir_dtype, var_info=self.var_info)
 
-        line = f"{operation} %{value}, %{sram_var}[{sram_index_var}] : {tile_shape}{shape}"
+        if tile_numel_per_lane > 1 and store_size > 1:
+            operation = "affine.vector_store"
+            line = f"{operation} %{value}, %{sram_var}[{sram_index_var}] : {tile_shape}, {vshape}"
+        else:
+            operation = "affine.store"
+            line = f"{operation} %{value}, %{sram_var}[{sram_index_var}] : {tile_shape}"
         self.stores.writeline(common.DeferredLine(name, line)) # TODO: Should be changed to self.compute?
 
         # Generate DMA instruction
@@ -957,7 +965,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         if self.welford_reduce_out is not None:
             # raise NotImplementedError()
             sum, sqr_sum, _ = self.welford_reduce_out
-            shape = f"vector<{tile_numel_per_lane}x{mlir_dtype}>" if self.buffer_types[name][1] > 1 else mlir_dtype
+            shape = local_tile_desc.get_mlir_vshape(mlir_dtype) if self.buffer_types[name][1] > 1 else mlir_dtype
             # mean
             divider = self.cse.generate(self.reductions_suffix, f"arith.constant {float(self.ranges[self.reduction_depth])} : f32")
             if self.buffer_types[name][1] > 1:
@@ -987,8 +995,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         if tile_numel_per_lane == 1:
             shape = ""
         else:
-            shape = f"vector<{tile_numel_per_lane}x{mlir_dtype}>"
-            shape = f", {shape}" if self.buffer_types[name][1] > 1 else ""
+            shape = f", {local_tile_desc.get_mlir_vshape(mlir_dtype)}" if self.buffer_types[name][1] > 1 else ""
 
         line = f"{operation} %{value}, %{sram_var}[{sram_index_var}] : {tile_shape}{shape}"
         self.reductions_suffix.writeline(common.DeferredLine(name, line))
@@ -1041,8 +1048,8 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         mlir_dtype = mlir_common.DTYPE_TO_MLIR[dtype]
         tile_numel_per_lane = tile_desc.get_numel_per_lane()
         str_tile_size = [str(dim) for dim in tile_size]
-        shape = "x".join(str_tile_size)
-        tile_shape = f"memref<{shape}xi64, 1>"
+        tile_shape = f"memref<{'x'.join(str_tile_size)}xi64, 1>"
+        vshape = tile_desc.get_mlir_vshape(mlir_dtype)
 
         # Define scratch pad buffer
         sram_var, _, _ = self.get_scratchpad_buffer(dtype, "index_buffer", tile_numel_per_lane, tile_shape, self.loads, None, index)
@@ -1054,7 +1061,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
             self.index_set.add(index)
             ops._index_expr(tile_size, sram_var, renamed_expression, index)
 
-        line = f"affine.vector_load %{sram_var}[0, 0, 0] : {tile_shape}, vector<{tile_numel_per_lane}x{mlir_dtype}> // {renamed_expression}"
+        line = f"affine.vector_load %{sram_var}[0, 0, 0] : {tile_shape}, {vshape} // {renamed_expression}"
         out = self.cse.generate(self.compute, line)
         self.register_var_info(out, [tile_numel_per_lane, mlir_dtype])
         return out

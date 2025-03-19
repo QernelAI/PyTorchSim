@@ -244,6 +244,18 @@ class MLIRMultiDimTile():
         shape = "x".join(str_tile_size)
         return f"memref<{shape}x{dtype}, 1>"
 
+    @staticmethod
+    def extract_tile_size(memref_str):
+        assert memref_str.startswith("memref<") and memref_str.endswith(">"), "Invalid memref format"
+        # Extract the inner content of memref<>
+        inner_part = memref_str[len("memref<"):-1]
+        shapes = inner_part.split("x")[:-1]
+        return [int(dim) for dim in shapes]
+
+    def get_mlir_vshape(self, mlir_dtype):
+        tile_numel_per_lane = self.get_numel_per_lane()
+        return f"vector<{tile_numel_per_lane}x{mlir_dtype}>" if tile_numel_per_lane > 1 else ""
+
     def get_used_vlane(self):
         """
         Return number of used vector lane
@@ -324,6 +336,9 @@ class BaseMLIRKernel(common.Kernel, BaseMLIRHardwareInfo):
         raise NotImplementedError()
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
+        raise NotImplementedError()
+
+    def indirect_indexing(self, index_var, size, check):
         raise NotImplementedError()
 
     def codegen_global_init(self):
@@ -578,7 +593,7 @@ class BaseMLIRKernel(common.Kernel, BaseMLIRHardwareInfo):
             @staticmethod
             def indirect_indexing(index_var, size, check=True):
                 # Skip CSE since this doesn't return an expression
-                return sympy_symbol(str(index_var))  # type: ignore[attr-defined]
+                return self.indirect_indexing(index_var, size, check)
 
             @staticmethod
             def load(name: str, index: sympy.Expr):

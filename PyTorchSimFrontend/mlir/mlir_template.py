@@ -488,6 +488,8 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
         vlane_split_axis = self.kernel_group.tile_desc.vlane_split_axis if len(load_dim) != 1 else 0    # FIXME: Fixed split axis for 1d load dim
         vlane_stride = self.kernel_group.tile_desc.vlane_stride if len(load_dim) != 1 else 1    # FIXME: Fixed stride for 1d load dim
         tile_numel_per_lane = self.kernel_group.tile_desc.get_numel_per_lane()
+        vshape = self.kernel_group.tile_desc.get_mlir_vshape(mlir_dtype)
+        vshape = f", {vshape}" if tile_numel_per_lane > 1 else ""
         if name not in self.buffer_names:
             # Allocate sram buffer
             dram_shape = mlir_common.MLIRKernelArgs.get_mlir_shape(self.buffer_types[name])
@@ -502,10 +504,9 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
         # Load vector from sram
         sram_var = self.buffer_names[name]
         operation = "affine.vector_load" if tile_numel_per_lane > 1 else "affine.load"
-        shape = f", vector<{tile_numel_per_lane}x{mlir_dtype}>" if tile_numel_per_lane > 1 else ""
         zero_var = self.get_const_cse(0)
         tile_indices = ",".join([f"%{zero_var}"] * self.store_info["tile_nr_dim"])
-        line = f"{operation} %{sram_var}[{tile_indices}] : {self.store_info['tile_shape']}{shape}"
+        line = f"{operation} %{sram_var}[{tile_indices}] : {self.store_info['tile_shape']}{vshape}"
         out = self.cse.generate(self.loads, line)
         self.register_var_info(out, [tile_numel_per_lane, mlir_dtype])
         return out
@@ -522,6 +523,8 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
         dram_shape = mlir_common.MLIRKernelArgs.get_mlir_shape(self.buffer_types[name])
         tile_shape = self.kernel_group.tile_desc.get_mlir_shape(mlir_dtype)
         tile_stride = self.store_info['tile_stride']
+        vshape = self.kernel_group.tile_desc.get_mlir_vshape(mlir_dtype)
+        vshape = f", {vshape}" if tile_numel_per_lane > 1 else ""
 
         if name not in self.buffer_names:
             sram_var, index_var, sram_index_var = self.get_scratchpad_buffer(dtype, name, tile_numel_per_lane, tile_shape, self.stores, index_var, index)
@@ -533,7 +536,6 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
         sram_var = self.buffer_names[name]
 
         operation = "affine.vector_store" if tile_numel_per_lane > 1 else "affine.store"
-        shape = f", vector<{tile_numel_per_lane}x{mlir_dtype}>" if tile_numel_per_lane > 1 else ""
         zero_var = self.get_const_cse(0)
 
         _, operand_type = self.var_info[value]
@@ -541,7 +543,7 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
             value = ops.to_dtype(value, mlir_dtype, var_info=self.var_info)
 
         tile_indices = ",".join([f"%{zero_var}"] * self.store_info["tile_nr_dim"])
-        line = f"{operation} %{value}, %{sram_var}[{tile_indices}] : {tile_shape}{shape}"
+        line = f"{operation} %{value}, %{sram_var}[{tile_indices}] : {tile_shape}{vshape}"
 
         self.cse.generate(self.stores, line, assignment = False)
         code = self.get_dma_code("MVOUT", vlane_split_axis, vlane_stride, mlir_dtype, dram_var, index_var, sram_var, sram_index_var,
