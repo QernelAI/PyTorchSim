@@ -706,6 +706,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         self.reduce_iterator = {}
         self.is_template_kernel = False
         self.index_set = set()
+        self.spad_buffer_dict = dict()
 
     # padding type 0: zero-padding 1: negative-padding(-inf) ...
     def get_padding_type(self):
@@ -745,6 +746,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
     def parse_indices(self, expr, buffer=None) -> common.CSEVariable:
         if buffer is None:
             buffer = self.applys
+
         # Constant case
         if expr.is_number:
             return self.get_const_cse(int(expr))
@@ -771,19 +773,18 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         # Extract index var
         expr_str = str(expr)
         args = ", ".join(map(str, indices))
-        map_var = self.map_cse.generate(self.global_vars, f"affine_map<({args}) -> ({expr_str})>")
+        map_var = self.map_cse.generate(self.global_vars, f"affine_map<({args})[] -> ({expr_str})>")
         args = ", ".join([f"%{i}" for i in indices])
-        index = self.apply_cse.generate(buffer, f"affine.apply #{map_var}({args})")
+        index = self.apply_cse.generate(buffer, f"affine.apply #{map_var}({args})[]")
         return index
 
     def load(self, name: str, index: sympy.Expr):
         index = self.rename_indexing(index)
         padding = self.get_padding_type()
-        index_var = self.parse_indices(index)
         dram_var = self.kernel_group.args.input(name)
         dtype = V.graph.get_dtype(name)
         mlir_dtype = mlir_common.DTYPE_TO_MLIR[dtype]
-        local_tile_desc, index_var = self.get_dma_info(name, index, index_var)
+        local_tile_desc, index_var = self.get_dma_info(name, index)
         vlane_split_axis = local_tile_desc.vlane_split_axis
         vlane_stride = local_tile_desc.vlane_stride
         tile_numel_per_lane = local_tile_desc.get_numel_per_lane()
@@ -810,17 +811,17 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
             line = f"{operation} %{sram_var}[{sram_index_var}] : {tile_shape}"
         out = self.cse.generate(self.loads, line)
         self.register_var_info(out, [tile_numel_per_lane, mlir_dtype])
+        self.spad_buffer_dict[out] = [sram_var, local_tile_desc.get_tile_size(), tile_shape]
         return out
 
     def store(self, name: str, index: sympy.Expr, value, *args, **kwargs):
         index = self.rename_indexing(index)
-        index_var = self.parse_indices(index)
         dram_var = self.kernel_group.args.output(name)
         dtype = V.graph.get_dtype(name)
         mlir_dtype = mlir_common.DTYPE_TO_MLIR[dtype]
 
         # Prepare dma instruction
-        local_tile_desc, index_var = self.get_dma_info(name, index, index_var)
+        local_tile_desc, index_var = self.get_dma_info(name, index)
         vlane_split_axis = local_tile_desc.vlane_split_axis
         vlane_stride = local_tile_desc.vlane_stride
         tile_numel_per_lane = local_tile_desc.get_numel_per_lane()
@@ -960,10 +961,9 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         dtype = V.graph.get_dtype(name)
         mlir_dtype = mlir_common.DTYPE_TO_MLIR[dtype]
         index = self.rename_indexing(index)
-        index_var = self.parse_indices(index, buffer=self.reductions_suffix)
 
         # Tile is always reuduced in inner loop
-        local_tile_desc, index_var = self.get_dma_info(name, index, index_var, broadcast=False, store_reduction=True, buffer=self.reductions_suffix)
+        local_tile_desc, index_var = self.get_dma_info(name, index, broadcast=False, store_reduction=True, buffer=self.reductions_suffix)
         vlane_split_axis = local_tile_desc.vlane_split_axis
         vlane_stride = local_tile_desc.vlane_stride
         tile_numel_per_lane = local_tile_desc.get_numel_per_lane()
@@ -1023,7 +1023,16 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         self.cse = tmp_cse
 
     def indirect_indexing(self, index_var, size, check=True):
-        raise NotImplementedError("Not support indirect access")
+        spad_buffer_var, tile_size, mlir_shape = self.spad_buffer_dict[index_var]
+        nr_rank = len(tile_size)
+        mlir_dtype = self.var_info[index_var][1]
+        line = f"affine.load %{spad_buffer_var}[{', '.join(['%const0']*nr_rank)}] : {mlir_shape}"
+        out = self.cse.generate(self.dma_loads, line)
+        self.register_var_info(out, [1, "index", [1]])
+        if mlir_dtype != "index":
+            line = f"arith.index_cast %{out} : {mlir_dtype} to {'index'}"
+            out = self.cse.generate(self.dma_loads, line)
+        return str(out)
 
     def _index_expr(self, tile_size, buffer, renamed_expression, index):
         str_tile_size = [str(dim) for dim in tile_size]
@@ -1145,7 +1154,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
             write_atomic(gem5_write_path, self.gem5_header.getvalue())
         return src_code
 
-    def get_dma_info(self, name, index, index_var, broadcast=True, store_reduction=False, buffer=None): # Need more argument?
+    def get_dma_info(self, name, index, broadcast=True, store_reduction=False, buffer=None): # Need more argument?
         """
         A tile descriptor exists that is configured on a kernel group
         DMA desc should be adjusted according to buffer.
@@ -1154,7 +1163,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         """
         # Use loads as default
         if buffer is None:
-            buffer = self.applys
+            buffer = self.applys if "tmp" not in str(index) else self.dma_loads
 
         # TODO.
         kg_tile_desc = self.kernel_group.tile_desc
@@ -1166,6 +1175,8 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         total_dims =  [int(str(i)[5:]) for i in self.itervars]
         local_tile_desc = mlir_common.MLIRMultiDimTile([1], self.vector_lane)
         local_dims.sort() # Assume that smaller index is placed in the outer loop
+        indirect_dims = [f"{i}" for i in index.free_symbols if "tmp" in str(i)]
+        indirect_arg_dims = [f"%{i}" for i in index.free_symbols if "tmp" in str(i)]
 
         # Reduction can have two type of tile size
         if broadcast and (total_dims != local_dims or (self.reduction_depth!=len(total_dims) and total_dims[:self.reduction_depth] == local_dims)):
@@ -1175,9 +1186,11 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
             input_expr = ",".join(["d"+str(i) for i in total_dims])
             output_expr = str(index).replace('index', 'd')
             input_argument = ",".join(["%index" + str(i) if i in local_dims else f"%{fake_dim}" for i in total_dims])
-            map_var = self.map_cse.generate(self.global_vars, f"affine_map<({input_expr}) -> ({output_expr})>")
-            index_var = self.apply_cse.generate(buffer, f"affine.apply #{map_var}({input_argument})")
+            map_var = self.map_cse.generate(self.global_vars, f"affine_map<({input_expr})[{','.join(indirect_dims)}] -> ({output_expr})>")
+            index_var = self.apply_cse.generate(buffer, f"affine.apply #{map_var}({input_argument})[{','.join(indirect_arg_dims)}]")
             local_dims = total_dims # Brodatcast tile shape
+        else:
+            index_var = self.parse_indices(index, buffer=buffer)
 
         if kg_tile_desc.vlane_split_axis in local_dims:
             local_vlane_split_axis = local_dims.index(kg_tile_desc.vlane_split_axis)
