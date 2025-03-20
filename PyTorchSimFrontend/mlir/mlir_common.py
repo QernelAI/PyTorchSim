@@ -440,6 +440,13 @@ class BaseMLIRKernel(common.Kernel, BaseMLIRHardwareInfo):
         tile_desc.implicit_dim_size = implicit_dim_size
         return tile_desc
 
+    def set_tile_size(self, template_store_info):
+        tile_desc = MLIRMultiDimTile(template_store_info['tile_size'],
+            self.vector_lane,
+            vlane_split_axis=template_store_info['vlane_split_axis'],
+            vlane_stride=template_store_info['vlane_stride'])
+        return tile_desc
+
     def codegen_nodes(self, nodes, kernel_name):
         _, (group, reduction_group) = max(
             nodes, key=lambda x: int(x.is_reduction())

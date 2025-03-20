@@ -59,7 +59,7 @@ func.func @{{ KERNEL_NAME }}{{kernel.def_kernel(inputs=[X, W, Bias], outputs=[Y]
           linalg.matmul ins(%X_buffer, %W_buffer : memref<{{ TILE_M }}x{{ TILE_K }}x{{ DATA_STYPE }}, 1>, memref<{{ TILE_K }}x{{ TILE_N }}x{{ DATA_STYPE }}, 1>)
                   outs(%Y_buffer : memref<{{ TILE_M }}x{{ TILE_N }}x{{ DATA_STYPE }}, 1>)
         } { accumulation_loop=true }
-       {{kernel.store_output(vlane_split_axis=2)}}
+        {{kernel.store_output(indent_size=8)}}
       } { outer_loop=true }
     } { outer_loop=true }
   } { outer_loop=true }
@@ -130,6 +130,23 @@ class MLIRBMMTemplate(MLIRTemplate):
             X_transposed = X_transposed,
             Y_numel = B * M * N,
             input_reorder = self.input_reorder
+        )
+
+        kernel.store_info = dict(
+            output_node = self.output_node.name,
+            dependent_buf = [],
+            sram_var = "Y_buffer",
+            dram_var = "Y",
+            index_var = "index2",
+            tag_var = "tag",
+            vlane_split_axis = 2,
+            vlane_stride = 1,
+            mlir_dtype = kernel.render_options['DATA_STYPE'],
+            tile_nr_dim = 2,
+            dram_shape = f"memref<{kernel.render_options['Y_numel']}x{kernel.render_options['DATA_STYPE']}>",
+            tile_shape = f"memref<{TILE_M}x{TILE_N}x{kernel.render_options['DATA_STYPE']}, 1>",
+            tile_size = (TILE_M, TILE_N),
+            tile_stride = [1, TILE_M]
         )
         code = self._template_from_string(BMM_TEMPLATE).render(**kernel.render_options)
         kernel.add_loop_info([kernel.render_options["M"], kernel.render_options["N"], kernel.render_options["K"]], [kernel.render_options["TILE_M"], kernel.render_options["TILE_N"], kernel.render_options["TILE_K"]])

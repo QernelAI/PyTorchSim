@@ -28,9 +28,17 @@ CONV_TEMPLATE = r"""
 // TILE_M = {{ TILE_M }}
 // TILE_N = {{ TILE_N }}
 // TILE_K = {{ TILE_K }}
-// TILE_M = {{ TILE_M }}
-// TILE_N = {{ TILE_N }}
-// TILE_K = {{ TILE_K }}
+// TILE_I_H={{ TILE_I_H }},
+// TILE_I_W={{ TILE_I_W }},
+// TILE_O_H={{ TILE_O_H }},
+// TILE_O_W={{ TILE_O_W }},
+// TILE_K_H={{ TILE_K_H }},
+// TILE_K_W={{ TILE_K_W }},
+// SUB_TILE_M={{ SUB_TILE_M }},
+// SUB_TILE_N={{ SUB_TILE_N }},
+// SUB_TILE_I_W={{ SUB_TILE_I_W }},
+// SUB_TILE_K_H={{ SUB_TILE_K_H }},
+// SUB_TILE_K_W={{ SUB_TILE_K_W }},
 // PADDING_H = {{ PADDING_H }}
 // PADDING_W = {{ PADDING_W }}
 // STRIDE_H = {{ STRIDE_H }}
@@ -54,7 +62,7 @@ memref.global @W_spad : memref<{{ TILE_K_H }}x{{ TILE_K_W }}x{{ TILE_K }}x{{ TIL
 memref.global @Y_spad : memref<{{ TILE_O_H }}x{{ TILE_O_W }}x{{ TILE_M }}x{{ TILE_N }}xf32, 1>
 {{kernel.def_global_vars()}}
 
-func.func @{{ KERNEL_NAME }}({{ KERNEL_DEF }}) {
+func.func @{{ KERNEL_NAME }}{{kernel.def_conv_kernel(inputs=[X, W, BIAS], outputs=[Y], names_str="X, W, Bias, Y", padded_input_size=PADDED_INPUT_SIZE, input_reorder=input_reorder)}} {
   %c_mvin = arith.constant 2 : index
   %c_mvin2 = arith.constant 1 : index
   %c_mvin3 = arith.constant 14 : index
@@ -74,7 +82,8 @@ func.func @{{ KERNEL_NAME }}({{ KERNEL_DEF }}) {
   %c0 = arith.constant 0 : index
   %c1 = arith.constant 1 : index
   %c2 = arith.constant 2 : index
-{{ kernel.def_local_vars() }}
+  {{- kernel.def_local_vars() }}
+
   affine.for %o_h = 0 to {{ O_H }} step {{ TILE_O_H }} {
     affine.for %o_w = 0 to {{ O_W }} step {{ TILE_O_W }} {
       affine.for %tile_m = 0 to {{ BATCH }} step {{ TILE_M }} {
@@ -122,8 +131,7 @@ func.func @{{ KERNEL_NAME }}({{ KERNEL_DEF }}) {
             } { accumulation_loop=true }
           } { accumulation_loop=true }
           // Store output matrix
-          memref.dma_start %output_buffer[%c0, %c0, %c0, %c0], %Y[%index0], %c_mvout, %tag3[%c0], %input_axis, %vstride
-              : memref<{{ TILE_O_H }}x{{ TILE_O_W }}x{{ TILE_M }}x{{ TILE_N }}xf32, 1>, memref<{{ BATCH * O_C * O_H * O_W }}xf32>, memref<1xi32> {padding=0, sram_stride=[{{ TILE_O_W * TILE_M * TILE_N }}, {{ TILE_M * TILE_N }}, 1, {{ TILE_M }}]}
+          {{kernel.store_output(indent_size=10)}}
         } { outer_loop=true }
       } { outer_loop=true }
     } { outer_loop=true }
@@ -134,6 +142,38 @@ func.func @{{ KERNEL_NAME }}({{ KERNEL_DEF }}) {
 
 MULTI_TILE_CONV_TEMPLATE = r"""
 // Multi Channel Tile Conv2D kernel
+// BATCH = {{ BATCH }}
+// I_C = {{ I_C }}
+// I_H = {{ I_H }}
+// I_W = {{ I_W }}
+// O_C = {{ O_C }}
+// K_H = {{ K_H }}
+// K_W = {{ K_W }}
+// O_H = {{ O_H }}
+// O_W = {{ O_W }}
+// TILE_M = {{ TILE_M }}
+// TILE_N = {{ TILE_N }}
+// TILE_K = {{ TILE_K }}
+// TILE_I_H={{ TILE_I_H }},
+// TILE_I_W={{ TILE_I_W }},
+// TILE_O_H={{ TILE_O_H }},
+// TILE_O_W={{ TILE_O_W }},
+// TILE_K_H={{ TILE_K_H }},
+// TILE_K_W={{ TILE_K_W }},
+// SUB_TILE_M={{ SUB_TILE_M }},
+// SUB_TILE_N={{ SUB_TILE_N }},
+// SUB_TILE_I_W={{ SUB_TILE_I_W }},
+// SUB_TILE_K_H={{ SUB_TILE_K_H }},
+// SUB_TILE_K_W={{ SUB_TILE_K_W }},
+// PADDING_H = {{ PADDING_H }}
+// PADDING_W = {{ PADDING_W }}
+// STRIDE_H = {{ STRIDE_H }}
+// STRIDE_W = {{ STRIDE_W }}
+// DILATION_H = {{ DILATION_H }}
+// DILATION_W = {{ DILATION_W }}
+// DATA_STYPE = {{ DATA_STYPE }}
+// DATA_SIZE = {{ DATA_SIZE }}
+
 #map0 = affine_map<(d0, d1, d2, d3) -> (d0 * {{ O_W * BATCH * O_C }} + d1 * {{ BATCH * O_C }} + d2 * {{ O_C }} + d3)> // output (O_H, O_W, BATCH, O_C)
 #map1 = affine_map<(d0, d1, d2, d3) -> (d0 * {{ (I_W + 2 * PADDING_W) * BATCH * I_C }} + d1 * {{ I_C * STRIDE_W }} + d2 * {{ I_C * (I_W + 2 * PADDING_W) }} + d3)> // input (I_H, BATCH, I_W, I_C)
 #map2 = affine_map<(d0, d1, d2, d3) -> (d0 * {{ K_W * I_C * O_C }} + d1 * {{ I_C * O_C }} + d2 * {{ O_C }} + d3)> // weight (K_H, K_W, I_C, O_C)
@@ -145,8 +185,9 @@ MULTI_TILE_CONV_TEMPLATE = r"""
 memref.global @X_spad : memref<{{ TILE_I_H }}x{{ TILE_O_W }}x{{ TILE_M }}x{{ TILE_K }}xf32, 1>
 memref.global @W_spad : memref<{{ TILE_K_H }}x{{ 1 }}x{{ TILE_K }}x{{ TILE_N }}xf32, 1>
 memref.global @Y_spad : memref<{{ TILE_O_H }}x{{ TILE_O_W }}x{{ TILE_M }}x{{ TILE_N }}xf32, 1>
+{{kernel.def_global_vars()}}
 
-func.func @{{ KERNEL_NAME }}({{ KERNEL_DEF }}) {
+func.func @{{ KERNEL_NAME }}{{kernel.def_conv_kernel(inputs=[X, W, BIAS], outputs=[Y], names_str="X, W, Bias, Y", padded_input_size=PADDED_INPUT_SIZE, input_reorder=input_reorder)}} {
   %c_mvin = arith.constant 2 : index
   %c_mvin2 = arith.constant 1 : index
   %c_mvin3 = arith.constant 14 : index
@@ -166,6 +207,7 @@ func.func @{{ KERNEL_NAME }}({{ KERNEL_DEF }}) {
   %c0 = arith.constant 0 : index
   %c1 = arith.constant 1 : index
   %c2 = arith.constant 2 : index
+  {{- kernel.def_local_vars() }}
 
   affine.for %o_h = 0 to {{ O_H }} step {{ TILE_O_H }} {
     affine.for %o_w = 0 to {{ O_W }} step {{ TILE_O_W }} {
@@ -210,8 +252,7 @@ func.func @{{ KERNEL_NAME }}({{ KERNEL_DEF }}) {
             } { accumulation_loop=true }
           } { accumulation_loop=true }
           // Store output matrix
-          memref.dma_start %output_buffer[%c0, %c0, %c0, %c0], %Y[%index0], %c_mvout, %tag3[%c0], %input_axis, %vstride
-              : memref<{{ TILE_O_H }}x{{ TILE_O_W }}x{{ TILE_M }}x{{ TILE_N }}xf32, 1>, memref<{{ BATCH * O_C * O_H * O_W }}xf32>, memref<1xi32> {padding=0, sram_stride=[{{ TILE_O_W * TILE_M * TILE_N }}, {{ TILE_M * TILE_N }}, 1, {{ TILE_M }}]}
+          {{kernel.store_output(indent_size=10)}}
         } { outer_loop=true }
       } { outer_loop=true }
     } { outer_loop=true }
@@ -234,9 +275,17 @@ SINGLE_BATCH_CONV_TEMPLATE = r"""
 // TILE_M = {{ TILE_M }}
 // TILE_N = {{ TILE_N }}
 // TILE_K = {{ TILE_K }}
-// TILE_M = {{ TILE_M }}
-// TILE_N = {{ TILE_N }}
-// TILE_K = {{ TILE_K }}
+// TILE_I_H={{ TILE_I_H }},
+// TILE_I_W={{ TILE_I_W }},
+// TILE_O_H={{ TILE_O_H }},
+// TILE_O_W={{ TILE_O_W }},
+// TILE_K_H={{ TILE_K_H }},
+// TILE_K_W={{ TILE_K_W }},
+// SUB_TILE_M={{ SUB_TILE_M }},
+// SUB_TILE_N={{ SUB_TILE_N }},
+// SUB_TILE_I_W={{ SUB_TILE_I_W }},
+// SUB_TILE_K_H={{ SUB_TILE_K_H }},
+// SUB_TILE_K_W={{ SUB_TILE_K_W }},
 // PADDING_H = {{ PADDING_H }}
 // PADDING_W = {{ PADDING_W }}
 // STRIDE_H = {{ STRIDE_H }}
@@ -245,6 +294,7 @@ SINGLE_BATCH_CONV_TEMPLATE = r"""
 // DILATION_W = {{ DILATION_W }}
 // DATA_STYPE = {{ DATA_STYPE }}
 // DATA_SIZE = {{ DATA_SIZE }}
+
 #map0 = affine_map<(d0, d1, d2, d3) -> (d0 * {{ O_W * O_H * O_C }} + d1 * {{ O_W * O_C }} + d2 * {{ O_C }} + d3)> // output (BATCH, O_H, O_W, O_C)
 #map1 = affine_map<(d0, d1, d2, d3) -> (d0 * {{ (I_W + 2 * PADDING_W) * (I_H + 2 * PADDING_W) * I_C }} + d1 * {{ (I_W + 2 * PADDING_W) * I_C }} + d2 * {{ I_C }} + d3)> // input (BATCH, I_H, I_W, I_C) Stride should be changed if kernel stride > 1
 #map2 = affine_map<(d0, d1, d2, d3) -> (d0 * {{ K_W * I_C * O_C }} + d1 * {{ I_C * O_C }} + d2 * {{ O_C }} + d3)> // weight (K_H, K_W, I_C, O_C)
@@ -255,7 +305,9 @@ SINGLE_BATCH_CONV_TEMPLATE = r"""
 memref.global @X_spad : memref<{{ 1 }}x{{ TILE_I_H }}x{{ TILE_I_W }}x{{ TILE_K }}xf32, 1>
 memref.global @W_spad : memref<{{ TILE_K_H }}x{{ TILE_K_W }}x{{ TILE_K }}x{{ TILE_N }}xf32, 1>
 memref.global @Y_spad : memref<{{ 1 }}x{{ TILE_O_H }}x{{ TILE_M }}x{{ TILE_N }}xf32, 1>
-func.func @{{ KERNEL_NAME }}({{ KERNEL_DEF }}) {
+{{kernel.def_global_vars()}}
+
+func.func @{{ KERNEL_NAME }}{{kernel.def_conv_kernel(inputs=[X, W, BIAS], outputs=[Y], names_str="X, W, Bias, Y", padded_input_size=PADDED_INPUT_SIZE, input_reorder=input_reorder)}} {
   %c_mvin = arith.constant 2 : index
   %c_mvin2 = arith.constant 1 : index
   %c_mvin3 = arith.constant 14 : index
@@ -275,6 +327,8 @@ func.func @{{ KERNEL_NAME }}({{ KERNEL_DEF }}) {
   %c0 = arith.constant 0 : index
   %c1 = arith.constant 1 : index
   %c2 = arith.constant 2 : index
+  {{- kernel.def_local_vars() }}
+
   affine.for %o_h = 0 to {{ O_H }} step {{ TILE_O_H }} {
     affine.for %tile_m = 0 to {{ O_W }} step {{ TILE_M }} {
       affine.for %tile_n = 0 to {{ O_C }} step {{ TILE_N }} {
@@ -319,8 +373,7 @@ func.func @{{ KERNEL_NAME }}({{ KERNEL_DEF }}) {
           } { accumulation_loop=true }
         } { accumulation_loop=true }
         // Store output matrix
-        memref.dma_start %output_buffer[%c0, %c0, %c0, %c0], %Y[%index0], %c_mvout, %tag3[%c0], %input_axis, %vstride
-            : memref<{{ 1 }}x{{ TILE_O_H }}x{{ TILE_M }}x{{ TILE_N }}xf32, 1>, memref<{{ BATCH * O_C * O_H * O_W }}xf32>, memref<1xi32> {padding=0, sram_stride=[{{ TILE_O_W * TILE_M * TILE_N }}, {{ TILE_M * TILE_N }}, 1, {{ TILE_M }}]}
+        {{kernel.store_output(indent_size=8)}}
       } { outer_loop=true }
     } { outer_loop=true }
   } { outer_loop=true }
@@ -342,9 +395,17 @@ SINGLE_BATCH_CONV_STRIDE_TEMPLATE = r"""
 // TILE_M = {{ TILE_M }}
 // TILE_N = {{ TILE_N }}
 // TILE_K = {{ TILE_K }}
-// TILE_M = {{ TILE_M }}
-// TILE_N = {{ TILE_N }}
-// TILE_K = {{ TILE_K }}
+// TILE_I_H={{ TILE_I_H }},
+// TILE_I_W={{ TILE_I_W }},
+// TILE_O_H={{ TILE_O_H }},
+// TILE_O_W={{ TILE_O_W }},
+// TILE_K_H={{ TILE_K_H }},
+// TILE_K_W={{ TILE_K_W }},
+// SUB_TILE_M={{ SUB_TILE_M }},
+// SUB_TILE_N={{ SUB_TILE_N }},
+// SUB_TILE_I_W={{ SUB_TILE_I_W }},
+// SUB_TILE_K_H={{ SUB_TILE_K_H }},
+// SUB_TILE_K_W={{ SUB_TILE_K_W }},
 // PADDING_H = {{ PADDING_H }}
 // PADDING_W = {{ PADDING_W }}
 // STRIDE_H = {{ STRIDE_H }}
@@ -365,8 +426,9 @@ SINGLE_BATCH_CONV_STRIDE_TEMPLATE = r"""
 memref.global @X_spad : memref<{{ TILE_I_H }}x{{ TILE_K_W }}x{{ TILE_M }}x{{ TILE_K }}xf32, 1>
 memref.global @W_spad : memref<{{ TILE_K_H }}x{{ TILE_K_W }}x{{ TILE_K }}x{{ TILE_N }}xf32, 1>
 memref.global @Y_spad : memref<{{ 1 }}x{{ TILE_O_H }}x{{ TILE_M }}x{{ TILE_N }}xf32, 1>
+{{kernel.def_global_vars()}}
 
-func.func @{{ KERNEL_NAME }}({{ KERNEL_DEF }}) {
+func.func @{{ KERNEL_NAME }}{{kernel.def_conv_kernel(inputs=[X, W, BIAS], outputs=[Y], names_str="X, W, Bias, Y", padded_input_size=PADDED_INPUT_SIZE, input_reorder=input_reorder)}} {
   %c_mvin = arith.constant 2 : index
   %c_mvin2 = arith.constant 1 : index
   %c_mvin3 = arith.constant 14 : index
@@ -386,6 +448,7 @@ func.func @{{ KERNEL_NAME }}({{ KERNEL_DEF }}) {
   %c0 = arith.constant 0 : index
   %c1 = arith.constant 1 : index
   %c2 = arith.constant 2 : index
+  {{- kernel.def_local_vars() }}
 
   affine.for %o_h = 0 to {{ O_H }} step {{ TILE_O_H }} {
     affine.for %tile_m = 0 to {{ O_W }} step {{ TILE_M }} {
@@ -431,8 +494,7 @@ func.func @{{ KERNEL_NAME }}({{ KERNEL_DEF }}) {
           } { accumulation_loop=true }
         } { accumulation_loop=true }
         // Store output matrix
-        memref.dma_start %output_buffer[%c0, %c0, %c0, %c0], %Y[%index0], %c_mvout, %tag3[%c0], %input_axis, %vstride
-            : memref<{{ 1 }}x{{ TILE_O_H }}x{{ TILE_M }}x{{ TILE_N }}xf32, 1>, memref<{{ BATCH * O_C * O_H * O_W }}xf32>, memref<1xi32> {padding=0, sram_stride=[{{ TILE_O_W * TILE_M * TILE_N }}, {{ TILE_M * TILE_N }}, 1, {{ TILE_M }}]}
+        {{kernel.store_output(indent_size=8)}}
       } { outer_loop=true }
     } { outer_loop=true }
   } { outer_loop=true }
@@ -441,38 +503,65 @@ func.func @{{ KERNEL_NAME }}({{ KERNEL_DEF }}) {
 """
 
 WRAPPER_TEMPLATE = r"""
-def {{ FUNC_NAME }}({{ INPUT }}, {{ WEIGHT }}{% if BIAS %}, {{ BIAS }} {% endif %}, {{ OUT }}):
+def {{ FUNC_NAME }}{{kernel.def_wrapper()}}:
     # Padding input
-    padded_shape = list({{ INPUT }}.shape)
+    padded_shape = list(X.shape)
     padded_shape[2] += 2 * {{ PADDING_H }}
     padded_shape[3] += 2 * {{ PADDING_W }}
-    {{ INPUT }}_padding = torch.zeros(padded_shape, device={{ INPUT }}.device)
-    {{ INPUT }}_padding[:, :, {{ PADDING_H }}:{{ INPUT }}.shape[2] + {{ PADDING_H }}, {{ PADDING_W }}:{{ INPUT }}.shape[3] + {{ PADDING_W }}] = {{ INPUT }}
+    X_padding = torch.zeros(padded_shape, device=X.device)
+    X_padding[:, :, {{ PADDING_H }}:X.shape[2] + {{ PADDING_H }}, {{ PADDING_W }}:X.shape[3] + {{ PADDING_W }}] = X
 
-    # Tanspose tensors
-    {%- if MULTI_TILE %}
-    t_{{ INPUT }} = {{ INPUT }}_padding.permute(2, 0, 3, 1).contiguous() # (BATCH, I_C, I_H, I_W) -> (I_H, BATCH, I_W, I_C)
-    {% elif SINGLE_BATCH %}
-    t_{{ INPUT }} = {{ INPUT }}_padding.permute(0, 2, 3, 1).contiguous() # (BATCH, I_C, I_H, I_W) -> (BATCH, I_H, I_W, I_C)
-    {% else %}
-    t_{{ INPUT }} = {{ INPUT }}_padding.permute(2, 3, 0, 1).contiguous() # (BATCH, I_C, I_H, I_W) -> (I_H, I_W, BATCH, I_C)
-    {% endif -%}
-    t_{{ WEIGHT }} = {{ WEIGHT }}.permute(2, 3, 1, 0).contiguous() # (O_C, I_C, K_H, K_W) -> (K_H, K_W, I_C, O_C)
-    {%- if SINGLE_BATCH %}
-    t_{{ OUT }} = {{ OUT }}.permute(0, 2, 3, 1).contiguous() # (BATCH, O_C, O_H, O_W) -> (BATCH, O_H, O_W, O_C)
-    {% else %}
-    t_{{ OUT }} = {{ OUT }}.permute(2, 3, 0, 1).contiguous() # (BATCH, O_C, O_H, O_W) -> (O_H, O_W, BATCH, O_C)
-    {% endif -%}
-    {{ KERNEL_NAME }}(t_{{ INPUT }}, t_{{ WEIGHT }}{% if BIAS %}, {{ BIAS }} {% endif %}, t_{{ OUT }})
-    {% if BACKENDSIM_EAGER_MODE %}
-    yield ({{KERNEL_NAME}}, (t_{{ INPUT }}, t_{{ WEIGHT }}{% if BIAS %}, {{ BIAS }} {% endif %}, t_{{ OUT }}))
-    {% endif %}
-    # Transpose back
-    {%- if SINGLE_BATCH %}
-    {{ OUT }}.copy_(t_{{ OUT }}.permute(0, 3, 1, 2).contiguous()) # (BATCH, O_H, O_W, O_C) -> (BATCH, O_C, O_H, O_W)
-    {% else %}
-    {{ OUT }}.copy_(t_{{ OUT }}.permute(2, 3, 0, 1).contiguous()) # (O_H, O_W, BATCH, O_C) -> (BATCH, O_C, O_H, O_W)
-    {% endif -%}
+    # Holding original output tensor
+    {%- for buf, name in kernel.get_conv_outputs().items() %}
+    {{ name }}_t = {{ name }}
+    {%- endfor %}
+
+    # Tanspose inputs
+    {%- for buf, name in kernel.get_conv_inputs().items() %}
+      {%- if name == "X" %}
+        {%- if MULTI_TILE %}
+    {{ name }} = {{ name }}_padding.permute(2, 0, 3, 1).contiguous() # (BATCH, I_C, I_H, I_W) -> (I_H, BATCH, I_W, I_C)
+        {%- elif SINGLE_BATCH %}
+    {{ name }} = {{ name }}_padding.permute(0, 2, 3, 1).contiguous() # (BATCH, I_C, I_H, I_W) -> (BATCH, I_H, I_W, I_C)
+        {%- else %}
+    {{ name }} = {{ name }}_padding.permute(2, 3, 0, 1).contiguous() # (BATCH, I_C, I_H, I_W) -> (I_H, I_W, BATCH, I_C)
+        {%- endif %}
+      {%- elif name == "W" %}
+    {{ name }} = {{ name }}.permute(2, 3, 1, 0).contiguous() # (O_C, I_C, K_H, K_W) -> (K_H, K_W, I_C, O_C)
+      {%- elif name == "Bias" %}
+    {{ name }} = {{ name }}
+      {%- else %}
+        {%- if SINGLE_BATCH %}
+    {{ name }} = {{ name }}.permute(0, 2, 3, 1).contiguous()  if {{ name }}.dim() == 4 else {{ name }} # (BATCH, O_C, O_H, O_W) -> (BATCH, O_H, O_W, O_C)
+        {%- else %}
+    {{ name }} = {{ name }}.permute(2, 3, 0, 1).contiguous()  if {{ name }}.dim() == 4 else {{ name }} # (BATCH, O_C, O_H, O_W) -> (O_H, O_W, BATCH, O_C)
+        {%- endif %}
+      {%- endif %}
+    {%- endfor %}
+
+    # Transpose outputs
+    {%- for buf, name in kernel.get_conv_outputs().items() %}
+      {%- if SINGLE_BATCH %}
+    {{ name }} = {{ name }}.permute(0, 2, 3, 1).contiguous() # (BATCH, O_C, O_H, O_W) -> (BATCH, O_H, O_W, O_C)
+      {%- else %}
+    {{ name }} = {{ name }}.permute(2, 3, 0, 1).contiguous() # (BATCH, O_C, O_H, O_W) ->  (O_H, O_W, BATCH, O_C)
+      {%- endif %}
+    {%- endfor %}
+
+    # Launch kernel
+    {{ KERNEL_NAME }}<DEF_CONV_WRAPPER>
+    {%- if BACKENDSIM_EAGER_MODE %}
+    yield ({{KERNEL_NAME}}, <DEF_CONV_WRAPPER>)
+    {%- endif %}
+
+    # Transpose back outputs
+    {%- for buf, name in kernel.get_conv_outputs().items() %}
+      {%- if SINGLE_BATCH %}
+    {{ name }}_t.copy_({{ name }}.permute(0, 3, 1, 2).contiguous()) # (BATCH, O_H, O_W, O_C) -> (BATCH, O_C, O_H, O_W)
+      {%- else %}
+    {{ name }}_t.copy_({{ name }}.permute(2, 3, 0, 1).contiguous()) # (O_H, O_W, BATCH, O_C) -> (BATCH, O_C, O_H, O_W)
+      {%- endif %}
+    {%- endfor %}
 """
 
 class MLIRConvTemplate(MLIRTemplate):
@@ -504,28 +593,11 @@ class MLIRConvTemplate(MLIRTemplate):
     def is_single_batch(self, BATCH):
         return BATCH == 1
 
-    # Can use math.multi ?
-    def def_kernel(self) ->str:
-        X, W = self.input_nodes[0], self.input_nodes[1]
-        Y = self.output_node
-        if len(self.input_nodes) == 3:
-          Bias = self.input_nodes[2]
-        else:
-          Bias = None
-
+    def get_padded_input_size(self, X):
         input_padded = list(X.layout.size)
         input_padded[2] += 2 * self.padding[0]
         input_padded[3] += 2 * self.padding[1]
-        input_size = math.prod(input_padded)
-        weight_size = math.prod(W.layout.size)
-        if Bias is not None:
-          bias_size = math.prod(Bias.layout.size)
-        output_size = math.prod(Y.layout.size)
-
-        if Bias is None:
-          return f"%{self.kernel_args[0]}: memref<{input_size}xf32>, %{self.kernel_args[1]}: memref<{weight_size}xf32>, %{self.kernel_args[3]}: memref<{output_size}xf32>"
-        else:
-          return f"%{self.kernel_args[0]}: memref<{input_size}xf32>, %{self.kernel_args[1]}: memref<{weight_size}xf32>, %{self.kernel_args[2]}: memref<{bias_size}xf32>, %{self.kernel_args[3]}: memref<{output_size}xf32>"
+        return math.prod(input_padded)
 
     def render(self,
                kernel: MLIRTemplateKernel,
@@ -534,13 +606,20 @@ class MLIRConvTemplate(MLIRTemplate):
                **kwargs):
         if template_buffer_node is not None:
             self.output_node = template_buffer_node
-        # if epilogue_nodes is not None and len(epilogue_nodes) > 0:
-        #     self.output_node = cast(Buffer, epilogue_nodes[-1])
-        #     self.function_name += f"_fused_{epilogue_nodes[0].node.origin_node.name}"
+        self.kernel = kernel
+        self.epilogue_nodes = epilogue_nodes
 
         X, W = self.input_nodes[0], self.input_nodes[1]
         Y = self.output_node
         Bias = None if len(self.input_nodes) == 2 else self.input_nodes[2]
+
+        if epilogue_nodes is not None:
+          extra_node_rw = {
+            item.name for epilogue_node in epilogue_nodes
+            for item in epilogue_node.read_writes.reads | epilogue_node.read_writes.writes
+            if item.name != Y.name
+          }
+        n_extra_node = len(extra_node_rw) if epilogue_nodes is not None else 0
 
         BATCH = X.layout.size[0]
         I_C = X.layout.size[1]
@@ -550,7 +629,7 @@ class MLIRConvTemplate(MLIRTemplate):
         O_H = Y.layout.size[2] if template_buffer_node is None else template_buffer_node.layout.size[2]
         O_W = Y.layout.size[3] if template_buffer_node is None else template_buffer_node.layout.size[3]
 
-        TILE_K_H, TILE_K_W, TILE_O_H, TILE_O_W, TILE_M, TILE_N, TILE_K = kernel.conv_combination_mapping(BATCH, O_C, I_C, K_H, K_W, O_H, O_W, self.stride, self.dilation)
+        TILE_K_H, TILE_K_W, TILE_O_H, TILE_O_W, TILE_M, TILE_N, TILE_K = kernel.conv_combination_mapping(BATCH, O_C, I_C, K_H, K_W, O_H, O_W, self.stride, self.dilation, n_extra_node)
         SUB_TILE_M = TILE_M if TILE_M < kernel.vector_lane else kernel.vector_lane
         SUB_TILE_N = TILE_N if TILE_N < kernel.vector_lane else kernel.vector_lane
         TILE_I_H = 1 + (TILE_O_H - 1) * self.stride[0] + (TILE_K_H - 1) * self.dilation[0]
@@ -566,7 +645,7 @@ class MLIRConvTemplate(MLIRTemplate):
         TOG_latency = BATCH if TILE_M > BATCH else TILE_M
         if self.is_single_batch(BATCH) and self.stride[0] != 1:
           conv_template = SINGLE_BATCH_CONV_STRIDE_TEMPLATE
-          TILE_K_H, TILE_K_W, TILE_O_H, TILE_O_W, TILE_M, TILE_N, TILE_K = kernel.conv_single_batch_mapping(BATCH, O_C, I_C, K_H, K_W, O_H, O_W, self.stride, self.dilation) # TODO: implement K_W
+          TILE_K_H, TILE_K_W, TILE_O_H, TILE_O_W, TILE_M, TILE_N, TILE_K = kernel.conv_single_batch_mapping(BATCH, O_C, I_C, K_H, K_W, O_H, O_W, self.stride, self.dilation, n_extra_node) # TODO: implement K_W
           TILE_I_H = 1 + (TILE_O_H - 1) * self.stride[0] + (TILE_K_H - 1) * self.dilation[0]
           x_spad_size_per_lane = kernel.get_spad_size_per_lane(TILE_K_W * TILE_I_H * TILE_M, TILE_K)
           y_spad_size_per_lane = kernel.get_spad_size_per_lane(TILE_O_H * TILE_M, TILE_N)
@@ -577,7 +656,7 @@ class MLIRConvTemplate(MLIRTemplate):
           TOG_latency = O_W if TILE_M > O_W else TILE_M
         elif self.is_multi_tile(I_C):
           conv_template = MULTI_TILE_CONV_TEMPLATE
-          TILE_K_H, TILE_K_W, TILE_O_H, TILE_O_W, TILE_M, TILE_N, TILE_K = kernel.conv_multi_tile_mapping(BATCH, O_C, I_C, K_H, K_W, O_H, O_W, self.stride, self.dilation)
+          TILE_K_H, TILE_K_W, TILE_O_H, TILE_O_W, TILE_M, TILE_N, TILE_K = kernel.conv_multi_tile_mapping(BATCH, O_C, I_C, K_H, K_W, O_H, O_W, self.stride, self.dilation, n_extra_node)
           TILE_I_W = 1 + (TILE_O_W - 1) * self.stride[1]
           TILE_I_H = 1 + (TILE_O_H - 1) * self.stride[0] + (TILE_K_H - 1) * self.dilation[0]
           x_spad_size_per_lane = kernel.get_spad_size_per_lane(TILE_I_W * TILE_I_H * TILE_M, TILE_K)
@@ -588,15 +667,15 @@ class MLIRConvTemplate(MLIRTemplate):
           y_spad_size = TILE_O_H * TILE_O_W * TILE_M * TILE_N
         elif self.is_single_batch(BATCH) and self.stride[0] == 1:
           conv_template = SINGLE_BATCH_CONV_TEMPLATE
-          TILE_K_H, TILE_K_W, TILE_O_H, TILE_O_W, TILE_M, TILE_N, TILE_K = kernel.conv_single_batch_mapping(BATCH, O_C, I_C, K_H, 1, O_H, O_W, self.stride, self.dilation) # TODO: implement K_W
+          TILE_K_H, TILE_K_W, TILE_O_H, TILE_O_W, TILE_M, TILE_N, TILE_K = kernel.conv_single_batch_mapping(BATCH, O_C, I_C, K_H, 1, O_H, O_W, self.stride, self.dilation, n_extra_node) # TODO: implement K_W
           TILE_I_H = 1 + (TILE_O_H - 1) * self.stride[0] + (TILE_K_H - 1) * self.dilation[0]
           TILE_I_W = 1 + (TILE_O_W - 1) * self.stride[1] + (TILE_K_W - 1) * self.dilation[1]
           SUB_TILE_M = TILE_I_W if TILE_I_W < kernel.vector_lane else kernel.vector_lane
           SUB_TILE_N = TILE_N if TILE_N < kernel.vector_lane else kernel.vector_lane
           x_spad_size_per_lane = kernel.get_spad_size_per_lane(TILE_I_W * TILE_I_H, TILE_K)
-          y_spad_size_per_lane = kernel.get_spad_size_per_lane(TILE_O_H * TILE_O_W * TILE_M, TILE_N)
+          y_spad_size_per_lane = kernel.get_spad_size_per_lane(TILE_O_H  * TILE_M, TILE_N)
           x_spad_size = TILE_I_W * TILE_I_H * TILE_K
-          y_spad_size = TILE_O_H * TILE_O_W * TILE_M * TILE_N
+          y_spad_size = TILE_O_H * TILE_M * TILE_N
           TOG_latency = O_W if TILE_M > O_W else TILE_M
 
         kernel.loop_size = [TOG_latency, TILE_N, TILE_K]
@@ -607,8 +686,12 @@ class MLIRConvTemplate(MLIRTemplate):
 
         kernel.render_options = dict(
             KERNEL_NAME=self.name,
-            KERNEL_DEF=self.def_kernel(),
             kernel=kernel,
+            X=X,
+            W=W,
+            BIAS=Bias,
+            Y=Y,
+            PADDED_INPUT_SIZE=self.get_padded_input_size(X),
             BATCH=X.layout.size[0],
             I_C=X.layout.size[1],
             I_H=X.layout.size[2],
@@ -641,10 +724,27 @@ class MLIRConvTemplate(MLIRTemplate):
             DILATION_W=self.dilation[1],
             DATA_STYPE="f32",
             DATA_SIZE=4,
-            BIAS=Bias
+            input_reorder=self.input_reorder
+        )
+
+        kernel.store_info = dict(
+            output_node = self.output_node.name,
+            dependent_buf = [],
+            sram_var = "output_buffer",
+            dram_var = "Y",
+            index_var = "index0",
+            tag_var = "tag",
+            vlane_split_axis = 3,
+            vlane_stride = 1,
+            mlir_dtype = kernel.render_options['DATA_STYPE'],
+            tile_nr_dim = 4,
+            dram_shape = f"memref<{BATCH * O_C * O_H * O_W}x{kernel.render_options['DATA_STYPE']}>",
+            tile_shape = f"memref<{TILE_O_H}x{TILE_O_W}x{TILE_M}x{TILE_N}x{kernel.render_options['DATA_STYPE']}, 1>" if conv_template in (CONV_TEMPLATE, MULTI_TILE_CONV_TEMPLATE)
+                          else f"memref<1x{TILE_O_H}x{TILE_M}x{TILE_N}x{kernel.render_options['DATA_STYPE']}, 1>",
+            tile_size = (TILE_O_H, TILE_O_W, TILE_M, TILE_N) if conv_template in (CONV_TEMPLATE, MULTI_TILE_CONV_TEMPLATE) else (1, TILE_O_H, TILE_M, TILE_N),
+            tile_stride = [TILE_O_W * TILE_M * TILE_N, TILE_M * TILE_N, 1, TILE_M]
         )
         code = self._template_from_string(conv_template).render(**kernel.render_options)
-
         self.header = f"float X_spad[{x_spad_size_per_lane}] __attribute__ ((section(\".spad\")));\n"
         self.header += f"float W_spad[{w_spad_size_per_lane}] __attribute__ ((section(\".spad\")));\n"
         self.header += f"float Y_spad[{y_spad_size_per_lane}] __attribute__ ((section(\".spad\")));\n"
@@ -653,26 +753,30 @@ class MLIRConvTemplate(MLIRTemplate):
         self.gem5_header += f"float Y_spad[{y_spad_size}] __attribute__ ((section(\".spad\")));\n"
 
         kernel.add_loop_info([kernel.render_options["K_H"], kernel.render_options["K_W"], kernel.render_options["O_H"], kernel.render_options["O_W"], kernel.render_options["BATCH"], kernel.render_options["O_C"], kernel.render_options["I_C"]], [kernel.render_options["TILE_M"], kernel.render_options["TILE_N"], kernel.render_options["TILE_K"]])
-        kernel.def_kernel(inputs=[X, W, Bias], outputs=[Y], names_str="X, W, Bias, Y", input_reorder=self.input_reorder)
 
         return code
 
     def outer_func_render(self, kernel_name, input_args):
+        X, W = self.input_nodes[0], self.input_nodes[1]
+        Y = self.output_node
+        Bias = None if len(self.input_nodes) == 2 else self.input_nodes[2]
+
         eager_mode = int(os.environ.get('BACKENDSIM_EAGER_MODE', default=False))
         options = dict(
+            kernel=self.kernel,
             KERNEL_NAME=kernel_name,
             FUNC_NAME=self.function_name,
-            INPUT=input_args[0],
-            WEIGHT=input_args[1],
-            BIAS=0 if len(input_args) == 3 else input_args[2],
-            OUT=input_args[3] if len(input_args) == 4 else input_args[2],
+            INPUT=X,
+            WEIGHT=W,
+            BIAS=Bias,
+            OUTPUT=Y,
             PADDING_H=self.padding[0],
             PADDING_W=self.padding[1],
             MULTI_TILE=self.is_multi_tile(self.input_shape[1]),
             SINGLE_BATCH=self.is_single_batch(self.input_shape[0]),
             VALIDATION_MODE=extension_config.CONFIG_TORCHSIM_VALIDATION_MODE,
             BACKENDSIM_EAGER_MODE=eager_mode,
-            HASH_VALUE=self.hash_value
+            input_reorder=self.input_reorder
         )
         code = self._template_from_string(WRAPPER_TEMPLATE).render(**options)
         return code, self.function_name
@@ -680,18 +784,10 @@ class MLIRConvTemplate(MLIRTemplate):
     def get_arg_attributes(self):
         arg_attributes = []
 
-        X, W = self.input_nodes[0], self.input_nodes[1]
-        Y = self.output_node
-        Bias = None if len(self.input_nodes) == 2 else self.input_nodes[2]
-
+        X = self.input_nodes[0]
         X_shape = [X.get_size()[i] for i in (2, 3, 0, 1)]
         X_shape[0] += 2 * self.padding[0]
         X_shape[1] += 2 * self.padding[1]
-        W_shape = [W.get_size()[i] for i in (2, 3, 1, 0)]
-        Y_shape = [Y.get_size()[i] for i in (2, 3, 0, 1)]
-
-        if Bias is not None:
-          Bias_shape = Bias.get_size()
 
         def compute_stride(shape):
             stride = [1] * len(shape)
@@ -700,16 +796,7 @@ class MLIRConvTemplate(MLIRTemplate):
             return stride
 
         X_stride = compute_stride(X_shape)
-        W_stride = compute_stride(W_shape)
-        Y_stride = compute_stride(Y_shape)
-        if Bias is not None:
-          Bias_stride = compute_stride(Bias_shape)
-
-        arg_attributes.append([self.kernel_args[0], [MLIRKernelArgs.MLIR_ARGS_IN, X.layout.dtype, math.prod(X_shape), X_shape, X_stride]])
-        arg_attributes.append([self.kernel_args[1], [MLIRKernelArgs.MLIR_ARGS_IN, W.layout.dtype, math.prod(W_shape), W_shape, W_stride]])
-        if Bias is not None:
-          arg_attributes.append([self.kernel_args[2], [MLIRKernelArgs.MLIR_ARGS_IN, Bias.layout.dtype, math.prod(Bias_shape), Bias_shape, Bias_stride]])
-        arg_attributes.append([self.kernel_args[3], [MLIRKernelArgs.MLIR_ARGS_OUT, Y.layout.dtype, math.prod(Y_shape), Y_shape, Y_stride]])
+        arg_attributes.append([X.data.data.name, [MLIRKernelArgs.MLIR_ARGS_IN, X.layout.dtype, math.prod(X_shape), X_shape, X_stride]])
 
         return arg_attributes
 

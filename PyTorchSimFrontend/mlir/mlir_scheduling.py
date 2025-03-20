@@ -20,6 +20,7 @@ class MLIRScheduling(BaseScheduling):
         self._ready_to_flush = False
         self.outer_function = set()
         config.inplace_buffers = False # FIXME. inout kernel makes trouble.. So disabled it!
+        self.max_fusion_size = 5
 
     def _set_flush_status(self, status: bool):
         self._ready_to_flush = status
@@ -28,6 +29,8 @@ class MLIRScheduling(BaseScheduling):
         return self.can_fuse_horizontal(node1, node2)
 
     def can_fuse_horizontal(self, node1, node2):
+        if (len(node1.get_nodes())+ len(node2.get_nodes())) > self.max_fusion_size:
+            return False
         _, (vars1, reduce1) = node1.group
         _, (vars2, reduce2) = node2.group
 
@@ -51,11 +54,11 @@ class MLIRScheduling(BaseScheduling):
                 return False
 
             # Convolution is currently not supported
-            if node1.is_template() and node1.get_nodes()[0].node.origin_node is not None and hasattr(node1.get_nodes()[0].node.origin_node.target, "_name") and node1.get_nodes()[0].node.origin_node.target._name == 'aten::convolution':
-                return False
+            # if node1.is_template() and node1.get_nodes()[0].node.origin_node is not None and hasattr(node1.get_nodes()[0].node.origin_node.target, "_name") and node1.get_nodes()[0].node.origin_node.target._name == 'aten::convolution':
+            #     return False
 
-            if node2.is_template() and node2.get_nodes()[0].node.origin_node is not None and hasattr(node2.get_nodes()[0].node.origin_node.target, "_name") and node2.get_nodes()[0].node.origin_node.target._name == 'aten::convolution':
-                return False
+            # if node2.is_template() and node2.get_nodes()[0].node.origin_node is not None and hasattr(node2.get_nodes()[0].node.origin_node.target, "_name") and node2.get_nodes()[0].node.origin_node.target._name == 'aten::convolution':
+            #     return False
 
             v1_total = math.prod(vars1) if len(vars1) else 0
             v2_total = math.prod(vars2) if len(vars2) else 0
@@ -111,11 +114,13 @@ class MLIRScheduling(BaseScheduling):
         self._set_flush_status(False)
 
     def define_function(self, kernel):
-        code, function_name = kernel.def_function()
-        if code is not None and function_name not in self.outer_function:
-            wrapper = V.graph.wrapper_code
-            wrapper.header.writeline(code)
-            self.outer_function.add(function_name)
+        partial_code, function_name = kernel.def_function()
+        if partial_code is not None and function_name not in self.outer_function:
+            with V.set_kernel_handler(kernel):
+                code = partial_code.finalize()
+                wrapper = V.graph.wrapper_code
+                wrapper.header.writeline(code)
+                self.outer_function.add(function_name)
 
     def define_kernel(self, src_code, kernel_name, vector_lane, spad_info, loop_size=None, origins={}):
         wrapper = V.graph.wrapper_code
@@ -134,7 +139,7 @@ class MLIRScheduling(BaseScheduling):
             wrapper.define_kernel(kernel_name, codecache_def.getvalue(), cuda=False)
         return kernel_name
 
-    def codegen_src_code(self, kernel, render, template_node, epilogue_nodes):
+    def codegen_template_code(self, kernel, render, template_node, epilogue_nodes):
         with kernel:
             for node in [template_node, *epilogue_nodes]:
                 node.mark_run()
@@ -143,13 +148,15 @@ class MLIRScheduling(BaseScheduling):
                 _, (group, reduction_group) = max(
                     epilogue_nodes, key=lambda x: int(x.is_reduction())
                 ).group
-                vars, reduction_vars = kernel.set_ranges(group, reduction_group)
-                tile_desc = kernel.compute_tile_size(epilogue_nodes, vars, reduction_vars)
+                vars, reduction_vars = kernel.set_ranges(group, reduction_group)    # Do we need this?
+                tile_desc = kernel.set_tile_size(kernel.store_info)
                 kernel.kernel_group.set_tile_info(tile_desc)
-                kernel.adjust_tile_size()
             # Flush created varaibles, since template fusion doen't share variable
             kernel.cse.cache.clear()
             for node in epilogue_nodes:
+                if template_node.node.name in [dep[0] for dep in list(node.read_writes.reads)]:
+                    kernel.store_info['dependent_buf'].append(node.node.name)
+                kernel.store_info
                 node.codegen((vars, reduction_vars))
         with V.set_kernel_handler(kernel):
             src_code = (
@@ -165,13 +172,13 @@ class MLIRScheduling(BaseScheduling):
         kernel, render, codegen_header = template_buffer.make_kernel_render(template_buffer, epilogue_nodes=epilogue_nodes, kernel_group=self.kernel_group)
         _, _, _, kernel.buffer_types = self.kernel_group.args.mlir_argdefs()
 
-        src_code = self.codegen_src_code(kernel, render, template_node, epilogue_nodes)
+        src_code = self.codegen_template_code(kernel, render, template_node, epilogue_nodes)
         wrapper = V.graph.wrapper_code
 
         if src_code in wrapper.src_to_kernel: # [CONV] check inner function is already defined
             kernel_name = wrapper.src_to_kernel[src_code]
             kernel, render, codegen_header = template_buffer.make_kernel_render(template_buffer, epilogue_nodes=epilogue_nodes, kernel_name=kernel_name) # update kernel name
-            src_code = self.codegen_src_code(kernel, render, template_node, epilogue_nodes)
+            src_code = self.codegen_template_code(kernel, render, template_node, epilogue_nodes)
 
         with V.set_kernel_handler(kernel):
             spad_end_symbol = f"int spad_end[0] __attribute__ ((section(\".spad\"), aligned({kernel.spad_info['spad_size']*kernel.vector_lane})));"
