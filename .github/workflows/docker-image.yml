@@ -6,7 +6,7 @@ on:
 
 jobs:
   build:
-    runs-on: self-hosted
+    runs-on: [self-hosted, Linux]
 
     permissions:
       contents: read
@@ -25,7 +25,7 @@ jobs:
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          password: ${{ secrets.GIT_ACCESS_TOKEN }}
 
       # Step 3: Pull the Cached Image
       - name: Pull Cached Image & Set environment
@@ -72,7 +72,15 @@ jobs:
     runs-on: self-hosted
     needs: build
     steps:
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GIT_ACCESS_TOKEN }}
       - name: Run test_add.py
+        env:
+          GIT_ACCESS_TOKEN: ${{ secrets.GIT_ACCESS_TOKEN }}
         run: |
           echo "Running test_add.py"
           docker run --rm \
@@ -85,7 +93,15 @@ jobs:
     runs-on: self-hosted
     needs: build
     steps:
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GIT_ACCESS_TOKEN }}
       - name: Run test_activation.py
+        env:
+          GIT_ACCESS_TOKEN: ${{ secrets.GIT_ACCESS_TOKEN }}
         run: |
           echo "Running test_activation.py"
           docker run --rm \
@@ -98,7 +114,15 @@ jobs:
     runs-on: self-hosted
     needs: build
     steps:
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GIT_ACCESS_TOKEN }}
       - name: Run test_batchnorm.py
+        env:
+          GIT_ACCESS_TOKEN: ${{ secrets.GIT_ACCESS_TOKEN }}
         run: |
           echo "Running test_batchnorm.py"
           docker run --rm \
@@ -111,7 +135,15 @@ jobs:
     runs-on: self-hosted
     needs: build
     steps:
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GIT_ACCESS_TOKEN }}
       - name: Run test_bmm.py
+        env:
+          GIT_ACCESS_TOKEN: ${{ secrets.GIT_ACCESS_TOKEN }}
         run: |
           echo "Running test_bmm.py"
           docker run --rm \
@@ -124,7 +156,15 @@ jobs:
     runs-on: self-hosted
     needs: build
     steps:
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GIT_ACCESS_TOKEN }}
       - name: Run test_cnn.py
+        env:
+          GIT_ACCESS_TOKEN: ${{ secrets.GIT_ACCESS_TOKEN }}
         run: |
           echo "Running test_cnn.py"
           docker run --rm \
@@ -137,7 +177,15 @@ jobs:
     runs-on: self-hosted
     needs: build
     steps:
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GIT_ACCESS_TOKEN }}
       - name: Run test_conv2d.py
+        env:
+          GIT_ACCESS_TOKEN: ${{ secrets.GIT_ACCESS_TOKEN }}
         run: |
           echo "Running test_conv2d.py"
           docker run --rm \
@@ -150,7 +198,15 @@ jobs:
     runs-on: self-hosted
     needs: build
     steps:
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GIT_ACCESS_TOKEN }}
       - name: Run test_matmul.py
+        env:
+          GIT_ACCESS_TOKEN: ${{ secrets.GIT_ACCESS_TOKEN }}
         run: |
           echo "Running test_matmul.py"
           docker run --rm \
@@ -163,7 +219,15 @@ jobs:
     runs-on: self-hosted
     needs: build
     steps:
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GIT_ACCESS_TOKEN }}
       - name: Run test_reduce.py
+        env:
+          GIT_ACCESS_TOKEN: ${{ secrets.GIT_ACCESS_TOKEN }}
         run: |
           echo "Running test_reduce.py"
           docker run --rm \
@@ -176,7 +240,15 @@ jobs:
     runs-on: self-hosted
     needs: build
     steps:
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GIT_ACCESS_TOKEN }}
       - name: Run test_softmax.py
+        env:
+          GIT_ACCESS_TOKEN: ${{ secrets.GIT_ACCESS_TOKEN }}
         run: |
           echo "Running test_softmax.py"
           docker run --rm \
@@ -189,7 +261,15 @@ jobs:
     runs-on: self-hosted
     needs: build
     steps:
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GIT_ACCESS_TOKEN }}
       - name: Run test_transpose2D.py
+        env:
+          GIT_ACCESS_TOKEN: ${{ secrets.GIT_ACCESS_TOKEN }}
         run: |
           echo "Running test_transpose2D.py"
           docker run --rm \
@@ -202,7 +282,15 @@ jobs:
     runs-on: self-hosted
     needs: build
     steps:
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GIT_ACCESS_TOKEN }}
       - name: Run test_view3D_2D.py
+        env:
+          GIT_ACCESS_TOKEN: ${{ secrets.GIT_ACCESS_TOKEN }}
         run: |
           echo "Running test_view3D_2D.py"
           docker run --rm \
@@ -215,7 +303,15 @@ jobs:
     runs-on: self-hosted
     needs: build
     steps:
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GIT_ACCESS_TOKEN }}
       - name: Run test_layernorm.py
+        env:
+          GIT_ACCESS_TOKEN: ${{ secrets.GIT_ACCESS_TOKEN }}
         run: |
           echo "Running test_layernorm.py"
           docker run --rm \
@@ -228,7 +324,15 @@ jobs:
     runs-on: self-hosted
     needs: build
     steps:
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GIT_ACCESS_TOKEN }}
       - name: Run test_mlp.py
+        env:
+          GIT_ACCESS_TOKEN: ${{ secrets.GIT_ACCESS_TOKEN }}
         run: |
           echo "Running test_mlp.py"
           docker run --rm \
@@ -241,7 +345,15 @@ jobs:
     runs-on: self-hosted
     needs: build
     steps:
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GIT_ACCESS_TOKEN }}
       - name: Run test_resnet.py
+        env:
+          GIT_ACCESS_TOKEN: ${{ secrets.GIT_ACCESS_TOKEN }}
         run: |
           echo "Running test_resnet.py"
           docker run --rm \
@@ -254,7 +366,15 @@ jobs:
     runs-on: self-hosted
     needs: build
     steps:
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GIT_ACCESS_TOKEN }}
       - name: Run test_transformer.py
+        env:
+          GIT_ACCESS_TOKEN: ${{ secrets.GIT_ACCESS_TOKEN }}
         run: |
           echo "Running test_transformer.py"
           docker run --rm \
@@ -267,7 +387,15 @@ jobs:
     runs-on: self-hosted
     needs: build
     steps:
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GIT_ACCESS_TOKEN }}
       - name: Run test_transpose3D.py
+        env:
+          GIT_ACCESS_TOKEN: ${{ secrets.GIT_ACCESS_TOKEN }}
         run: |
           echo "Running test_transpose3D.py"
           docker run --rm \
@@ -280,7 +408,15 @@ jobs:
     runs-on: self-hosted
     needs: build
     steps:
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GIT_ACCESS_TOKEN }}
       - name: Run test_sparsity.py
+        env:
+          GIT_ACCESS_TOKEN: ${{ secrets.GIT_ACCESS_TOKEN }}
         run: |
           echo "Running test_sparsity.py"
           docker run --rm \
@@ -293,7 +429,15 @@ jobs:
     runs-on: self-hosted
     needs: build
     steps:
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GIT_ACCESS_TOKEN }}
       - name: Run test_pool.py
+        env:
+          GIT_ACCESS_TOKEN: ${{ secrets.GIT_ACCESS_TOKEN }}
         run: |
           echo "Running test_pool.py"
           docker run --rm \
@@ -306,7 +450,15 @@ jobs:
     runs-on: self-hosted
     needs: build
     steps:
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GIT_ACCESS_TOKEN }}
       - name: Run test_single_perceptron.py
+        env:
+          GIT_ACCESS_TOKEN: ${{ secrets.GIT_ACCESS_TOKEN }}
         run: |
           echo "Running test_single_perceptron.py"
           docker run --rm \
@@ -319,21 +471,45 @@ jobs:
     runs-on: self-hosted
     needs: build
     steps:
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GIT_ACCESS_TOKEN }}
       - name: Run test_addmm_residual.py
+        env:
+          GIT_ACCESS_TOKEN: ${{ secrets.GIT_ACCESS_TOKEN }}
         run: |
           echo "Running test_addmm_residual.py"
           docker run --rm \
             -v /tmp/torchsim-ci/${GITHUB_SHA}:/dump \
             -e TORCHSIM_DUMP_PATH=/dump \
             ghcr.io/psal-postech/torchsim-ci:${GITHUB_SHA} python3 PyTorchSim/tests/Fusion/test_addmm_residual.py
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GIT_ACCESS_TOKEN }}
       - name: Run test_matmul_activation.py
+        env:
+          GIT_ACCESS_TOKEN: ${{ secrets.GIT_ACCESS_TOKEN }}
         run: |
           echo "Running test_matmul_activation.py"
           docker run --rm \
             -v /tmp/torchsim-ci/${GITHUB_SHA}:/dump \
             -e TORCHSIM_DUMP_PATH=/dump \
             ghcr.io/psal-postech/torchsim-ci:${GITHUB_SHA} python3 PyTorchSim/tests/Fusion/test_matmul_activation.py
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GIT_ACCESS_TOKEN }}
       - name: Run test_matmul_scalar.py
+        env:
+          GIT_ACCESS_TOKEN: ${{ secrets.GIT_ACCESS_TOKEN }}
         run: |
           echo "Running test_matmul_scalar.py"
           docker run --rm \
@@ -346,7 +522,15 @@ jobs:
     runs-on: self-hosted
     needs: build
     steps:
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GIT_ACCESS_TOKEN }}
       - name: Run test_moe.py
+        env:
+          GIT_ACCESS_TOKEN: ${{ secrets.GIT_ACCESS_TOKEN }}
         run: |
           echo "Running test_moe.py"
           docker run --rm \
@@ -359,7 +543,15 @@ jobs:
     runs-on: self-hosted
     needs: build
     steps:
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GIT_ACCESS_TOKEN }}
       - name: Run test_mistral.py
+        env:
+          GIT_ACCESS_TOKEN: ${{ secrets.GIT_ACCESS_TOKEN }}
         run: |
           echo "Running test_mistral.py"
           docker run --rm \
