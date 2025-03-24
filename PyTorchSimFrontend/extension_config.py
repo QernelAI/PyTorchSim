@@ -29,6 +29,7 @@ CONFIG_CLEANUP_DUMP_ARGS = int(os.environ.get('CLEANUP_DUMP_ARGS', default=False
 CONFIG_TORCHSIM_LLVM_PATH = os.environ.get('TORCHSIM_LLVM_PATH', default="/usr/bin")
 CONFIG_TORCHSIM_CUSTOM_PASS_PATH = os.environ.get('TORCHSIM_CUSTOM_PASS_PATH',
                                            default=f"{CONFIG_TORCHSIM_DIR}/GemminiLowerPass/build")
+CONFIG_TORCHSIM_DUMP_MLIR_IR = int(os.environ.get("TORCHSIM_DUMP_MLIR_IR", default=False))
 
 # Backendsim config
 CONFIG_TORCHSIM_BACKEND_CONFIG = os.environ.get('TORCHSIM_CONFIG',

@@ -65,6 +65,7 @@ def mlir_compile_command(filename, vectorlane_size, vlen=256):
             -convert-func-to-llvm \
             -convert-index-to-llvm \
             -reconcile-unrealized-casts \
+            {'--mlir-print-ir-after-all' if extension_config.CONFIG_TORCHSIM_DUMP_MLIR_IR else ''} \
             {filename}.mlir -o {filename}_llvm.mlir
         """,
     ).strip(),
@@ -101,6 +102,7 @@ def mlir_gem5_compile_command(filename, sample_filename, tog_file, vectorlane_si
             -convert-func-to-llvm \
             -convert-index-to-llvm \
             -reconcile-unrealized-casts \
+            {'--mlir-print-ir-after-all' if extension_config.CONFIG_TORCHSIM_DUMP_MLIR_IR else ''} \
             {filename}.mlir -o {sample_filename}_llvm.mlir
         """,
     ).strip(),
