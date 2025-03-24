@@ -65,6 +65,6 @@ struct SimulationConfig {
   }
 
   float max_dram_bandwidth() {
-    return dram_freq * dram_channels * dram_req_size / dram_nbl / 1000; // GB/s
+    return dram_freq * dram_channels * dram_req_size * 2 / dram_nbl / 1000; // GB/s
   }
 };

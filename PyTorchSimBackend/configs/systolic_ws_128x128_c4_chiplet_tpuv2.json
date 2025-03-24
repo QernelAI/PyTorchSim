@@ -10,7 +10,7 @@
   "dram_req_size": 32,
   "dram_latency" : 10,
   "dram_size" : 16,
-  "dram_nbl" : 1,
+  "dram_nbl" : 2,
   "dram_print_interval": 10000,
   "dram_config_path" : "../configs/ramulator2_configs/HBM2.yaml",
  
