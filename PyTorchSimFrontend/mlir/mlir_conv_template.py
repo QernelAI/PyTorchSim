@@ -644,7 +644,19 @@ class MLIRConvTemplate(MLIRTemplate):
         y_spad_size = TILE_O_H * TILE_O_W * TILE_M * TILE_N
         conv_template = CONV_TEMPLATE
         TOG_latency = BATCH if TILE_M > BATCH else TILE_M
-        if self.is_single_batch(BATCH) and self.stride[0] != 1:
+        if self.is_multi_tile(I_C):
+          conv_template = MULTI_TILE_CONV_TEMPLATE
+          TILE_K_H, TILE_K_W, TILE_O_H, TILE_O_W, TILE_M, TILE_N, TILE_K = kernel.conv_multi_tile_mapping(BATCH, O_C, I_C, K_H, K_W, O_H, O_W, self.stride, self.dilation, n_extra_node)
+          TILE_I_W = 1 + (TILE_O_W - 1) * self.stride[1]
+          TILE_I_H = 1 + (TILE_O_H - 1) * self.stride[0] + (TILE_K_H - 1) * self.dilation[0]
+          SUB_TILE_K = TILE_K if TILE_K < kernel.vector_lane else kernel.vector_lane
+          x_spad_size_per_lane = kernel.get_spad_size_per_lane(TILE_I_W * TILE_I_H * TILE_M, TILE_K)
+          w_spad_size_per_lane = kernel.get_spad_size_per_lane(TILE_K_H * TILE_K, TILE_N)
+          y_spad_size_per_lane = kernel.get_spad_size_per_lane(TILE_O_H * TILE_O_W * TILE_M, TILE_N)
+          x_spad_size = TILE_I_W * TILE_I_H * TILE_M * TILE_K
+          w_spad_size = TILE_K_H * TILE_K * TILE_N
+          y_spad_size = TILE_O_H * TILE_O_W * TILE_M * TILE_N
+        elif self.is_single_batch(BATCH) and self.stride[0] != 1:
           conv_template = SINGLE_BATCH_CONV_STRIDE_TEMPLATE
           TILE_K_H, TILE_K_W, TILE_O_H, TILE_O_W, TILE_M, TILE_N, TILE_K = kernel.conv_single_batch_mapping(BATCH, O_C, I_C, K_H, K_W, O_H, O_W, self.stride, self.dilation, n_extra_node) # TODO: implement K_W
           TILE_I_H = 1 + (TILE_O_H - 1) * self.stride[0] + (TILE_K_H - 1) * self.dilation[0]
@@ -656,17 +668,6 @@ class MLIRConvTemplate(MLIRTemplate):
           SUB_TILE_N = TILE_N if TILE_N < kernel.vector_lane else kernel.vector_lane
           SUB_TILE_K = TILE_K if TILE_K < kernel.vector_lane else kernel.vector_lane
           TOG_latency = O_W if TILE_M > O_W else TILE_M
-        elif self.is_multi_tile(I_C):
-          conv_template = MULTI_TILE_CONV_TEMPLATE
-          TILE_K_H, TILE_K_W, TILE_O_H, TILE_O_W, TILE_M, TILE_N, TILE_K = kernel.conv_multi_tile_mapping(BATCH, O_C, I_C, K_H, K_W, O_H, O_W, self.stride, self.dilation, n_extra_node)
-          TILE_I_W = 1 + (TILE_O_W - 1) * self.stride[1]
-          TILE_I_H = 1 + (TILE_O_H - 1) * self.stride[0] + (TILE_K_H - 1) * self.dilation[0]
-          x_spad_size_per_lane = kernel.get_spad_size_per_lane(TILE_I_W * TILE_I_H * TILE_M, TILE_K)
-          w_spad_size_per_lane = kernel.get_spad_size_per_lane(TILE_K_H * TILE_K, TILE_N)
-          y_spad_size_per_lane = kernel.get_spad_size_per_lane(TILE_O_H * TILE_O_W * TILE_M, TILE_N)
-          x_spad_size = TILE_I_W * TILE_I_H * TILE_M * TILE_K
-          w_spad_size = TILE_K_H * TILE_K * TILE_N
-          y_spad_size = TILE_O_H * TILE_O_W * TILE_M * TILE_N
         elif self.is_single_batch(BATCH) and self.stride[0] == 1:
           conv_template = SINGLE_BATCH_CONV_TEMPLATE
           TILE_K_H, TILE_K_W, TILE_O_H, TILE_O_W, TILE_M, TILE_N, TILE_K = kernel.conv_single_batch_mapping(BATCH, O_C, I_C, K_H, 1, O_H, O_W, self.stride, self.dilation, n_extra_node) # TODO: implement K_W
