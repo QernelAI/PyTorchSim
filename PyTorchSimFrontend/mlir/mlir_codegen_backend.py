@@ -848,23 +848,33 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         dram_shape = mlir_common.MLIRKernelArgs.get_mlir_shape(self.buffer_types[name])
         tile_shape = local_tile_desc.get_mlir_shape(mlir_dtype)
         tile_stride = local_tile_desc.get_tile_stride()
+        tile_size = local_tile_desc.get_tile_size()
         vshape = local_tile_desc.get_mlir_vshape(mlir_dtype)
+        origin_tile_size = self.spad_buffer_dict[str(value)][1] if str(value) in self.spad_buffer_dict else tile_size
+        require_store = True
+        if str(value) in self.spad_buffer_dict:
+            # Todo. If tile_size is not same (i.e., view operation), we can't apply peephole optimization easily
+            require_store = self.spad_buffer_dict[str(value)][1] != tile_size
 
-        # Define scratch pad buffer
-        sram_var, index_var, sram_index_var = self.get_scratchpad_buffer(dtype, name, tile_numel_per_lane, tile_shape, index_var, index)
+        if require_store:
+            # Define scratch pad buffer
+            sram_var, index_var, sram_index_var = self.get_scratchpad_buffer(dtype, name, tile_numel_per_lane, tile_shape, index_var, index)
 
-        # Generate vector store instruction
-        store_size, operand_type = self.var_info[value]
-        if mlir_dtype != operand_type:
-            value = ops.to_dtype(value, mlir_dtype, var_info=self.var_info)
+            # Generate vector store instruction
+            store_size, operand_type = self.var_info[value]
+            if mlir_dtype != operand_type:
+                value = ops.to_dtype(value, mlir_dtype, var_info=self.var_info)
 
-        if tile_numel_per_lane > 1 and store_size > 1:
-            operation = "affine.vector_store"
-            line = f"{operation} %{value}, %{sram_var}[{sram_index_var}] : {tile_shape}, {vshape}"
+            if tile_numel_per_lane > 1 and store_size > 1:
+                operation = "affine.vector_store"
+                line = f"{operation} %{value}, %{sram_var}[{sram_index_var}] : {tile_shape}, {vshape}"
+            else:
+                operation = "affine.store"
+                line = f"{operation} %{value}, %{sram_var}[{sram_index_var}] : {tile_shape}"
+            self.stores.writeline(common.DeferredLine(name, line)) # TODO: Should be changed to self.compute?
         else:
-            operation = "affine.store"
-            line = f"{operation} %{value}, %{sram_var}[{sram_index_var}] : {tile_shape}"
-        self.stores.writeline(common.DeferredLine(name, line)) # TODO: Should be changed to self.compute?
+            sram_var = self.spad_buffer_dict[str(value)][0]
+            sram_index_var = self.spad_buffer_dict[str(value)][3]
 
         # Generate DMA instruction
         code = self.get_dma_code("MVOUT", vlane_split_axis, vlane_stride, mlir_dtype, dram_var, index_var, sram_var, sram_index_var,
