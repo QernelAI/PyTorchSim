@@ -95,7 +95,7 @@ class FunctionalSimulator():
         vectorlane_option = f"--vectorlane-size={vectorlane_size}"
         kernel_address = f"--kernel-addr={kernel_start_addr}:{kernel_end_addr}"
         base_path= f"--base-path={runtime_path}"
-        os.makedirs(os.path.join(base_path, "indirect_access"), exist_ok=True)
+        os.makedirs(os.path.join(runtime_path, "indirect_access"), exist_ok=True)
         run = f'spike --isa rv64gcv --varch=vlen:256,elen:64 {vectorlane_option} {spad_option} {kernel_address} {base_path} /workspace/riscv-pk/build/pk {target_binary} {file_path_str}'
 
         print("[SpikeSimulator] cmd> ", run)

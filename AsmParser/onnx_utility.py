@@ -73,6 +73,7 @@ class memory_node(node):
         self.torchsim_tag_stride_list = tile_info["tag_stride_list"]
         self.torchsim_loop_idx_list = tile_info["loop_idx_list"]
         self.torchsim_is_async = tile_info["is_async"]
+        self.torchsim_indirect_mode = tile_info["indirect_mode"]
 
 class load_node(memory_node):
     pass

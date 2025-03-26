@@ -98,6 +98,7 @@ class tog_generator:
             tile_info["tag_stride_list"] = dump_data["tag_stride_list"]
             tile_info["loop_idx_list"] = dump_data["loop_idx_list"]
             tile_info["is_async"] = dump_data["is_async"]
+            tile_info["indirect_mode"] = dump_data["indirect_mode"]
             is_write = dump_data["is_write"]
             if is_write:
                 new_node = store_node(tile_info, node_id=node_id)
