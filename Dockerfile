@@ -53,7 +53,7 @@ ENV LLVM_DIR /riscv-llvm
 
 # Install Spike simulator
 RUN git clone https://${GIT_ACCESS_TOKEN}@github.com/PSAL-POSTECH/riscv-isa-sim.git --branch TorchSim && cd riscv-isa-sim && mkdir build && cd build && \
-    ../configure --prefix=$RISCV && make -j && make install && make clean
+    ../configure --prefix=$RISCV && make -j && make install
 
 # Install Proxy kernel
 RUN git clone https://github.com/riscv-software-src/riscv-pk.git && \
