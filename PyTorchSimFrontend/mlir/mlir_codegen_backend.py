@@ -1012,7 +1012,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
             if self.buffer_types[name][1] > 1:
                 divider_vec = self.cse.generate(self.reductions_suffix, f"vector.broadcast %{divider} : f32 to vector<{self.var_info[sum][0]}x{mlir_dtype}>")
             else:
-                divider_vec = f"f{self.buffer_types[name][1]}"
+                divider_vec = divider
             mean = self.cse.generate(self.reductions_suffix, f"arith.divf %{sum}, %{divider_vec} : {shape}")
 
             # m2 = (E(X^2) - E(X)^2) * N
