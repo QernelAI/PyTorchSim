@@ -1378,7 +1378,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
             new_name = f"{name}_{len(self.global_vars_dict[name])}"
             # Add definition to header
             self.header.writeline(f"{c_type} {new_name}_spad[{tile_size // self.vector_lane}] __attribute__ ((section(\".spad\")));")
-            self.gem5_header.writeline(f"{c_type} {new_name}_spad[{tile_size}];")
+            self.gem5_header.writeline(f"{c_type} {new_name}_spad[{tile_size}] __attribute__((aligned(64)));")
             self.global_vars.writeline(f"memref.global @{new_name}_spad : {dram_tile_shape}")
             self.global_vars_dict[name].append(str(raw_index))
         else:
