@@ -1,4 +1,6 @@
-import os
+import dataclasses
+from typing import Dict
+from typing import List
 from collections import defaultdict
 from functools import reduce
 from operator import mul
@@ -76,14 +78,15 @@ MLIR_INF = {
 }
 
 class ParallelLoopBuffer(IndentedBuffer):
-    def indent(self, offset=1, outer_loop=True):
+    def indent(self, offset=1, attribute="", suffix=""):
         @contextlib.contextmanager
         def ctx():
-            attribute = "{outer_loop=true}" if outer_loop else "{accumulation_loop=true}"
             for _ in range(offset):
                 self.writeline("{")
                 self._indent += 1
             for _ in range(-offset):
+                if suffix:
+                    self.writeline(suffix)
                 self._indent -= 1
                 self.writeline("} " + attribute)
             yield
@@ -91,6 +94,8 @@ class ParallelLoopBuffer(IndentedBuffer):
                 self.writeline("{")
                 self._indent += 1
             for _ in range(offset):
+                if suffix:
+                    self.writeline(suffix)
                 self._indent -= 1
                 self.writeline("} " + attribute)
 
@@ -178,6 +183,7 @@ class MLIRMultiDimTile():
         self.vlane_split_axis = vlane_split_axis
         self.vlane_stride = vlane_stride
         self.implicit_dim_size = None
+        self.nr_rdim = 0
 
     def set_tile_size(self, tile_size, tile_axis_order=None):
         self._tile_size = tile_size
@@ -221,6 +227,8 @@ class MLIRMultiDimTile():
 
     def get_tile_size_per_lane(self):
         tile_size_per_lane = list(self._tile_size)
+        if self.vlane_split_axis < 0 or self.vlane_split_axis >= len(tile_size_per_lane):
+            raise AssertionError("Not allowed split_axis")
         used_vlane = self.get_used_vlane()
         tile_size_per_lane[self.vlane_split_axis] = \
             self.div_round_up(tile_size_per_lane[self.vlane_split_axis], used_vlane)
@@ -244,25 +252,25 @@ class MLIRMultiDimTile():
         shape = "x".join(str_tile_size)
         return f"memref<{shape}x{dtype}, 1>"
 
-    @staticmethod
-    def extract_tile_size(memref_str):
-        assert memref_str.startswith("memref<") and memref_str.endswith(">"), "Invalid memref format"
-        # Extract the inner content of memref<>
-        inner_part = memref_str[len("memref<"):-1]
-        shapes = inner_part.split("x")[:-1]
-        return [int(dim) for dim in shapes]
-
     def get_mlir_vshape(self, mlir_dtype):
-        tile_numel_per_lane = self.get_numel_per_lane()
-        return f"vector<{tile_numel_per_lane}x{mlir_dtype}>" if tile_numel_per_lane > 1 else ""
+        return f"vector<{self.get_compute_vec_size()}x{mlir_dtype}>" if self.vlane_stride > 1 else f"{mlir_dtype}"
 
     def get_used_vlane(self):
         """
         Return number of used vector lane
         """
+        if self.vlane_split_axis < 0 or self.vlane_split_axis >= len(self._tile_size):
+            raise AssertionError("Not allowed split_axis")
         return min(self.div_round_up(self._tile_size[self.vlane_split_axis], self.vlane_stride), self.vector_lane)
 
     def get_vlane_stride(self):
+        return self.vlane_stride
+
+    def get_compute_vec_size(self):
+        # Granule size used in compute loop
+        if self.nr_rdim:
+            assert self.nr_rdim==1
+            return self.get_numel_per_lane() // self._tile_size[-1]
         return self.vlane_stride
 
     @staticmethod
@@ -309,6 +317,8 @@ class BaseMLIRKernel(common.Kernel, BaseMLIRHardwareInfo):
         # MLIR SSA tracker
         self.var_info = {} # MLIR variable info
         self.buffer_types : dict = None # format: dtype, numel, size, stride
+        self.compute_idx = "compute_idx"
+        self.compute_body_loop = LoopLevel(self.compute_idx, 1)
 
     def set_ranges(self, lengths, reduction_lengths):
         if self.call_ranges:
@@ -426,8 +436,8 @@ class BaseMLIRKernel(common.Kernel, BaseMLIRHardwareInfo):
         else:
             raise NotImplementedError("dummy tile size fail!")
 
-        vlane_stride = 8 # TODO: VCIX widening is not implemented
         vlane_split_axis = len(vars) - 1 # Set split_axis as a last normal loop not reduction loop
+        vlane_stride = 8 # TODO: VCIX widening is not implemented
         # Adjust tile size to avoid too much paddings
         for i in range(1, len(tile_size)+1):
             target_range = self.ranges[-i]
@@ -439,10 +449,7 @@ class BaseMLIRKernel(common.Kernel, BaseMLIRHardwareInfo):
                 tile_size[-i] = target_range
                 if remains:
                     tile_size[-i] += vlane_stride - remains
-        # Handle scalar case
-        if len(tile_size)==1 and tile_size[0] == 1:
-            vlane_stride = 1
-            tile_size[0] = 1
+
         # Adjust tile size
         for i in range(len(vars)):
             if tile_size[i] >= self.vector_lane: # maximize used vector lane
@@ -451,12 +458,22 @@ class BaseMLIRKernel(common.Kernel, BaseMLIRHardwareInfo):
         padded_size = used_vlane * vlane_stride
         tile_size[vlane_split_axis] = ((tile_size[vlane_split_axis] + padded_size - 1) // padded_size) * padded_size
 
+        # Handle scalar case
+        if len(tile_size)==1 and tile_size[0] == 1:
+            vlane_stride = 1
+            tile_size[0] = 1
+        elif vlane_split_axis == -1:
+            tile_size = [1] + tile_size
+            vlane_split_axis = 0
+            vlane_stride = 1
+
         # Select tile info.
         # Note: Kernel Group have to share same tile desc for fusion
         tile_desc = MLIRMultiDimTile(tile_size, self.vector_lane)
         tile_desc.vlane_split_axis = vlane_split_axis
         tile_desc.vlane_stride = vlane_stride
         tile_desc.implicit_dim_size = implicit_dim_size
+        tile_desc.nr_rdim = len(reduction_vars)
         return tile_desc
 
     def set_tile_size(self, template_store_info):
@@ -474,6 +491,8 @@ class BaseMLIRKernel(common.Kernel, BaseMLIRHardwareInfo):
         # Set node range info
         vars, reduction_vars = self.set_ranges(group, reduction_group)
         tile_desc = self.compute_tile_size(nodes, vars, reduction_vars)
+        self.compute_body_loop.size = tile_desc.get_numel_per_lane()
+        self.compute_body_loop.step = tile_desc.get_compute_vec_size()
         self.kernel_group.set_tile_info(tile_desc)
 
         _, _, _, self.buffer_types = self.kernel_group.args.mlir_argdefs()
@@ -680,3 +699,48 @@ class BaseMLIRKernel(common.Kernel, BaseMLIRHardwareInfo):
         return self
 
 
+@dataclasses.dataclass
+class LoopLevel:
+    var: sympy.Expr
+    size: sympy.Expr
+    start: int = 0
+    step: int = 1
+    reduction_vars: Dict[str, str] = dataclasses.field(default_factory=dict)
+    affine_yield: Dict[str, str] = dataclasses.field(default_factory=dict)
+
+    def lines(self):
+        if len(self.reduction_vars):
+            acc = ', '.join([f"%{acc.name}" for acc in self.reduction_vars.keys()])
+            args = ', '.join([f"%{iter.name} = %{init.name}" for (_, iter, init, _) in self.reduction_vars.values()])
+            dtype = ', '.join([f"{dtype}" for (_, _, _, dtype) in self.reduction_vars.values()])
+            line = f"{acc} = affine.for %{self.var} = {self.start} to {self.size} step {self.step} iter_args({args}) -> ({dtype})"
+        else:
+            line = f"affine.for %{self.var} = {self.start} to {self.size} step {self.step}"
+
+        return [line]
+
+    def epilogue_line(self):
+        if len(self.affine_yield):
+            vars = ', '.join([f"%{name}" for name, _ in self.affine_yield.items()])
+            reduced_shapes = ', '.join([f"{shape}" for _, shape in self.affine_yield.items()])
+            return f"affine.yield {vars} : {reduced_shapes}"
+        return ""
+
+@dataclasses.dataclass
+class LoopNest:
+    loops: List[LoopLevel]
+
+    def __bool__(self):
+        return bool(self.loops)
+
+    def mark_reduction(self, reduction_vars, affine_yield=dict()):
+        for loop in self.loops:
+            loop.reduction_vars = reduction_vars
+            loop.affine_yield = affine_yield
+
+    def mark_parallel(self, par_depth):
+        loops = self.loops
+        loops[0].parallel = par_depth
+        for i in range(1, par_depth):
+            loops[i].collapsed = True
+        loops[0].simd = loops[par_depth - 1].simd
