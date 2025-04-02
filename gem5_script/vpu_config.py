@@ -105,7 +105,7 @@ class MinorVecLdStore(MinorFU):
             "SimdUnitStrideSegmentedStore",
         ]
     )
-    opLat = 2
+    opLat = 1
 
 class MinorVecMisc(MinorFU):
     opClasses = minorMakeOpClassSet(
@@ -117,6 +117,7 @@ class MinorVecMisc(MinorFU):
             "SimdMisc",
             "SimdExt",
             "SimdFloatExt",
+            "CustomVlaneIdx",
         ]
     )
     opLat = 1
@@ -125,7 +126,6 @@ class MinorVecConfig(MinorFU):
     opClasses = minorMakeOpClassSet(
         [
             "SimdConfig",
-            "CustomVlaneIdx",
         ]
     )
     opLat = 1
@@ -153,6 +153,7 @@ class MinorCustomFUPool(MinorFUPool):
         # Scalar unit
         MinorFPUnit(),
         MinorCustomIntFU(),
+        MinorCustomIntFU(),
         MinorCustomIntMulFU(),
         MinorCustomIntDivFU(),
         MinorCustomPredFU(),
@@ -164,7 +165,10 @@ class MinorCustomFUPool(MinorFUPool):
  
         # Vector
         MinorVecConfig(), # 1 for vector config
+        MinorVecConfig(),
         MinorVecMisc(),
+        MinorVecMisc(),
+        MinorVecLdStore(),
         MinorVecLdStore(),
 
         # Vector ALU0
