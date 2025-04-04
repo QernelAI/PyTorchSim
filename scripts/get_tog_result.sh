@@ -30,4 +30,7 @@ while IFS= read -r line; do
         echo "Accumulated Total Cycle: $total_cycles"
         total_cycles=0
     fi
+    if [[ "$line" == *"[log]"* ]]; then
+        echo "$line"
+    fi
 done
