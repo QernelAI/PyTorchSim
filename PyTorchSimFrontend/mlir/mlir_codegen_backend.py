@@ -34,7 +34,7 @@ def reduction_init(reduction_type, dtype):
         return f"0.0"
     raise AssertionError(reduction_type)
 
-def reduction_combine_vec(reduction_type, vector_value, init_value):
+def reduction_partial_combine_vec(reduction_type, vector_value, init_value):
     if reduction_type == "sum":
         return ops.add(vector_value, init_value)
     if reduction_type == "prod":
@@ -45,6 +45,19 @@ def reduction_combine_vec(reduction_type, vector_value, init_value):
         return ops.minimum(vector_value, init_value)
     if reduction_type == "any":
         return ops.logical_and(vector_value, init_value)
+    raise AssertionError(reduction_type)
+
+def reduction_combine_vec(reduction_type, vector_value, init_value, axis, shape, reduced_shape):
+    if reduction_type == "sum":
+        return f"vector.multi_reduction <add>, %{vector_value}, %{init_value} [{axis}] : {shape} to {reduced_shape}"
+    if reduction_type == "prod":
+        return f"vector.multi_reduction <mul>, %{vector_value}, %{init_value} [{axis}] : {shape} to {reduced_shape}"
+    if reduction_type == "max":
+        return f"vector.multi_reduction <maximumf>, %{vector_value}, %{init_value} [{axis}] : {shape} to {reduced_shape}"
+    if reduction_type == "min":
+        return f"vector.multi_reduction <minimumf>, %{vector_value}, %{init_value} [{axis}] : {shape} to {reduced_shape}"
+    if reduction_type == "any":
+        return f"vector.multi_reduction <and>, %{vector_value}, %{init_value} [{axis}] : {shape} to {reduced_shape}"
     raise AssertionError(reduction_type)
 
 class ExtensionWrapperCodegen(wrapper.WrapperCodeGen):
@@ -934,15 +947,14 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         reduced_shape = self.kernel_group.tile_desc.get_mlir_vshape(type_name)
 
         # Set accumulation var
-        if len(self.ranges) == 1 or (len(self.ranges) == 2 and vec_len == 1): # 1-D vector to scalar
+        if vec_len == 1: # 1-D vector to scalar
             # Edge case for scalar
             init_vec = init
         else:
             # Adjust shape and inital value
             init_vec = self.cse.generate(self.reduction_prefix, f"vector.broadcast %{init} : {type_name} to {reduced_shape}")
         acc_var = init_vec
-        var_info = [vec_len, mlir_common.DTYPE_TO_MLIR[dtype]]
-        self.register_var_info(acc, var_info)
+
 
         # Reduction body prepare
         body_acc = self.reduction_cse.generate(
@@ -960,9 +972,29 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         self.init_cse.reduction_cache[reduction_key] = init_vec
 
         # Reduction body codegen
-        result = reduction_combine_vec(reduction_type, value, body_iter_arg)
+        result = reduction_partial_combine_vec(reduction_type, value, body_iter_arg)
         self.compute_body_loop.reduction_vars[body_acc] = (reduction_type, body_iter_arg, iterator, reduced_shape)
         self.compute_body_loop.affine_yield[result] = reduced_shape
+
+        # Final reduction
+        reduction_size = self.kernel_group.tile_desc.get_numel_per_lane() // self.kernel_group.tile_desc.get_tile_size()[-1]
+        assert(vec_len % reduction_size==0)
+        if vec_len > reduction_size:
+            init = self.cse.generate(self.reductions_suffix, f"arith.constant {reduction_init(reduction_type, dtype)} : {type_name}")
+            if reduction_size == 1:
+                final_reduced_shape = f"{type_name}"
+                out = self.cse.generate(self.reductions_suffix, reduction_combine_vec(reduction_type, acc, init, axis=0, shape=reduced_shape, reduced_shape=final_reduced_shape))
+            else:
+                final_reduced_shape = f"vector<{reduction_size}x{type_name}>"
+                init_vec = self.cse.generate(self.reductions_suffix, f"vector.broadcast %{init} : {type_name} to {final_reduced_shape}")
+                new_vshape= f"vector<{vec_len//reduction_size}x{reduction_size}x{type_name}>"
+                value = self.cse.generate(self.reductions_suffix, f"vector.shape_cast %{acc} : {reduced_shape} to {new_vshape}")
+                out = self.cse.generate(self.reductions_suffix, reduction_combine_vec(reduction_type, value, init_vec, axis=0, shape=new_vshape, reduced_shape=final_reduced_shape))
+            acc = out
+
+        # reigster reduction output
+        var_info = [reduction_size, mlir_common.DTYPE_TO_MLIR[dtype]]
+        self.register_var_info(acc, var_info)
         return acc
 
     def store_reduction(self, name, index, value):
@@ -986,9 +1018,11 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         dram_shape = mlir_common.MLIRKernelArgs.get_mlir_shape(self.buffer_types[name])
         tile_shape = local_tile_desc.get_mlir_shape(mlir_dtype)
         tile_stride = local_tile_desc.get_tile_stride()
-        vshape = self.kernel_group.tile_desc.get_mlir_vshape(mlir_dtype)
-        compute_vec_size = self.kernel_group.tile_desc.get_compute_vec_size()
-
+        compute_vec_size = self.kernel_group.tile_desc.get_numel_per_lane() // self.kernel_group.tile_desc.get_tile_size()[-1]
+        if compute_vec_size == 1:
+            vshape = f"{mlir_dtype}"
+        else:
+            vshape = f"vector<{compute_vec_size}x{mlir_dtype}>"
         sram_var, index_var, sram_index_var = self.get_scratchpad_buffer(dtype, name, tile_numel_per_lane, tile_shape, index_var,
                                                                          index, buffer=self.reduction_suffix)
         if self.welford_reduce_out is not None:
