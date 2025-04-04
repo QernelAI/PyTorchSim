@@ -5,12 +5,16 @@ import torch.utils.cpp_extension
 from model import Transformer, TransformerBlock, ModelArgs, Attention, FeedForward, KVCache, precompute_freqs_cis, sample
 
 def test_result(name, out, cpu_out, rtol=1e-4, atol=1e-4):
-    message = f"|{name} Test Passed|"
     if torch.allclose(out.cpu(), cpu_out, rtol=rtol, atol=atol):
+        message = f"|{name} Test Passed|"
         print("-" * len(message))
         print(message)
         print("-" * len(message))
     else:
+        message = f"|{name} Test Failed|"
+        print("-" * len(message))
+        print(message)
+        print("-" * len(message))
         print("custom out: ", out.cpu())
         print("cpu out: ", cpu_out)
         exit(1)
@@ -143,7 +147,7 @@ if __name__ == "__main__":
     from Scheduler.scheduler import ExecutionEngine
     module = ExecutionEngine.setup_device()
     device = module.custom_device()
-    test_decode(device, 33, 3)
+    test_decode(device, 32, 3)
     #test_concat(device, size1=(1, 8, 32, 64), size2=(1,8,1,64), dim=2)
     #test_attention(device)
     #test_ffn(device)
