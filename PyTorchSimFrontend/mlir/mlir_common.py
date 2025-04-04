@@ -506,6 +506,11 @@ class BaseMLIRKernel(common.Kernel, BaseMLIRHardwareInfo):
             else:
                 spad_overflow = False
 
+        # Maximize the utilizaiotn of vectorlane
+        if len(reduction_vars):
+            minimum_stride = max(self.roundup_vectorlane(tile_size[vlane_split_axis]) // self.vector_lane, 2)
+            vlane_stride = min(minimum_stride, 8)
+
         # Handle scalar case
         if len(self.ranges)==1 and self.ranges[0] == 1:
             vlane_stride = 1
