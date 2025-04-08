@@ -140,10 +140,10 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
         maximize_i_j = 1 # reuse weight
         for k in tile_K_range:
             tile_K = k * self.vector_lane if K > self.vector_lane else K_padded
-            for j in tile_N_range:
-                tile_N = j * self.vector_lane if N > self.vector_lane else N_padded
-                for i in tile_M_range:
-                    tile_M = i * self.vector_lane if M > self.vector_lane else M_padded
+            for i in tile_M_range:
+                tile_M = i * self.vector_lane if M > self.vector_lane else M_padded
+                for j in tile_N_range:
+                    tile_N = j * self.vector_lane if N > self.vector_lane else N_padded
                     used_spad_size = (tile_M * tile_K + tile_K * tile_N + tile_M * tile_N * (1 + n_extra_node)) * self.precision
                     weight_size_per_lane = self.get_spad_size_per_lane(tile_K, tile_N)
                     input_size_per_lane = self.get_spad_size_per_lane(tile_M, tile_K)
@@ -153,6 +153,42 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
                         max_used_spad_size = used_spad_size
                         maximize_i_j = tile_M * tile_N
                         mapping = (tile_M, tile_N, tile_K)
+        return mapping
+
+    def search_mapping_space(self, mapping, idx, increment, stride, dilation, n_extra_node=0):
+        if idx == 0 or idx == 1 or idx == 4 or idx == 5 or idx == 6:
+            raise NotImplementedError("Only O_H and O_W are supported for search_mapping_space")
+        spad_size_per_lane = self.spad_info["spad_size"]
+        spad_size = spad_size_per_lane * self.vector_lane
+        max_spad_size = spad_size // 2 # double buffer
+        max_spad_per_lane = spad_size_per_lane // 2 # double buffer
+
+        mapping = list(mapping)
+        mapping[idx] += increment
+        k_h, k_w, o_h, o_w, M, N, K = mapping
+        i_h = 1 + (o_h - 1) * stride[0] + (k_h - 1) * dilation[0]
+        i_w = 1 + (o_w - 1) * stride[1] + (k_w - 1) * dilation[1]
+        weight_size = k_w * k_h * K * N
+        input_size = i_w * i_h * M * K
+        output_size = o_w * o_h * M * N
+        used_spad_size = (weight_size + input_size + output_size * (1 + n_extra_node)) * self.precision
+        weight_size_per_lane = self.get_spad_size_per_lane(k_w * k_h * K, N)
+        input_size_per_lane = self.get_spad_size_per_lane(i_w * i_h * M, K)
+        output_size_per_lane = self.get_spad_size_per_lane(o_w * o_h * M  * (1 + n_extra_node), N)
+        used_spad_size_per_lane = (weight_size_per_lane + input_size_per_lane + output_size_per_lane) * self.precision
+        if used_spad_size < max_spad_size and used_spad_size_per_lane < max_spad_per_lane:
+            mapping = (k_h, k_w, o_h, o_w, M, N, K)
+        else:
+            mapping[idx] -= increment
+
+        return mapping
+
+    def pseudo_auto_tune(self, mapping, stride, dilation, n_extra_node=0):
+        # pseudo auto-tune
+        if mapping[2] == 1:
+            mapping = self.search_mapping_space(mapping, 2, 1, stride, dilation, n_extra_node=n_extra_node)
+        if mapping[3] == 1:
+            mapping = self.search_mapping_space(mapping, 3, 1, stride, dilation, n_extra_node=n_extra_node)
         return mapping
 
     def conv_combination_mapping(self, M, N, K, K_H, K_W, O_H, O_W, stride, dilation, n_extra_node=0):
@@ -182,6 +218,10 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
                             max_used_spad_size = used_spad_size
                             max_k_h_w = k_h * k_w
                             mapping = (k_h, k_w, o_h, o_w, M, N, K)
+
+        # FIXME: this should be implemented with auto-tuning
+        mapping = self.pseudo_auto_tune(mapping, stride, dilation, n_extra_node=n_extra_node)
+
         if max_used_spad_size == 0:
             raise RuntimeError("Cannot find a valid mapping")
         return mapping
