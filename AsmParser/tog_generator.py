@@ -210,7 +210,6 @@ class tog_generator:
 
     def generate_tile_graph(self, name="tile_graph", cycle_list=list, x_offset=int, w_offset=int, vector_lane=int, stonneGraph=False):
         node_list = list(self.node_dict.values())[1:]
-        is_preload = True # FIXME: first systolic array node is preload
         if len(node_list):
             node_list[0].set_parent([])
             for iter_node in self.node_dict.values():
@@ -221,9 +220,9 @@ class tog_generator:
                         print("[TOGGen] Error compute cycle timing is missing...!")
                         iter_node.torchsim_cycle = 10
                     # FIXME.
-                    if iter_node.torchsim_compute_type == 1:
+                    if iter_node.torchsim_compute_type > 0:
+                        is_preload = iter_node.torchsim_compute_type == 2
                         offset = w_offset if is_preload else x_offset
-                        is_preload = False
                         iter_node.torchsim_overlapping_cycle = max(iter_node.torchsim_cycle - offset, 0)
 
         origin_info = "_".join(map(str, self.origins))

@@ -541,16 +541,17 @@ std::vector<std::shared_ptr<Tile>> TileLoopNode::get_tiles_from_iter(TileGraphPa
       inst->set_overlapping_cycle(compute_node->get_overlapping_cycle());
       inst->set_compute_type(compute_node->get_compute_type());
 
+      // FIXME: double free error
       /* Check should we have to skip */
-      auto output_idx_list = calc_output_idx(tog_parser, iter); // (M,N,K) order
-      if (compute_node->get_compute_type() == 1 && output_idx_list.size() == 3) { // FIXME. hardcoded type
-        bool skip = find_output_idx(tog_parser, output_idx_list);
-        if (skip) {
-          inst->set_compute_cycle(0);
-          inst->set_overlapping_cycle(0);
-          spdlog::trace("[TOGParser/Sparse] Skip output tile index: {}", fmt::join(output_idx_list, ","));
-        }
-      }
+      // auto output_idx_list = calc_output_idx(tog_parser, iter); // (M,N,K) order
+      // if (compute_node->get_compute_type() == 1 && output_idx_list.size() == 3) { // FIXME. hardcoded type
+      //   bool skip = find_output_idx(tog_parser, output_idx_list);
+      //   if (skip) {
+      //     inst->set_compute_cycle(0);
+      //     inst->set_overlapping_cycle(0);
+      //     spdlog::trace("[TOGParser/Sparse] Skip output tile index: {}", fmt::join(output_idx_list, ","));
+      //   }
+      // }
 
       link_map[tile_node] = inst;
       tile_vec.back()->append_instuction(inst);

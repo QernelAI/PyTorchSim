@@ -217,7 +217,7 @@ class MLIRCodeCache:
             x_offset = kwargs['loop_size'][-3]
         if kwargs['loop_size'] is not None and kwargs['loop_size'][-1] < vectorlane_size:
             w_offset = kwargs['loop_size'][-1]
-        w_offset = max(w_offset - x_offset, 0)
+        w_offset = 0 # max(w_offset - x_offset, 0)
         tile_graph_generator = tog_generator(origins)
         tile_graph_generator.load_file(raw_tog_path)
         tile_graph_generator.generate_tile_graph(

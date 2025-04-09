@@ -43,7 +43,7 @@ if __name__ == "__main__":
     import sys
     base_dir = os.environ.get('TORCHSIM_DIR', default='/workspace/PyTorchSim')
     config = os.environ.get('TORCHSIM_CONFIG', default=f'{base_dir}/PyTorchSimBackend/configs/systolic_ws_128x128_c1_simple_noc_tpuv2.json')
-    config = config.split('/')[-1].split('.')[0] # extract config name from config path
+    config = config.split('/')[-1].split('.')[0][9:] # extract config name from config path
     sys.path.append(base_dir)
     args = argparse.ArgumentParser()
     args.add_argument('--size', nargs='+', type=int, default=[128, 128, 128], help='M K N')

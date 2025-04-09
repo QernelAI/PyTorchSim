@@ -32,7 +32,8 @@ class Core {
   std::queue<std::shared_ptr<Instruction>>& get_compute_pipeline(int compute_type);
   enum {
     VECTOR_UNIT,
-    SYSTOLIC_ARRAY,
+    MATMUL,
+    PRELOAD,
     NR_COMPUTE_UNIT
   };
 

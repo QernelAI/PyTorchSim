@@ -27,7 +27,7 @@ def run_conv2d(device, batch_size, i_h, i_w, i_c, o_c, kernel_size, stride, padd
         o_c = b.shape[0]
         conv2d = torch.nn.Conv2d(i_c, o_c, b.shape[-1], stride=stride, padding=padding, dilation=1, bias=False)
         conv2d.weight = torch.nn.Parameter(b)
-        conv2d.bias = torch.nn.Parameter(bias)
+        # conv2d.bias = torch.nn.Parameter(bias)
         return conv2d(a)
     torch.manual_seed(0)
     conv_input = torch.randn(batch_size, i_c, i_h, i_w).to(memory_format=torch.channels_last, device=device)

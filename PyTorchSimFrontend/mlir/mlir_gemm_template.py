@@ -136,11 +136,11 @@ class MLIRGemmTemplate(MLIRTemplate):
         TILE_M = min(extension_config.CONFIG_FORCE_TILE_M, TILE_M)
         TILE_N = min(extension_config.CONFIG_FORCE_TILE_N, TILE_N)
         TILE_K = min(extension_config.CONFIG_FORCE_TILE_K, TILE_K)
-        TOG_latency = M if TILE_M > M else TILE_M
-        kernel.loop_size =[TOG_latency, TILE_N, TILE_K]
         SUB_TILE_M = TILE_M if TILE_M < kernel.vector_lane else kernel.vector_lane
-        SUB_TILE_N = TILE_N if TILE_N < kernel.vector_lane else kernel.vector_lane
-        SUB_TILE_K = TILE_K if TILE_K < kernel.vector_lane else kernel.vector_lane
+        SUB_TILE_N = TILE_N
+        SUB_TILE_K = TILE_K
+        TOG_latency = M if SUB_TILE_M > M else SUB_TILE_M
+        kernel.loop_size =[TOG_latency, SUB_TILE_N, SUB_TILE_K]
 
         W_transposed = self.is_transposed(W)
         X_transposed = self.is_transposed(X)

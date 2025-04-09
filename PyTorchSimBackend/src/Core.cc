@@ -20,6 +20,7 @@ Core::Core(uint32_t id, SimulationConfig config)
 
 bool Core::can_issue(const std::shared_ptr<Tile>& op) {
   /* Check SRAM is enough to run tile */
+  assert(op->get_required_sram_size() <= _sram_size);
   return op->get_required_sram_size() + _used_sram_size <= _sram_size && !op->is_stonne_tile();
 }
 
@@ -48,7 +49,7 @@ std::shared_ptr<Tile> Core::pop_finished_tile() {
 std::queue<std::shared_ptr<Instruction>>& Core::get_compute_pipeline(int compute_type) {
   if (compute_type == VECTOR_UNIT)
     return _vu_compute_pipeline;
-  else if (compute_type == SYSTOLIC_ARRAY) {
+  else if (compute_type == MATMUL || compute_type == PRELOAD) {
     uint32_t sa_idx = _systolic_array_rr;
     _systolic_array_rr = (_systolic_array_rr + 1) % _num_systolic_array_per_core;
     return _sa_compute_pipeline.at(sa_idx);
