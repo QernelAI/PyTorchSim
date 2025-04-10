@@ -71,6 +71,8 @@ std::vector<uint32_t> calc_output_idx(TileGraphParser* tog_parser, std::map<std:
   }
 
   offset = outer_loop.size() - inner_loop.size();
+  if (offset < 0)
+    return outer_loop;
   for (int i=0; i<inner_loop.size(); i++)
     outer_loop[offset+i] += inner_loop[i] * step;
   return outer_loop;
@@ -340,6 +342,7 @@ std::vector<std::shared_ptr<Tile>> TileLoopNode::get_tiles_from_iter(TileGraphPa
     if (tile_node->get_type() == TileType::LOAD_NODE) {
       std::shared_ptr<TileMemoryNode> mem_node = std::static_pointer_cast<TileMemoryNode>(tile_node);
       auto base_addr_name = mem_node->get_base_addr_name();
+      int base_addr_id = tog_parser->register_addr_name(base_addr_name);
       std::vector<std::string>& tag_idx_list = mem_node->get_tag_idx_list();
       std::vector<int>& tag_stride_list = mem_node->get_tag_stride_list();
       std::vector<int> skip_idx_list;
@@ -415,7 +418,8 @@ std::vector<std::shared_ptr<Tile>> TileLoopNode::get_tiles_from_iter(TileGraphPa
         mem_node->get_tile_size(), mem_node->get_precision(), iter_list,
         mem_node->get_stride_list(), tag_list, tag_stride_list, accum_tag_list, loop_size_list
       );
-      inst->set_addr_name(base_addr_name);
+      inst->set_addr_name(base_addr_name, base_addr_id);
+      inst->prepare_tag_key();
       inst->set_nr_inner_loop(nr_inner_loop);
       inst->adjust_dram_address();
       inst->set_is_async(mem_node->is_async_node());
@@ -429,6 +433,7 @@ std::vector<std::shared_ptr<Tile>> TileLoopNode::get_tiles_from_iter(TileGraphPa
     } else if (tile_node->get_type() == TileType::STORE_NODE) {
       std::shared_ptr<TileMemoryNode> mem_node = std::static_pointer_cast<TileMemoryNode>(tile_node);
       auto base_addr_name = mem_node->get_base_addr_name();
+      int base_addr_id = tog_parser->register_addr_name(base_addr_name);
       /* Lookup given name's address */
       addr_type base_addr = tog_parser->lookup(base_addr_name);
       std::vector<int>& tag_stride_list = mem_node->get_tag_stride_list();
@@ -469,7 +474,8 @@ std::vector<std::shared_ptr<Tile>> TileLoopNode::get_tiles_from_iter(TileGraphPa
         mem_node->get_tile_size(), mem_node->get_precision(), iter_list,
         mem_node->get_stride_list(), std::vector<int>(1), tag_stride_list, accum_tag_list, loop_size_list
       );
-      inst->set_addr_name(base_addr_name);
+      inst->set_addr_name(base_addr_name, base_addr_id);
+      inst->prepare_tag_key();
       inst->set_nr_inner_loop(nr_inner_loop);
       inst->adjust_dram_address();
       inst->set_is_async(mem_node->is_async_node());
@@ -484,6 +490,7 @@ std::vector<std::shared_ptr<Tile>> TileLoopNode::get_tiles_from_iter(TileGraphPa
       printIndexMap("[TOGParser] DMA Wait Node ", iter);
       std::shared_ptr<TileMemoryWaitNode> wait_node = std::static_pointer_cast<TileMemoryWaitNode>(tile_node);
       auto base_addr_name = wait_node->get_base_addr_name();
+      int base_addr_id = tog_parser->register_addr_name(base_addr_name);
       addr_type base_addr = tog_parser->lookup(base_addr_name);
       /* Lookup given name's address */
       std::vector<int> iter_list;
@@ -522,7 +529,8 @@ std::vector<std::shared_ptr<Tile>> TileLoopNode::get_tiles_from_iter(TileGraphPa
         std::vector<size_t>(), 0, iter_list,
         iter_list, tag_list, new_tag_stride_list, accum_tag_list, std::vector<int>()
       );
-      inst->set_addr_name(base_addr_name);
+      inst->set_addr_name(base_addr_name, base_addr_id);
+      inst->prepare_tag_key();
       link_map[tile_node] = inst;
       tile_vec.back()->append_instuction(inst);
     } else if (tile_node->get_type() == TileType::COMPUTE_NODE) {

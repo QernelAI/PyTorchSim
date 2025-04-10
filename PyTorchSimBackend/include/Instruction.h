@@ -51,7 +51,7 @@ class Instruction {
   void set_compute_cycle(cycle_type cycle) { compute_cycle = cycle; }
   void set_indirect_index_path(std::string indirect_path) { _is_indirect_mode=true; _indirect_index_path=indirect_path; }
   void print();
-  std::set<addr_type> get_dram_address(addr_type dram_req_size);
+  std::shared_ptr<std::set<addr_type>> get_dram_address(addr_type dram_req_size);
   std::vector<addr_type> get_trace_address() { return _trace_address; }
   bool load_indirect_index(const std::string& path, uint64_t*& indirect_index, const std::vector<uint64_t>& tile_size);
   void set_trace_address(std::vector<addr_type>& trace_address) { _trace_address = trace_address; }
@@ -71,11 +71,13 @@ class Instruction {
   std::vector<int>& get_tag_idx_list() { return _tag_idx_list; }
   std::vector<int>& get_tag_stride_list() { return _tag_stride_list; }
   std::vector<int>& get_tag_id() { return _tag_key; }
-  void set_addr_name(std::string name) { _addr_name = name; }
+  void set_addr_name(std::string name, int id) { _addr_name = name; _addr_id = id; }
   std::string get_addr_name() { return _addr_name; }
+  int get_addr_id() { return _addr_id; }
   void set_nr_inner_loop(int nr) { _nr_inner_loop = nr; }
   int get_nr_inner_loop() { return _nr_inner_loop; }
   void set_is_async(bool is_async) { _is_async_dma = is_async; }
+  void prepare_tag_key();
 
   cycle_type start_cycle;
   cycle_type finish_cycle;
@@ -107,6 +109,7 @@ class Instruction {
   std::vector<int> _loop_size_list;
   std::vector<addr_type> _trace_address;
   std::string _addr_name;
+  int _addr_id;
   int _nr_inner_loop = 0;
   bool _is_async_dma=false;
   bool _is_indirect_mode=false;

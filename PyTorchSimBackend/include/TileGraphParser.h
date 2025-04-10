@@ -94,6 +94,12 @@ class TileGraphParser {
     return new_path.string();
   }
   void inc_indirect_counter() { indirect_counter++; }
+  int register_addr_name(const std::string& addr_name) {
+    if (_addr_name_map.find(addr_name) == _addr_name_map.end())
+      _addr_name_map[addr_name] = _addr_name_map.size();
+    return _addr_name_map[addr_name];
+  }
+  int get_addr_name_id(const std::string& addr_name) { return _addr_name_map[addr_name]; }
 
  private:
   void register_tile(std::shared_ptr<TileNode> tile_node);
@@ -115,6 +121,7 @@ class TileGraphParser {
   std::map<std::string, std::tuple<int, int, LoopType>> _loop_size_map;
   std::map<std::string, std::string> _tog_meta;
   std::map<std::pair<std::string, std::vector<int>>, uint32_t> _tag_table;
+  std::unordered_map<std::string, int> _addr_name_map;
 };
 
 class TileComputeNode : public TileNode {

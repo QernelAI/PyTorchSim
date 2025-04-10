@@ -21,7 +21,7 @@ Core::Core(uint32_t id, SimulationConfig config)
 bool Core::can_issue(const std::shared_ptr<Tile>& op) {
   /* Check SRAM is enough to run tile */
   assert(op->get_required_sram_size() <= _sram_size);
-  return op->get_required_sram_size() + _used_sram_size <= _sram_size && !op->is_stonne_tile();
+  return op->get_required_sram_size() + _used_sram_size <= _sram_size &&  _tiles.size() < 2  && !op->is_stonne_tile();
 }
 
 void Core::issue(std::shared_ptr<Tile> op) {
@@ -111,11 +111,9 @@ void Core::compute_cycle() {
 
 void Core::dma_cycle() {
   /* Check finished dma operation */
-  for (int i=0; i<_dma_waiting_queue.size(); i++){
-    std::shared_ptr<Instruction>& instruction = _dma_waiting_queue.at(i);
-    /* Pass not finished instruction */
-    if (instruction->get_waiting_request())
-      continue;
+  while(_dma_finished_queue.size()) {
+    std::shared_ptr<Instruction>& instruction = _dma_finished_queue.at(0);
+    assert(instruction->get_waiting_request()==0);
 
     /* Finish DMA read instruction */
     if (instruction->is_dma_read() && !instruction->is_async_dma())
@@ -123,7 +121,7 @@ void Core::dma_cycle() {
 
     /* Set tag table of async dma load */
     if (instruction->is_dma_read() && instruction->is_async_dma()) {
-      auto key = std::make_pair(instruction->get_addr_name(), instruction->get_tag_id());
+      auto& key = instruction->get_tag_id();
       assert(!_tma.get_tag_finish(instruction->subgraph_id, key));
       _tma.set_tag_finish(instruction->subgraph_id, key);
       spdlog::trace("[Core {}][{}] {} ASYNC FINISHED, Used sram: {}, Release sram: {}, subgraph_id: {} addr_name: {} tag_id: {} tag_idx_list: {} tag_stride_list: {}",
@@ -138,10 +136,7 @@ void Core::dma_cycle() {
         finish_instruction(wait_inst);
       }
     }
-
-    /* Erase the instruction in DMA waiting queue */
-    _dma_waiting_queue.erase(_dma_waiting_queue.begin() + i);
-    i--;
+    _dma_finished_queue.erase(_dma_finished_queue.begin());
   }
 
   if (_tma.is_finished()) {
@@ -153,8 +148,7 @@ void Core::dma_cycle() {
         finish_instruction(finished_inst);
       } else if (finished_inst->is_dma_read() && finished_inst->is_async_dma()) {
         /* Register tag table for async dma load */
-        _tma.register_tag(finished_inst->subgraph_id,
-                          std::make_pair(finished_inst->get_addr_name(), finished_inst->get_tag_id()));
+        _tma.register_tag(finished_inst->subgraph_id, finished_inst->get_tag_id());
         finish_instruction(finished_inst);
       } else if(!finished_inst->is_dma_read()) {
         spdlog::error("[Core {}][{}] TMA instruction in not valid", _id, _core_cycle);
@@ -167,7 +161,7 @@ void Core::dma_cycle() {
                       fmt::format("[{}]", fmt::join(finished_inst->get_tag_stride_list(), ", ")));
       }
       /*Pass to waiting queue */
-      _dma_waiting_queue.push_back(std::move(finished_inst));
+      _dma_waiting_queue[finished_inst.get()] = std::move(finished_inst);
     }
 
     /* Issue new DMA operation */
@@ -186,8 +180,8 @@ void Core::dma_cycle() {
     }
   }
   /* Generate memfetch */
-  std::vector<mem_fetch*> access_vec = _tma.get_memory_access();
-  for (auto access : access_vec) {
+  auto access_vec = _tma.get_memory_access();
+  for (auto access : *access_vec) {
     access->set_start_cycle(_core_cycle);
     _request_queue.push(access);
   }
@@ -219,7 +213,7 @@ void Core::cycle() {
         case Opcode::MOVIN:
           {
             /* Check another MOVIN with same tag is issued */
-            auto key = std::make_pair(inst->get_addr_name(), inst->get_tag_id());
+            auto& key = inst->get_tag_id();
             if (inst->is_async_dma() && _tma.tag_key_exist(inst->subgraph_id, key)) {
               bool finished = _tma.get_tag_finish(inst->subgraph_id, key);
               if (finished)
@@ -286,7 +280,7 @@ void Core::cycle() {
           break;
         case Opcode::BAR:
           {
-            auto key = std::make_pair(inst->get_addr_name(), inst->get_tag_id());
+            auto& key = inst->get_tag_id();
             bool finished = _tma.get_tag_finish(inst->subgraph_id, key);
             if (finished) {
               _tma.mark_tag_used(inst->subgraph_id, key);
@@ -369,7 +363,7 @@ bool Core::running() {
   running = running || !_vu_compute_pipeline.empty();
   for (int i=0; i<_num_systolic_array_per_core;i++)
     running = running || !_sa_compute_pipeline.at(i).empty();
-  running = running || !_dma_waiting_queue.empty();
+  running = running || !_dma_waiting_queue.empty() || !_dma_finished_queue.empty();
   running = running || !_tma.empty();
   running = running || !_ld_inst_queue.empty();
   running = running || !_st_inst_queue.empty();
@@ -385,12 +379,20 @@ void Core::pop_memory_request() {
 }
 
 void Core::push_memory_response(mem_fetch* response) {
-  Instruction * owner_inst = static_cast<Instruction*>(response->get_custom_data());
-
-  assert(owner_inst);
+  Instruction* owner_inst = static_cast<Instruction*>(response->get_custom_data());
   assert(owner_inst->get_waiting_request());
 
   owner_inst->dec_waiting_request();
+  if (!owner_inst->get_waiting_request()) {
+    auto it = _dma_waiting_queue.find(owner_inst);
+    if (it != _dma_waiting_queue.end()) {
+      std::shared_ptr<Instruction> moved_inst = std::move(it->second);
+      _dma_finished_queue.push_back(std::move(moved_inst));
+      _dma_waiting_queue.erase(it);
+    } else {
+      assert(true || "Can't happend...!");
+    }
+  }
   delete response;
 }
 

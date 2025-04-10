@@ -1,6 +1,6 @@
 #pragma once
 #include <robin_hood.h>
-
+#include <unordered_set>
 #include <memory>
 #include <vector>
 #include <fmt/core.h>
@@ -83,7 +83,8 @@ class Core {
   std::queue<std::shared_ptr<Instruction>> _ld_inst_queue;
   std::queue<std::shared_ptr<Instruction>> _st_inst_queue;
 
-  std::vector<std::shared_ptr<Instruction>> _dma_waiting_queue;
+  std::unordered_map<Instruction*, std::shared_ptr<Instruction>> _dma_waiting_queue;
+  std::vector<std::shared_ptr<Instruction>> _dma_finished_queue;
   /* Interconnect queue */
   std::queue<mem_fetch*> _request_queue;
   std::queue<mem_fetch*> _response_queue;

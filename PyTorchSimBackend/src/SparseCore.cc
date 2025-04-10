@@ -201,8 +201,8 @@ void SparseCore::subCoreCycle(uint32_t subcore_id) {
     }
 
     /* Check finished dma operation */
-    for (int i=0; i<_dma_waiting_queue.size(); i++){
-      std::shared_ptr<Instruction>& instruction = _dma_waiting_queue.at(i);
+    while(_dma_finished_queue.size()) {
+      std::shared_ptr<Instruction>& instruction = _dma_finished_queue.at(0);
       /* Pass not finished instruction */
       if (instruction->get_waiting_request())
         continue;
@@ -210,10 +210,8 @@ void SparseCore::subCoreCycle(uint32_t subcore_id) {
       /* Finish DMA read instruction */
       if (instruction->is_dma_read())
         finish_instruction(instruction);
-
-      /* Erase the instruction in DMA waiting queue */
-      _dma_waiting_queue.erase(_dma_waiting_queue.begin() + i);
-      i--;
+      /* Erase the instruction in DMA finished queue */
+      _dma_finished_queue.erase(_dma_finished_queue.begin());
     }
 
     /* Peek instruction*/
@@ -240,7 +238,7 @@ void SparseCore::subCoreCycle(uint32_t subcore_id) {
             });
           }
           issued = true;
-          _dma_waiting_queue.push_back(std::move(inst));
+          _dma_waiting_queue[inst.get()] = std::move(inst);
         }
         break;
       case Opcode::MOVOUT:
@@ -261,7 +259,7 @@ void SparseCore::subCoreCycle(uint32_t subcore_id) {
           }
           issued = true;
           finish_instruction(inst);
-          _dma_waiting_queue.push_back(std::move(inst));
+          _dma_waiting_queue[inst.get()] = std::move(inst);
         }
         break;
       case Opcode::COMP:
