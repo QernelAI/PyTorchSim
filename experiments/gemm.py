@@ -66,3 +66,4 @@ if __name__ == "__main__":
     run_matmul(device, size[0], size[1], size[2], args.validation)
     # compute cycles with shell script
     subprocess.run([f"{base_dir}/scripts/end2end.sh {result_path}"], shell=True)
+    subprocess.run([f"{base_dir}/scripts/sim_time.sh {result_path}"], shell=True)
