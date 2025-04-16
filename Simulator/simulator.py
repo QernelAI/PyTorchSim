@@ -296,7 +296,12 @@ class BackendSimulator():
     def until(self, until_cycle):
         command = f"until {until_cycle}"
         ret = self.send_command(command)
-        return int(ret.split(" ")[-1])
+        bitmap = int(ret.split(" ")[-1])
+        indices = []
+        for i in range(64):
+            if (bitmap >> i) & 1:
+                indices.append(i)
+        return indices
 
     def quit(self):
         command = "quit"

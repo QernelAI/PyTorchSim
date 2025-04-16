@@ -218,6 +218,7 @@ TileMemoryNode::TileMemoryNode(onnx::NodeProto& node) : TileNode(node) {
       _is_async = attribute.i();
     } else if (attribute.name() == "torchsim_indirect_mode") {
       _is_indirect = attribute.i();
+    } else if (attribute.name() == "torchsim_name") {
     } else {
       spdlog::info("Unknown attribute: {}", attribute.name());
     }

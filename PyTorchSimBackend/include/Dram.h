@@ -27,7 +27,7 @@ class Dram {
   virtual void pop(uint32_t cid) = 0;
   uint32_t get_channel_id(mem_fetch* request);
   virtual void print_stat() {}
-
+  uint32_t get_channels_per_partition() { return _n_ch_per_partition; }
  protected:
   SimulationConfig _config;
   CacheConfig _m_cache_config;

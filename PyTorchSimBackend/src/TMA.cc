@@ -23,8 +23,8 @@ std::shared_ptr<std::vector<mem_fetch*>> TMA::get_memory_access() {
   auto access_vec = std::make_shared<std::vector<mem_fetch *>>();
   Tile* owner = (Tile*)_current_inst->get_owner();
   std::shared_ptr<TileSubGraph> owner_subgraph = owner->get_owner();
-  spdlog::trace("[NUMA Trace] Subgraph id: {} , Numa id: {}, Arg: {} is_write: {}",
-    owner_subgraph->get_core_id(), _current_inst->get_numa_id(), _current_inst->get_addr_name(), _current_inst->is_dma_write());
+  spdlog::trace("[NUMA Trace] Core-{}, Subgraph id: {} , Numa id: {}, Arg: {} is_write: {}",
+    _id, owner_subgraph->get_core_id(), _current_inst->get_numa_id(), _current_inst->get_addr_name(), _current_inst->is_dma_write());
   for (auto addr: *addr_set) {
     mem_access_type acc_type = _current_inst->is_dma_write() ? mem_access_type::GLOBAL_ACC_W : mem_access_type::GLOBAL_ACC_R;
     mf_type type = _current_inst->is_dma_write() ? mf_type::WRITE_REQUEST : mf_type::READ_REQUEST;

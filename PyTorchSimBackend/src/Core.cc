@@ -420,6 +420,7 @@ void Core::print_stats() {
   spdlog::info("Core [{}] : TMA active cycle {} TMA idle cycle {}", _id, _stat_tot_tma_cycle, _stat_tot_tma_idle_cycle);
   spdlog::info("Core [{}] : Vector Unit Utilization(%) {:.2f}, active cycle {}, idle_cycle {}", _id,
     static_cast<float>(_stat_tot_vu_compute_cycle * 100) / _core_cycle, _stat_tot_vu_compute_cycle, _stat_tot_vu_compute_idle_cycle);
+  spdlog::info("Core [{}] : Numa hit count : {}, Numa miss count : {}", _id, _stat_numa_hit, _stat_numa_miss);
   spdlog::info("Core [{}] : Total cycle {}", _id, _core_cycle);
 }
 

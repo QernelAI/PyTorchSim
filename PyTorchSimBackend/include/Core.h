@@ -28,6 +28,8 @@ class Core {
   virtual mem_fetch* top_memory_request() { return _request_queue.front(); }
   virtual void push_memory_response(mem_fetch* response);
   void check_tag() { _tma.check_table(); }
+  void inc_numa_hit() { _stat_numa_hit++; }
+  void inc_numa_miss() { _stat_numa_miss++; }
 
   std::queue<std::shared_ptr<Instruction>>& get_compute_pipeline(int compute_type);
   enum {
@@ -67,6 +69,8 @@ class Core {
   std::vector<uint64_t> _stat_tot_sa_inst;
   uint64_t _stat_gemm_inst = 0;
   uint64_t _stat_skip_dma = 0;
+  uint64_t _stat_numa_hit = 0;
+  uint64_t _stat_numa_miss = 0;
 
   cycle_type _stat_vu_compute_cycle = 0;
   std::vector<cycle_type> _stat_sa_compute_cycle;

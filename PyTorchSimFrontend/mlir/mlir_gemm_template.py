@@ -1,4 +1,5 @@
 import os
+from torch import empty_strided
 from typing import List, Optional, cast
 
 from PyTorchSimFrontend.mlir.mlir_template import MLIRTemplate
@@ -20,8 +21,8 @@ GEMM_TEMPLATE = r"""
 // TILE_K = {{ TILE_K }}
 // SUB_TILE_M = {{ SUB_TILE_M }}
 // SUB_TILE_N = {{ SUB_TILE_N }}
-{% if X_transposed %}#map0 = affine_map<(d0, d1) -> (d1 * {{ M }} + d0)>{% else %}#map0 = affine_map<(d0, d1) -> (d0 * {{ K }} + d1)>{% endif %}
-{% if W_transposed %}#map1 = affine_map<(d0, d1) -> (d1 * {{ K }} + d0)>{% else %}#map1 = affine_map<(d0, d1) -> (d0 * {{ N }} + d1)>{% endif %}
+#map0 = affine_map<(d0, d1) -> ({{ X_map }})>
+#map1 = affine_map<(d0, d1) -> ({{ W_map }})>
 #map2 = affine_map<(d0, d1) -> (d0 * {{ N }} + d1)>
 memref.global @X_spad : memref<{{ TILE_M }}x{{ TILE_K }}xf32, 1>
 memref.global @W_spad : memref<{{ TILE_K }}x{{ TILE_N }}xf32, 1>
@@ -87,30 +88,6 @@ class MLIRGemmTemplate(MLIRTemplate):
     def __init__(self, input_nodes, layout, input_reorder=None):
         super().__init__("kernel", input_nodes, layout, input_reorder)
 
-    def is_transposed(self, node):
-        if isinstance(node, ReinterpretView):
-            unsqueezed_layout_stride = [s for s, size in zip(node.layout.stride, node.layout.size) if size > 1]
-            unsqueezed_data_stride = [s for s, size in zip(node.data.layout.stride, node.data.layout.size) if size > 1]
-
-            if 0 in node.layout.stride: # [MoE] Temporary solution
-                if node.layout.stride[1] == 0:
-                    return True
-            if len(node.layout.stride) == len(node.data.layout.stride):
-                if node.layout.stride[-2] == node.data.layout.stride[-1] and node.layout.stride[-1] == node.data.layout.stride[-2]:
-                    return True
-                else:
-                    raise NotImplementedError("If the stride is not equal to the original stride, it should have been transposed.")
-            elif len(node.layout.stride) < len(node.data.layout.stride):
-                # Squeezed case
-                if node.layout.stride == node.data.layout.stride[-len(node.layout.stride):]:
-                    return False
-                if len(unsqueezed_layout_stride) < len(unsqueezed_data_stride):
-                    if unsqueezed_layout_stride == unsqueezed_data_stride[-len(unsqueezed_layout_stride):]:
-                        return False
-                raise NotImplementedError("If the stride is not equal to the original stride, it should have been transposed.")
-
-        return False
-
     def render(self,
                kernel: MLIRTemplateKernel,
                template_buffer_node = None,
@@ -125,7 +102,16 @@ class MLIRGemmTemplate(MLIRTemplate):
         Y = self.output_node
         Bias = None if len(self.input_nodes) == 2 else self.input_nodes[2]
 
-        M, N, K = X.get_size()[0], W.get_size()[1], X.get_size()[1]
+        W_tensor =  empty_strided(W.layout.size, W.layout.stride)
+        X_tensor =  empty_strided(X.layout.size, X.layout.stride)
+        if len(W_tensor.size()) > 2 or len(X_tensor.size()) > 2:
+            raise NotImplementedError("Please report this case to us...")
+        W_stride = W_tensor.stride()
+        X_stride = X_tensor.stride()
+        W_map = " + ".join([f"d{idx}*{s}" for idx, s in enumerate(W_stride)])
+        X_map = " + ".join([f"d{idx}*{s}" for idx, s in enumerate(X_stride)])
+
+        M, N, K = X_tensor.size()[0], W_tensor.size()[1], X_tensor.size()[1]
         n_extra_node = len(epilogue_nodes) if epilogue_nodes is not None else 0
         if (M == 0) or (N == 0) or (K == 0):
             TILE_M, TILE_N, TILE_K = 1, 1, 1
@@ -141,9 +127,6 @@ class MLIRGemmTemplate(MLIRTemplate):
         SUB_TILE_K = TILE_K
         TOG_latency = M if SUB_TILE_M > M else SUB_TILE_M
         kernel.loop_size =[TOG_latency, SUB_TILE_N, SUB_TILE_K]
-
-        W_transposed = self.is_transposed(W)
-        X_transposed = self.is_transposed(X)
 
         kernel.render_options = dict(
             KERNEL_NAME=self.name,
@@ -164,8 +147,8 @@ class MLIRGemmTemplate(MLIRTemplate):
             Y = Y,
             Bias = Bias,
             Bias_rank = len(Bias.data.get_size()) if Bias is not None else 0,
-            X_transposed = X_transposed,
-            W_transposed = W_transposed,
+            X_map = X_map,
+            W_map = W_map,
             Y_numel = M * N,
             epilogue_nodes = epilogue_nodes,
             input_reorder = self.input_reorder

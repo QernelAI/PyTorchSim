@@ -49,6 +49,7 @@ Simulator::Simulator(SimulationConfig config)
   }
 
   // Create interconnect object
+  spdlog::info("[Config/Interconnect] Inerconnect freq: {} MHz", config.icnt_freq);
   if (config.icnt_type == IcntType::SIMPLE) {
     spdlog::info("[Config/Interconnect] SimpleInerconnect selected");
     _icnt = std::make_unique<SimpleInterconnect>(config);
@@ -113,6 +114,11 @@ void Simulator::icnt_cycle() {
         mem_fetch *front = _cores[core_id]->top_memory_request();
         front->set_core_id(core_id);
         if (!_icnt->is_full(port_id, front)) {
+          //int node_id = _dram->get_channel_id(front) / 16;
+          //if (core_id == node_id)
+          //  _cores[core_id]->inc_numa_hit();
+          //else
+          //  _cores[core_id]->inc_numa_miss();
           _icnt->push(port_id , get_dest_node(front), front);
           _cores[core_id]->pop_memory_request();
           _nr_from_core++;
@@ -179,17 +185,30 @@ int Simulator::until(cycle_type until_cycle) {
 
     // Check if core status has changed
     if (_core_cycles % 10 == 0) {
+      int bitmap = 0;
       for (int i=0; i<_partition_scheduler.size(); i++) {
         /* Skip this */
         if (partition_scheudler_status.at(i))
           continue;
 
-        if (_partition_scheduler.at(i)->empty())
-          return i;
+        if (_partition_scheduler.at(i)->empty()) {
+          bitmap |= (1 << i);
+        }
       }
+      if (bitmap)
+        return bitmap;
     }
   }
-  return -1;
+  int bitmap = 0;
+  for (int i=0; i<_partition_scheduler.size(); i++) {
+    /* Skip this */
+    if (partition_scheudler_status.at(i))
+      continue;
+
+    if (_partition_scheduler.at(i)->empty())
+      bitmap |= (1ULL << i);
+  }
+  return bitmap;
 }
 
 void Simulator::cycle() {

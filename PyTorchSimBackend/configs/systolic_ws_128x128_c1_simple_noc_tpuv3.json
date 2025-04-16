@@ -21,10 +21,5 @@
   "icnt_config_path" : "../configs/booksim2_configs/fly_c4_m32.icnt",
 
   "precision" : 4,
-  "scheduler" : "simple",
-  "num_partition" : 2,
-  "partition": {
-    "core_0":0,
-    "core_1":0
-  }
+  "scheduler" : "simple"
 }

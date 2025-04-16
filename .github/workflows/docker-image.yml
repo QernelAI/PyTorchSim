@@ -575,6 +575,22 @@ jobs:
             -e TORCHSIM_DUMP_PATH=/dump \
             ghcr.io/psal-postech/torchsim-ci:${GITHUB_SHA} python3 PyTorchSim/tests/test_indirect_access.py
 
+  test_scheduler:
+    name: Run test_scheduler
+    runs-on: self-hosted
+    needs: build
+    env:
+      GIT_ACCESS_TOKEN: ${{ secrets.GIT_ACCESS_TOKEN }}
+    steps:
+      - name: Run test_scheduler.py
+        run: |
+          echo "Running test_scheduler.py"
+          echo $GIT_ACCESS_TOKEN | docker login ghcr.io -u USERNAME --password-stdin
+          docker run --rm \
+            -v /tmp/torchsim-ci/${GITHUB_SHA}:/dump \
+            -e TORCHSIM_DUMP_PATH=/dump \
+            ghcr.io/psal-postech/torchsim-ci:${GITHUB_SHA} python3 PyTorchSim/tests/test_scheduler.py
+
   test_cleanup:
     name: Clean test cases
     runs-on: self-hosted
@@ -583,7 +599,8 @@ jobs:
             test_transpose2D, test_view3D_2D, test_layernorm,
             test_mlp, test_resnet, test_transformer, test_transpose3D,
             test_sparsity, test_activation, test_pool, test_perceptron,
-            test_fusion, test_mistral, test_moe, test_indirect]
+            test_fusion, test_mistral, test_moe, test_indirect, test_scheduler]
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
