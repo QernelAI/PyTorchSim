@@ -28,9 +28,9 @@ class CNN(torch.nn.Module):
 
     def forward(self, x):
         x = self.conv1(x)
+        x = self.maxpool(x)
         x = self.norm(x)
         x = self.conv2(x)
-        # x = self.maxpool(x)
         x = torch.nn.functional.relu(x)
         return x
 
