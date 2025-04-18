@@ -123,7 +123,10 @@ class MLIRGemmTemplate(MLIRTemplate):
         TILE_N = min(extension_config.CONFIG_FORCE_TILE_N, TILE_N)
         TILE_K = min(extension_config.CONFIG_FORCE_TILE_K, TILE_K)
         SUB_TILE_M = TILE_M if TILE_M < kernel.vector_lane else kernel.vector_lane
-        SUB_TILE_N = TILE_N
+        if (TILE_M == M and TILE_N == N):
+            SUB_TILE_N = TILE_N if TILE_N < kernel.vector_lane else kernel.vector_lane
+        else: # Avoid Row Conflict of weights
+            SUB_TILE_N = TILE_N
         SUB_TILE_K = TILE_K
         TOG_latency = M if SUB_TILE_M > M else SUB_TILE_M
         kernel.loop_size =[TOG_latency, SUB_TILE_N, SUB_TILE_K]

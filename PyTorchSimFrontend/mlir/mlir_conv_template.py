@@ -588,7 +588,7 @@ class MLIRConvTemplate(MLIRTemplate):
         return False
 
     def is_multi_tile(self, I_C):
-        return I_C < 16 # 16 is hard-coded for now. This should be changed to a better heuristic.
+        return I_C < (self.kernel.vector_lane // 8) # 8 is hard-coded for now. This should be changed to a better heuristic.
 
     def is_single_batch(self, BATCH):
         return BATCH == 1

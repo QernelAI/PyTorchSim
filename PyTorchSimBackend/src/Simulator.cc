@@ -282,9 +282,10 @@ uint32_t Simulator::get_dest_node(mem_fetch *access) {
 
 void Simulator::print_core_stat()
 {
+  _icnt->print_stats();
+  _dram->print_stat();
   for (int core_id = 0; core_id < _n_cores; core_id++) {
     _cores[core_id]->print_stats();
   }
-  _icnt->print_stats();
-  _dram->print_stat();
+  spdlog::info("Total execution cycle: {}", _core_cycles);
 }

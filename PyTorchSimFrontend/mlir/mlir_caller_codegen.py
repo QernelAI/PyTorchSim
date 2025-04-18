@@ -50,6 +50,8 @@ class MLIRKernelCallerCodeGen(LLVMKernelCallerCodeGen):
 
     def generate_args_define(self):
         name_set = set()
+        if self.validation:
+            self.writeline(f'int padding[0x100000]{self.ending}') # FIXME. For pooling operation... Some pooling layer use negative offset
         for arg_name, (_, arg_type, arg_size, arg_sizes, arg_stride) in self.arg_attributes:
             if not arg_name in name_set:
                 if self.validation:

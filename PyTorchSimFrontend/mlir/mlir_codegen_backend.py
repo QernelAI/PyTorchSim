@@ -194,6 +194,16 @@ class ExtensionOverrides(common.OpOverrides):
         return f'{opcode} %{operand1}, %{operand2} : {shape}', [tile_size, ret_type]
 
     @staticmethod
+    def modular(operand1, operand2, *args, var_info=None, **kwargs):
+        tile_size, ret_type, operand1, operand2 = ExtensionOverrides.binary_elementwise_common(operand1, operand2, var_info)
+        shape = f"vector<{tile_size}x{ret_type}>" if tile_size > 1 else ret_type
+        if ret_type[0] == "f":
+            raise NotImplementedError("Not support remainder operation for floating point")
+        else:
+            opcode = f'arith.remui'
+        return f'{opcode} %{operand1}, %{operand2} : {shape}', [tile_size, ret_type]
+
+    @staticmethod
     def minimum(operand1, operand2, *args, var_info=None, **kwargs):
         tile_size, ret_type, operand1, operand2 = ExtensionOverrides.binary_elementwise_common(operand1, operand2, var_info)
         shape = f"vector<{tile_size}x{ret_type}>" if tile_size > 1 else ret_type
@@ -747,8 +757,8 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         self.welford_reduce_out = None
         self.reduce_iterator = {}
         self.is_template_kernel = False
-        self.index_set = set()
         self.spad_buffer_dict = dict()
+        self.base_vector_initialized = False
 
     # padding type 0: zero-padding 1: negative-padding(-inf) ...
     def get_padding_type(self):
@@ -893,7 +903,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
             # Generate vector store instruction
             store_size, operand_type = self.var_info[value]
             if mlir_dtype != operand_type:
-                value = ops.to_dtype(value, mlir_dtype, var_info=self.var_info)
+                value = ops.custom_cast(value, mlir_dtype, var_info=self.var_info)
 
             if compute_vec_size > 1 and store_size > 1:
                 operation = "affine.vector_store"
@@ -1067,62 +1077,119 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
     def indirect_indexing(self, index_var, size, check=True):
         return str(index_var)
 
-    def _index_expr(self, tile_size, buffer, renamed_expression, index):
-        str_tile_size = [str(dim) for dim in tile_size]
-        shape = "x".join(str_tile_size)
+    def _index_expr(self, tile_size, renamed_expression, index, base_vector_index):
+        tile_desc = self.kernel_group.tile_desc
+        compute_vec_size = tile_desc.get_compute_vec_size()
 
-        dim = ["%d"+str(i) for i in range(len(tile_size))]
-        sym_dim = ["d"+str(i) for i in range(len(tile_size))]
-        start_dim = [str(0) for i in tile_size]
-        end_dim = [str(i) for i in tile_size]
+        strides = [1] * len(tile_size)
+        for i in range(len(tile_size) - 2, -1, -1):
+            strides[i] = strides[i + 1] * tile_size[i + 1]
+
+        # Create vector index
+        compute_vec = self.cse.generate(self.compute, f"vector.broadcast %{self.compute_idx} : index to vector<{compute_vec_size}xindex>")
+        self.register_var_info(compute_vec, [compute_vec_size, "index"])
+        vector_index = ops.add(base_vector_index, compute_vec)
+
+        # Create tile_dim index
+        dim_list = []
+        for idx in range(len(tile_size)):
+            div_coeff = self.get_const_cse(strides[idx], "index")
+            mod_coeff = self.get_const_cse(tile_size[idx], "index")
+            div_vec = self.const_cse.generate(self.const_buffer, f"vector.broadcast %{div_coeff} : index to vector<{compute_vec_size}xindex>")
+            mod_vec = self.const_cse.generate(self.const_buffer, f"vector.broadcast %{mod_coeff} : index to vector<{compute_vec_size}xindex>")
+            self.register_var_info(div_vec, [compute_vec_size, "index"])
+            self.register_var_info(mod_vec, [compute_vec_size, "index"])
+            dim = ops.modular(ops.div(vector_index, div_vec), mod_vec)
+            if idx == tile_desc.vlane_split_axis: # Need to add vector lane offset
+                offset = tile_desc.vlane_stride * strides[idx]
+                vlane_coeff = self.get_const_cse(0, "i64")
+                vlane_vec_size = 4
+                vlane_vec = self.const_cse.generate(self.const_buffer, f"vector.broadcast %{vlane_coeff} : i64 to vector<{vlane_vec_size}xi64>")
+                vlane_offset = self.const_cse.generate(self.const_buffer, f"arith.addi %{vlane_vec}, %{vlane_vec} {{ vlane_offset={offset} }} : vector<{vlane_vec_size}xi64> // vlane offset")
+                self.register_var_info(vlane_offset, [vlane_vec_size, "i64"])
+                vlane_offset = ops.index_cast(vlane_offset, "index")
+                self.register_var_info(vlane_offset, [vlane_vec_size, "index"])
+                dim = ops.add(dim, vlane_offset)
+            dim_list.append(dim)
+
         indices = [str(i) for i in index.free_symbols]
-
-        affine_map_str = "(" + ", ".join(sym_dim) + ") -> ("
-        affine_map_str += sympy.printing.ccode(renamed_expression) + ")"
-        affine_offset_map = "(d0, d1) -> (d0 + d1)"
-        offset_vars = dim.copy()
-        parallel_map = f"affine.parallel ({','.join(dim)}) = ({','.join(start_dim)}) to ({','.join(end_dim)}) {{"
-        self.indexed_buffer.writeline(parallel_map)
-        with self.indexed_buffer.indent():
-            for idx in indices:
-                i = int(idx[5:])
-                self.indexed_buffer.writeline(f"%offset{i} = affine.apply affine_map<{affine_offset_map}>(%{idx}, {dim[i]})")
-                offset_vars[i] = f"%offset{i}"
-            apply_map = f"affine.apply affine_map<{affine_map_str}>({', '.join(offset_vars)}) {{global_idx=1}}"
-            apply_map_var = self.indexed_cse.generate(self.indexed_buffer, apply_map)
-            broadcast = f"vector.broadcast %{apply_map_var} : index to vector<2xindex>"
-            broadcast_var = self.indexed_cse.generate(self.indexed_buffer, broadcast)
-            cast_i64 = f"arith.index_cast %{broadcast_var} : vector<2xindex> to vector<2xi64>"
-            cast_i64_var = self.indexed_cse.generate(self.indexed_buffer, cast_i64)
-            affine_store = f"affine.vector_store %{cast_i64_var}, %{buffer}[{','.join(dim)}] : memref<{shape}xi64, 1>, vector<2xi64>"
-            self.cse.generate(self.indexed_buffer, affine_store, assignment=False)
-        self.indexed_buffer.writeline("}")
-        return buffer
+        for idx in indices:
+            i = int(idx[5:])
+            index_vec = self.cse.generate(self.compute, f"vector.broadcast %{idx} : index to vector<{compute_vec_size}xindex>")
+            self.register_var_info(index_vec, [compute_vec_size, "index"])
+            offset = ops.add(index_vec, dim_list[i])
+            dim_list[i] = offset
+        arg_lists = []
+        for arg in renamed_expression.args:
+            if isinstance(arg, sympy.Integer):
+                offset = self.get_const_cse(int(arg))
+                offset_vec = self.const_cse.generate(self.const_buffer, f"vector.broadcast %{offset} : index to vector<{compute_vec_size}xindex>")
+                self.register_var_info(offset_vec, [compute_vec_size, "index"])
+                arg_lists.append(offset_vec)
+            elif isinstance(arg, sympy.Mul):
+                if isinstance(arg.args[0], sympy.Integer) and isinstance(arg.args[1], sympy.Symbol):
+                    coeff = self.get_const_cse(int(arg.args[0]))
+                    coeff_vec = self.const_cse.generate(self.const_buffer, f"vector.broadcast %{coeff} : index to vector<{compute_vec_size}xindex>")
+                    self.register_var_info(coeff_vec, [compute_vec_size, "index"])
+                    result = ops.mul(dim_list[int(str(arg.args[1])[1:])], coeff_vec)
+                    arg_lists.append(result)
+                elif isinstance(arg.args[1], sympy.Integer) and isinstance(arg.args[0], sympy.Symbol):
+                    coeff = self.get_const_cse(int(arg.args[1]))
+                    coeff_vec = self.cse.generate(self.compute, f"vector.broadcast %{coeff} : index to vector<{compute_vec_size}xindex>")
+                    self.register_var_info(coeff_vec, [compute_vec_size, "index"])
+                    result = ops.mul(dim_list[int(str(arg.args[0])[1:])], coeff_vec)
+                    arg_lists.append(result)
+                else:
+                    raise NotImplementedError("Not supporting format")
+            elif isinstance(arg, sympy.Symbol):
+                arg_lists.append(dim_list[int(str(arg)[1:])])
+            else:
+                raise NotImplementedError("Not supporting format")
+        accum = arg_lists[0]
+        for arg in arg_lists[1:]:
+            accum = ops.add(accum, arg)
+        return accum
 
     def index_expr(self, index, dtype):
         tile_desc = self.kernel_group.tile_desc
         tile_size = tile_desc.get_tile_size_per_lane()
         mlir_dtype = mlir_common.DTYPE_TO_MLIR[dtype]
-        tile_numel_per_lane = tile_desc.get_numel_per_lane()
         str_tile_size = [str(dim) for dim in tile_size]
-        tile_shape = f"memref<{'x'.join(str_tile_size)}xi64, 1>"
-        vshape = tile_desc.get_mlir_vshape(mlir_dtype)
         compute_vec_size = tile_desc.get_compute_vec_size()
+        tile_shape = f"memref<{compute_vec_size}xi64, 1>"
+        vshape = f"vector<{compute_vec_size}xi64>"
 
-        # Define scratch pad buffer
-        sram_var, _, _ = self.get_scratchpad_buffer(dtype, "index_buffer", tile_numel_per_lane, tile_shape, None, index)
+        # Create base_vector index var
+        c_type = "uint64_t"
+        new_name = f"index_expr_{compute_vec_size}"
+        if new_name not in self.global_vars_dict:
+            self.header.writeline(f"{c_type} {new_name}_spad[{compute_vec_size}] __attribute__ ((section(\".spad\")));")
+            self.gem5_header.writeline(f"{c_type} {new_name}_spad[{compute_vec_size}] __attribute__((aligned(64)));")
+            self.global_vars.writeline(f"memref.global @{new_name}_spad : {tile_shape}")
+            self.global_vars_dict[new_name] = []
+        sram_var = self.spad_cse.generate(self.spad_buffer, f"memref.get_global @{new_name}_spad : {tile_shape}")
+        # Initialize base vector
+        if not self.base_vector_initialized:
+            init_iter = "iter"
+            parallel_map = f"affine.parallel (%{init_iter}) = ({0}) to ({compute_vec_size}) {{ // Base vector initializer"
+            self.spad_buffer.writeline(parallel_map)
+            with self.spad_buffer.indent():
+                self.spad_buffer.writeline(f"%init_vec = vector.broadcast %{init_iter} : index to vector<2xindex>")
+                self.spad_buffer.writeline(f"%init_cvt_vec = arith.index_cast %init_vec : vector<2xindex> to vector<2xi64>")
+                self.spad_buffer.writeline(f"affine.vector_store %init_cvt_vec, %{sram_var}[%{init_iter}] : {tile_shape}, vector<2xi64>")
+            self.spad_buffer.writeline("}")
+            self.base_vector_initialized = True
+
+        line = f"affine.vector_load %{sram_var}[0] : {tile_shape}, {vshape}"
+        out = self.cse.generate(self.compute, line)
+        self.register_var_info(out, [compute_vec_size, "i64"])
+        base_vector_index = ops.index_cast(out, "index")
+        self.register_var_info(base_vector_index, [compute_vec_size, "index"])
 
         renamed_symbols = {symbol: "d"+str(symbol)[5:] for symbol in index.free_symbols}
         renamed_expression = index.subs(renamed_symbols)
-        if index not in self.index_set:
-            # Register this operand
-            self.index_set.add(index)
-            ops._index_expr(tile_size, sram_var, renamed_expression, index)
-
-        line = f"affine.vector_load %{sram_var}[0, 0, %{self.compute_idx}] : {tile_shape}, {vshape} // {renamed_expression}"
-        out = self.cse.generate(self.compute, line)
-        self.register_var_info(out, [compute_vec_size, mlir_dtype])
-        return out
+        result = self._index_expr(tile_size, renamed_expression, index, base_vector_index)
+        return result
 
     def codegen_global_init(self):
         return self.global_vars

@@ -7,7 +7,7 @@ CONFIG_VECTOR_LANE = int(os.environ.get("TORCHSIM_VECTOR_LANE", default=128))
 CONFIG_SPAD_INFO = {
   "spad_vaddr" : 0xD0000000,
   "spad_paddr" : 0x2000000000,
-  "spad_size" : 128 << 10
+  "spad_size" : int(os.environ.get("TORCHSIM_SPAD_SIZE", default=128)) << 10 # Note: spad size per lane
 }
 CONFIG_PRECISION = 4 # 32bit
 CONFIG_NUM_CORES = 1
