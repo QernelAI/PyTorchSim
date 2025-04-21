@@ -962,7 +962,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
             self.loads, f"reduction {reduction_key}", write=False
         )
         type_name = mlir_common.DTYPE_TO_MLIR[dtype]
-        init = self.cse.generate(self.reduction_prefix, f"arith.constant {reduction_init(reduction_type, dtype)} : {type_name}")
+        init = self.const_cse.generate(self.const_buffer, f"arith.constant {reduction_init(reduction_type, dtype)} : {type_name}")
         vec_len = self.kernel_group.tile_desc.get_compute_vec_size()
         reduced_shape = self.kernel_group.tile_desc.get_mlir_vshape(type_name)
 
@@ -972,7 +972,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
             init_vec = init
         else:
             # Adjust shape and inital value
-            init_vec = self.cse.generate(self.reduction_prefix, f"vector.broadcast %{init} : {type_name} to {reduced_shape}")
+            init_vec = self.const_cse.generate(self.const_buffer, f"vector.broadcast %{init} : {type_name} to {reduced_shape}")
         acc_var = init_vec
 
         # Reduction body prepare
@@ -1263,8 +1263,9 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         spike_write_path = os.path.join(write_path, "global_var.h")
         gem5_write_path = os.path.join(write_path, "gem5_global_var.h")
         if not os.path.exists(spike_write_path):
-            spad_end_symbol = f"int spad_end[0] __attribute__ ((section(\".spad\"), aligned({self.spad_info['spad_size']*self.vector_lane})));"
-            write_atomic(spike_write_path, self.header.getvalue() + spad_end_symbol)
+            spad_end_symbol = f"int spad_end[0] __attribute__ ((section(\".spad\")));\n"
+            spad_section_end_symbol = f"int spad_section_end[0] __attribute__ ((section(\".spad\"), aligned({self.spad_info['spad_size']*self.vector_lane})));"
+            write_atomic(spike_write_path, self.header.getvalue() + spad_end_symbol + spad_section_end_symbol)
         if not os.path.exists(gem5_write_path):
             write_atomic(gem5_write_path, self.gem5_header.getvalue())
         return src_code

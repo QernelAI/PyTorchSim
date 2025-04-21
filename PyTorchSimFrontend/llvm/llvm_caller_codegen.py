@@ -1,6 +1,7 @@
 import os
 import subprocess
 import shlex
+import re
 
 from torch._inductor.utils import IndentedBuffer
 from torch._inductor.codegen import cpp
@@ -174,3 +175,51 @@ class LLVMKernelCallerCodeGen():
             print("Command failed with exit code", e.returncode)
             print("Error output:", e.output)
             assert(0)
+
+    def parse_stack_sizes(self, file_path):
+        meta_path = file_path.split(".")[0]+".meta"
+        cmd = ["riscv64-unknown-elf-objcopy", "--dump-section", f".stack_sizes={meta_path}", file_path, "/dev/null"]
+        subprocess.run(cmd, check=True)
+
+        with open(meta_path, 'rb') as f:
+            stack_sizes_data = bytearray(list(f.read()))
+        # Wrapper kernel serach
+        cmd = ["riscv64-unknown-elf-readelf", "-s", file_path]
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if result.returncode != 0:
+            raise RuntimeError(f"Readelf error: {result.stderr}")
+        output = result.stdout
+        for line in output.splitlines():
+            if 'wrapper_kernel' in line:
+                sym_addr = int(line.split()[1], 16)
+                byte_array = sym_addr.to_bytes(8, byteorder='little')
+                break
+        wrapper_pos = stack_sizes_data.find(byte_array)
+
+        if len(stack_sizes_data) <= 17:
+            raise ValueError("Invalid .stack_sizes section size")
+        stack_size_bytes = stack_sizes_data[8:wrapper_pos]
+        stack_size = int.from_bytes(stack_size_bytes, byteorder='little')
+        return stack_size
+
+    def get_spad_size(self, binary_path):
+        cmd = ["riscv64-unknown-elf-readelf", "-s", binary_path]
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if result.returncode != 0:
+            raise RuntimeError(f"Readelf error: {result.stderr}")
+
+        output = result.stdout
+        spad_start = None
+        spad_end = None
+        for line in output.splitlines():
+            if '.spad' in line and 'SECTION' in line:
+                parts = line.split()
+                spad_start = int(parts[1], 16)
+            elif 'spad_end' in line:
+                parts = line.split()
+                spad_end = int(parts[1], 16)
+
+        if spad_start is None or spad_end is None:
+            raise ValueError("Could not find .spad addresses")
+        spad_size = spad_end - spad_start
+        return spad_size
