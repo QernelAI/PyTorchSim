@@ -1,5 +1,3 @@
-import getpass
-import tempfile
 import os
 import re
 import shlex
@@ -140,6 +138,10 @@ def mlir_gem5_compile_command(filename, sample_filename, tog_file, vectorlane_si
         """,
     ).strip()]
 
+class SpadOverflowError(Exception):
+    def __init__(self, message="SPAD overflow occurred."):
+        super().__init__(message)
+
 class MLIRCodeCache:
     cache = dict()
     clear = staticmethod(cache.clear)   # Todo: Cache
@@ -202,6 +204,7 @@ class MLIRCodeCache:
                 if extension_config.CONFIG_SPAD_INFO["spad_size"] < spad_usage:
                     print(f"[Warning] Scratchpad size exceeded: required {spad_usage} bytes, "
                         f"but only {extension_config.CONFIG_SPAD_INFO['spad_size']} bytes available.")
+                    raise SpadOverflowError()
 
         # Launch tile graph generator
         gem5_sample_cmd = shlex.split(gem5_cmds[0])

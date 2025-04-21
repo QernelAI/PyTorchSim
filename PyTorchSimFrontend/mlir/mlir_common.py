@@ -6,6 +6,8 @@ from collections import defaultdict
 from functools import reduce
 from operator import mul
 import torch
+from torch._dynamo.testing import rand_strided
+from torch._inductor.autotune_process import TensorMeta
 from torch._inductor.codegen import common
 from torch._inductor.codegen import cpp
 from torch._inductor.virtualized import V
@@ -30,6 +32,7 @@ from torch._inductor.utils import (
     unique,
 )
 from PyTorchSimFrontend import extension_config
+from PyTorchSimFrontend.mlir.mlir_autotune import MLIRBenchmarkRequest
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 
 DTYPE_TO_MLIR = {
@@ -555,6 +558,29 @@ class BaseMLIRKernel(common.Kernel, BaseMLIRHardwareInfo):
         self.meta_kernel()
         return src_code
 
+    def run_bench(self, nodes, kernel_name, src_code):
+        _, _, arg_attributes, _ = self.kernel_group.args.mlir_argdefs()
+        input_call_args = tuple(self.args.input_buffers.keys())
+        output_call_args = tuple(self.args.output_buffers.keys())
+        full_input_nodes = tuple([V.graph.get_buffer(k) for k in input_call_args])
+        full_output_nodes = tuple([V.graph.get_buffer(k) for k in output_call_args])
+
+        bmreq = MLIRBenchmarkRequest(
+            kernel_name=kernel_name,
+            input_tensor_meta=TensorMeta.from_irnodes(full_input_nodes),
+            output_tensor_meta=TensorMeta.from_irnodes(full_output_nodes),
+            extra_args={
+                "vector_lane" : self.vector_lane,
+                "spad_info": self.spad_info,
+                "vlen" : self.vlen,
+                "arg_attributes" : arg_attributes
+            },
+            source_code=src_code,
+        )
+        dummy_inputs = [rand_strided(meta.sizes,meta.strides,dtype=meta.dtype, extra_size=meta.offset).to(device=nodes[0].get_device()) for meta in bmreq.input_tensor_meta]
+        dummy_outputs = [rand_strided(meta.sizes,meta.strides,dtype=meta.dtype, extra_size=meta.offset).to(device=nodes[0].get_device()) for meta in bmreq.output_tensor_meta]
+        return bmreq.make_run_fn(dummy_inputs, dummy_outputs)
+
     def codegen_kernel(self, kernel_name):
         arg_defs, _, _, _ = self.kernel_group.args.mlir_argdefs()
         arg_defs = ",\n".ljust(25).join(arg_defs)
@@ -580,6 +606,7 @@ class BaseMLIRKernel(common.Kernel, BaseMLIRHardwareInfo):
         wrapper.add_import_once(f'\ncustom_async_compile = CustomAsyncCompile()')
         # Dump loop and load/store information
         wrapper.add_import_once(f"arg_attributes = {arg_attributes}")
+        return arg_attributes
 
     def get_constant_vector(self, expr):
         constant_vector = [[int(expr.coeff(var)),None] for var in self.itervars]

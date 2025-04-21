@@ -1270,6 +1270,12 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
             write_atomic(spike_write_path, self.header.getvalue() + spad_end_symbol + spad_section_end_symbol)
         if not os.path.exists(gem5_write_path):
             write_atomic(gem5_write_path, self.gem5_header.getvalue())
+
+        try:
+            bench_runner = self.run_bench(nodes, kernel_name, src_code)
+            bench_runner()
+        except extension_codecache.SpadOverflowError:
+            print("Overflowed...")
         return src_code
 
     def get_dma_info(self, name, index, broadcast=True, store_reduction=False, buffer=None): # Need more argument?

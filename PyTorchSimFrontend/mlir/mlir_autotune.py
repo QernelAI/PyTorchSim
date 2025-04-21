@@ -1,8 +1,8 @@
 import functools
 import torch
+import dataclasses
 from torch._inductor.autotune_process import BenchmarkRequest
 from torch._inductor.autotune_process import TensorMeta
-from torch._inductor.codecache import CUDACodeCache
 
 from typing import (
     Any,
@@ -15,8 +15,8 @@ from typing import (
     TYPE_CHECKING,
     Union,
 )
-
-class MLIRBenchmarkRequest(BenchmarkRequest):
+@dataclasses.dataclass
+class MLIRBenchmarkRequest():
     def __init__(
         self,
         kernel_name: str,
@@ -25,50 +25,41 @@ class MLIRBenchmarkRequest(BenchmarkRequest):
         extra_args: Iterable[Any],
         source_code: str,
     ):
-        super().__init__(kernel_name, input_tensor_meta, output_tensor_meta, extra_args)
+        self.kernel_name = kernel_name
+        if isinstance(input_tensor_meta, TensorMeta):
+            input_tensor_meta = [input_tensor_meta]
+        self.input_tensor_meta = input_tensor_meta
+
+        if isinstance(output_tensor_meta, TensorMeta):
+            output_tensor_meta = [output_tensor_meta]
+        self.output_tensor_meta = output_tensor_meta
         self.source_code = source_code
         self.workspace_size: int = 0
         self.workspace: Optional[torch.Tensor] = None
         self.hash_key: str = ""
         self.source_file: str = ""
+        self.extra_args = extra_args
         #self.hash_key, self.source_file = CUDACodeCache.write(self.source_code, "so")
 
     def make_run_fn(
-        self, *input_tensors: torch.Tensor, output_tensor: torch.Tensor
+        self, input_tensors: torch.Tensor, output_tensors: torch.Tensor
     ) -> Callable[[], None]:
-        self.DLL, self.hash_key, self.source_file = CUDACodeCache.load(
-            self.source_code, "so"
-        )
+        from PyTorchSimFrontend.extension_codecache import CustomAsyncCompile
+        custom_async_compile = CustomAsyncCompile()
+        run_method = custom_async_compile.mlir(
+            self.source_code, vectorlane_size=self.extra_args["vector_lane"],
+            loop_size=None, spad_info=self.extra_args["spad_info"],
+            vlen=self.extra_args["vlen"], arg_attributes=self.extra_args["arg_attributes"],
+            origins="Unknown")
 
         args = [
-            tensor.data_ptr()
-            for tensor in list(input_tensors) + [output_tensor]
+            tensor
+            for tensor in list(input_tensors) + list(output_tensors)
         ]
-
-        print(
-            "make_run_fn: self.kernel_name=%s, self.source_file=%s, self.hash_key=%s, args=%s, self.extra_args=%s",
-            self.kernel_name,
-            self.source_file,
-            self.hash_key,
-            args,
-            self.extra_args,
-        )
-
-        run_method = getattr(self.DLL, self.kernel_name)
-
-        # Retrieve workspace_size and initialize workspace.
-        run_method(
-            *args,  # input ptrs and output ptrs
-            *self.extra_args,
-        )
-
         # Generate partial function.
         return functools.partial(
             run_method,
             *args,
-            *self.extra_args,
-            None,  # null workspace size ptr
-            None,  # set workspace ptr, TODO: update it to a real ptr if workspace_size > 0
         )
 
     def __str__(self) -> str:
