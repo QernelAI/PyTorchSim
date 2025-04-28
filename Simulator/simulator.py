@@ -1,5 +1,6 @@
 import os
 import shlex
+import ctypes
 import subprocess
 import re
 import sys
@@ -49,7 +50,9 @@ class FunctionalSimulator():
         if (isinstance(arg, torch.Tensor)):
             data_path = os.path.join(dump_path, f'{index}.raw')
             tensor = arg.cpu().detach()
-            t_arr = tensor.numpy().flatten()
+            buffer_size = tensor.untyped_storage().size()
+            buffer = (ctypes.c_char * buffer_size).from_address(tensor.data_ptr())
+            t_arr = np.frombuffer(buffer, dtype=tensor.numpy().dtype, count=buffer_size // tensor.element_size())
             t_arr.tofile(data_path)
         else:
             assert(0)
