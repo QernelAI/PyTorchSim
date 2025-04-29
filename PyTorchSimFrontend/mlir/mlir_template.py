@@ -201,34 +201,32 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
         M, N, K = self.gemm_combination_mapping(M, N, K, n_extra_node=n_extra_node, pad_k=False)
         max_k_h_w = 1 # maximize kernel size
         max_o_h_w = 1 # maximize output size
-        k_index = K // self.vector_lane
-        for k in sympy.divisors(k_index): # k occupies the large space in scratchpad memory
-            K = k * self.vector_lane if K > self.vector_lane else k
-            for o_h in sympy.divisors(O_H):
-                for o_w in sympy.divisors(O_W):
-                    for k_h in sympy.divisors(K_H):
-                        for k_w in sympy.divisors(K_W):
-                            i_h = 1 + (o_h - 1) * stride[0] + (k_h - 1) * dilation[0]
-                            i_w = 1 + (o_w - 1) * stride[1] + (k_w - 1) * dilation[1]
-                            weight_size = k_w * k_h * K * N
-                            input_size = i_w * i_h * M * K
-                            output_size = o_w * o_h * M * N
-                            used_spad_size = (weight_size + input_size + output_size * (1 + n_extra_node)) * self.precision
-                            weight_size_per_lane = self.get_spad_size_per_lane(k_w * k_h * K, N)
-                            input_size_per_lane = self.get_spad_size_per_lane(i_w * i_h * M, K)
-                            output_size_per_lane = self.get_spad_size_per_lane(o_w * o_h * M  * (1 + n_extra_node), N)
-                            used_spad_size_per_lane = (weight_size_per_lane + input_size_per_lane + output_size_per_lane) * self.precision
-                            if used_spad_size < max_spad_size and max_used_spad_size < used_spad_size and used_spad_size_per_lane < max_spad_per_lane and max_k_h_w <= k_h * k_w and max_o_h_w <= o_h * o_w:
-                                max_used_spad_size = used_spad_size
-                                max_k_h_w = k_h * k_w
-                                max_o_h_w = o_h * o_w
-                                mapping = (k_h, k_w, o_h, o_w, M, N, K)
+        K = min(K, self.vector_lane)
+        for o_h in sympy.divisors(O_H):
+            for o_w in sympy.divisors(O_W):
+                for k_h in sympy.divisors(K_H):
+                    for k_w in sympy.divisors(K_W):
+                        i_h = 1 + (o_h - 1) * stride[0] + (k_h - 1) * dilation[0]
+                        i_w = 1 + (o_w - 1) * stride[1] + (k_w - 1) * dilation[1]
+                        weight_size = k_w * k_h * K * N
+                        input_size = i_w * i_h * M * K
+                        output_size = o_w * o_h * M * N
+                        used_spad_size = (weight_size + input_size + output_size * (1 + n_extra_node)) * self.precision
+                        weight_size_per_lane = self.get_spad_size_per_lane(k_w * k_h * K, N)
+                        input_size_per_lane = self.get_spad_size_per_lane(i_w * i_h * M, K)
+                        output_size_per_lane = self.get_spad_size_per_lane(o_w * o_h * M  * (1 + n_extra_node), N)
+                        used_spad_size_per_lane = (weight_size_per_lane + input_size_per_lane + output_size_per_lane) * self.precision
+                        if used_spad_size < max_spad_size and max_used_spad_size < used_spad_size and used_spad_size_per_lane < max_spad_per_lane and max_k_h_w <= k_h * k_w and max_o_h_w <= o_h * o_w:
+                            max_used_spad_size = used_spad_size
+                            max_k_h_w = k_h * k_w
+                            max_o_h_w = o_h * o_w
+                            mapping = (k_h, k_w, o_h, o_w, M, N, K)
+        if max_used_spad_size == 0:
+            raise RuntimeError("Cannot find a valid mapping")
 
         # FIXME: this should be implemented with auto-tuning
         mapping = self.pseudo_auto_tune(mapping, stride, dilation, n_extra_node=n_extra_node)
 
-        if max_used_spad_size == 0:
-            raise RuntimeError("Cannot find a valid mapping")
         return mapping
 
     def conv_multi_tile_mapping(self, M, N, K, K_H, K_W, O_H, O_W, stride, dilation, n_extra_node=0):

@@ -18,6 +18,7 @@ public:
   // Pop memory request from Cache
   void pop() { l_to_mem_queue.pop(); }
   mem_fetch* top() { return l_to_mem_queue.empty() ? NULL : l_to_mem_queue.front(); }
+  virtual void print_stats() {};
 
 protected:
   cycle_type *l_core_cycle;   // Core cycle
@@ -48,4 +49,5 @@ public:
     std::queue<mem_fetch*> *from_xbar_queue);
   void cycle() override;
   bool push(mem_fetch* req) override;  // Push memory response from DRAM
+  virtual void print_stats() override;
 };

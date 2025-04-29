@@ -123,3 +123,9 @@ void DramRamulator2::print_stat() {
     _mem[ch]->print(stdout);
   }
 }
+
+void DramRamulator2::print_cache_stats() {
+  for (int ch = 0; ch < _n_ch; ch++) {
+    _m_caches[ch]->print_stats();
+  }
+}

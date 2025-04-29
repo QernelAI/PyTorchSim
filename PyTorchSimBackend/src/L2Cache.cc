@@ -12,7 +12,7 @@ void NoL2Cache::cycle() {
   }
 }
 
-ReadOnlyL2Cache::ReadOnlyL2Cache(std::string name,  CacheConfig &cache_config, uint32_t id, 
+ReadOnlyL2Cache::ReadOnlyL2Cache(std::string name,  CacheConfig &cache_config, uint32_t id,
   cycle_type *core_cycle, uint32_t l2d_hit_latency,
   std::queue<mem_fetch*> *to_xbar_queue, std::queue<mem_fetch*> *from_xbar_queue) :
   L2Cache(name, cache_config, id, core_cycle, l2d_hit_latency, to_xbar_queue, from_xbar_queue) {
@@ -60,7 +60,7 @@ void ReadOnlyL2Cache::cycle() {
       }
       l_from_xbar_queue->pop();
     } else if (status != RESERVATION_FAIL) {
-      if (req->is_write() &&
+      if (req->is_write() && // FIXME: req->is_write() already checked above 48 line.
           (l_cache_config.get_write_alloc_policy() == FETCH_ON_WRITE ||
             l_cache_config.get_write_alloc_policy() == LAZY_FETCH_ON_READ)) {
         req->set_reply();
@@ -94,5 +94,11 @@ void ReadOnlyL2Cache::cycle() {
     mem_fetch* req = l_from_cache_queue.top();
     l_to_xbar_queue->push(req);
     l_from_cache_queue.pop();
+  }
+}
+
+void ReadOnlyL2Cache::print_stats() {
+  if (l_id == 0) {
+    l_cache->get_stats().print_stats(stdout, l_name.c_str());
   }
 }

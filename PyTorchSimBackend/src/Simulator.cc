@@ -284,6 +284,7 @@ void Simulator::print_core_stat()
 {
   _icnt->print_stats();
   _dram->print_stat();
+  _dram->print_cache_stats();
   for (int core_id = 0; core_id < _n_cores; core_id++) {
     _cores[core_id]->print_stats();
   }

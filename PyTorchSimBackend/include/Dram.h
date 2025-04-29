@@ -27,6 +27,7 @@ class Dram {
   virtual void pop(uint32_t cid) = 0;
   uint32_t get_channel_id(mem_fetch* request);
   virtual void print_stat() {}
+  virtual void print_cache_stats() {};
   uint32_t get_channels_per_partition() { return _n_ch_per_partition; }
  protected:
   SimulationConfig _config;
@@ -58,6 +59,7 @@ class DramRamulator2 : public Dram {
   virtual mem_fetch* top(uint32_t cid) override;
   virtual void pop(uint32_t cid) override;
   virtual void print_stat() override;
+  void print_cache_stats() override;
 
  private:
   std::vector<std::unique_ptr<Ramulator2>> _mem;
