@@ -1274,7 +1274,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
                 if isinstance(e, RuntimeError) and str(e) != "STACK_OVERFLOW":
                     print(f"Benchmark[trial-{n_try}] failed with unexpected error: {e}")
                     raise
-                print(f"Benchmark failed due to stack overflow with tile size: {self.kernel_group.tile_desc.get_tile_size()}")
+                print(f"Benchmark failed due to spad overflow with tile size: {self.kernel_group.tile_desc.get_tile_size()}")
                 self.reset()
         raise RuntimeError("Exceeded maximum number of autotuning attempts")
 
@@ -1285,15 +1285,12 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         spike_write_path = os.path.join(write_path, "global_var.h")
         gem5_write_path = os.path.join(write_path, "gem5_global_var.h")
 
-        if not os.path.exists(spike_write_path):
-            spad_end_symbol = "int spad_end[0] __attribute__ ((section(\".spad\")));\n"
-            spad_section_end_symbol = (
-                f"int spad_section_end[0] __attribute__ ((section(\".spad\"), aligned({self.spad_info['spad_size']*self.vector_lane})));"
-            )
-            write_atomic(spike_write_path, self.header.getvalue() + spad_end_symbol + spad_section_end_symbol)
-
-        if not os.path.exists(gem5_write_path):
-            write_atomic(gem5_write_path, self.gem5_header.getvalue())
+        spad_end_symbol = "int spad_end[0] __attribute__ ((section(\".spad\")));\n"
+        spad_section_end_symbol = (
+            f"int spad_section_end[0] __attribute__ ((section(\".spad\"), aligned({self.spad_info['spad_size']*self.vector_lane})));"
+        )
+        write_atomic(spike_write_path, self.header.getvalue() + spad_end_symbol + spad_section_end_symbol)
+        write_atomic(gem5_write_path, self.gem5_header.getvalue())
 
     def get_dma_info(self, name, index, broadcast=True, store_reduction=False, buffer=None): # Need more argument?
         """

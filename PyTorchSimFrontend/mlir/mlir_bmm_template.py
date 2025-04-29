@@ -113,7 +113,8 @@ class MLIRBMMTemplate(MLIRTemplate):
         X_map = " + ".join([f"d{idx}*{s}" for idx, s in enumerate(X_stride)])
 
         B, M, N, K = X_tensor.size()[0], X_tensor.size()[1], W_tensor.size()[2], X_tensor.size()[2]
-        TILE_M, TILE_N, TILE_K = kernel.gemm_combination_mapping(M, N, K)
+        n_extra_node = len(epilogue_nodes) if epilogue_nodes is not None else 0
+        TILE_M, TILE_N, TILE_K = kernel.gemm_combination_mapping(M, N, K, n_extra_node=n_extra_node)
         TOG_latency = M if TILE_M > M else TILE_M
         kernel.loop_size = [TOG_latency, TILE_N, TILE_K]
         SUB_TILE_M = TILE_M if TILE_M < kernel.vector_lane else kernel.vector_lane
