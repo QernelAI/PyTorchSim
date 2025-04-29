@@ -1,6 +1,7 @@
 import os
 import subprocess
 import shlex
+import re
 
 from torch._inductor.utils import IndentedBuffer
 from torch._inductor.codegen import cpp
@@ -174,3 +175,62 @@ class LLVMKernelCallerCodeGen():
             print("Command failed with exit code", e.returncode)
             print("Error output:", e.output)
             assert(0)
+
+    def parse_stack_sizes(self, file_path, vlenb=256):
+        with open(file_path, 'r') as f:
+            stack_sizes_data = f.readlines()
+
+        in_proc = False
+        stack_base = None
+        dynamic_expr = None
+        max_offset = 0
+
+        for line in stack_sizes_data:
+            line = line.strip()
+            if line.startswith(".cfi_startproc"):
+                in_proc = True
+                continue
+            elif line.startswith(".cfi_endproc") and in_proc:
+                if dynamic_expr:
+                    total_stack = eval(dynamic_expr, {"vlenb": vlenb})
+                    return total_stack
+                elif stack_base:
+                    return stack_base
+                else:
+                    return max_offset
+
+            # Skip outer function
+            if not in_proc:
+                continue
+
+            if line.startswith(".cfi_def_cfa_offset"):
+                stack_base = int(line.split()[-1])
+
+            if ".cfi_escape" in line and "#" in line:
+                comment = line.split("#")[-1].strip()
+                m = re.search(r"sp \+ (\d+)\s*\+\s*(\d+)\s*\*\s*vlenb", comment)
+                if m:
+                    base, scale = int(m.group(1)), int(m.group(2))
+                    dynamic_expr = f"{base} + {scale} * vlenb"
+
+    def get_spad_size(self, binary_path):
+        cmd = ["riscv64-unknown-elf-readelf", "-s", binary_path]
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if result.returncode != 0:
+            raise RuntimeError(f"Readelf error: {result.stderr}")
+
+        output = result.stdout
+        spad_start = None
+        spad_end = None
+        for line in output.splitlines():
+            if '.spad' in line and 'SECTION' in line:
+                parts = line.split()
+                spad_start = int(parts[1], 16)
+            elif 'spad_end' in line:
+                parts = line.split()
+                spad_end = int(parts[1], 16)
+
+        if spad_start is None or spad_end is None:
+            raise ValueError("Could not find .spad addresses")
+        spad_size = spad_end - spad_start
+        return spad_size

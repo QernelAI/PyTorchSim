@@ -299,6 +299,7 @@ SINGLE_BATCH_CONV_TEMPLATE = r"""
 #map1 = affine_map<(d0, d1, d2, d3) -> (d0 * {{ (I_W + 2 * PADDING_W) * (I_H + 2 * PADDING_W) * I_C }} + d1 * {{ (I_W + 2 * PADDING_W) * I_C }} + d2 * {{ I_C }} + d3)> // input (BATCH, I_H, I_W, I_C) Stride should be changed if kernel stride > 1
 #map2 = affine_map<(d0, d1, d2, d3) -> (d0 * {{ K_W * I_C * O_C }} + d1 * {{ I_C * O_C }} + d2 * {{ O_C }} + d3)> // weight (K_H, K_W, I_C, O_C)
 #map_I_H = affine_map<(d0, d1) -> (d0 * {{ STRIDE_H }} + d1)>
+#map_I_W = affine_map<(d0, d1) -> (d0 * {{ STRIDE_W }} + d1)>
 #offset_w_map = affine_map<(d0, d1) -> (d0 * {{ kernel.get_spad_size_per_lane(TILE_K_W * TILE_K, TILE_N) }} + d1 * {{ kernel.get_spad_size_per_lane(TILE_K, TILE_N) }})>
 #offset_x_map = affine_map<(d0, d1) -> (d0 * {{ kernel.get_spad_size_per_lane(TILE_I_W, TILE_K) }} + d1)>
 #offset_y_map = affine_map<(d0, d1) -> (d0 * {{ kernel.get_spad_size_per_lane(TILE_M, TILE_N) }} + d1 * {{ kernel.get_spad_size_per_lane(TILE_M, TILE_N) }})>
@@ -328,7 +329,7 @@ func.func @{{ KERNEL_NAME }}{{kernel.def_conv_kernel(inputs=[X, W, BIAS], output
   %c1 = arith.constant 1 : index
   %c2 = arith.constant 2 : index
   {{- kernel.def_local_vars() }}
-
+  affine.for %o_w = 0 to {{ O_W }} step {{ TILE_O_W }} {
   affine.for %o_h = 0 to {{ O_H }} step {{ TILE_O_H }} {
     affine.for %tile_m = 0 to {{ O_W }} step {{ TILE_M }} {
       affine.for %tile_n = 0 to {{ O_C }} step {{ TILE_N }} {
@@ -344,7 +345,8 @@ func.func @{{ KERNEL_NAME }}{{kernel.def_conv_kernel(inputs=[X, W, BIAS], output
           affine.for %k_w = 0 to {{ K_W }} step {{ TILE_K_W }} {
             affine.for %tile_k = 0 to {{ I_C }} step {{ TILE_K }} {
               %index_i_h = affine.apply #map_I_H(%o_h, %k_h)
-              %index1 = affine.apply #map1(%c0, %index_i_h, %k_w, %tile_k) // input index
+              %index_i_w = affine.apply #map_I_W(%o_w, %k_w)
+              %index1 = affine.apply #map1(%c0, %index_i_h, %index_i_w, %tile_k) // input index
               %index2 = affine.apply #map2(%k_h, %k_w, %tile_k, %tile_n) // weight index
               // Load input matrix
               memref.dma_start %X[%index1], %input_buffer[%c0, %c0, %c0, %c0], %c_mvin, %tag1[%c0], %input_axis, %vstride
@@ -376,6 +378,7 @@ func.func @{{ KERNEL_NAME }}{{kernel.def_conv_kernel(inputs=[X, W, BIAS], output
         {{kernel.store_output(indent_size=8)}}
       } { outer_loop=true }
     } { outer_loop=true }
+  } { outer_loop=true }
   } { outer_loop=true }
   return
 }
@@ -465,7 +468,7 @@ func.func @{{ KERNEL_NAME }}{{kernel.def_conv_kernel(inputs=[X, W, BIAS], output
           affine.for %k_w = 0 to {{ K_W }} step {{ TILE_K_W }} {
             affine.for %tile_k = 0 to {{ I_C }} step {{ TILE_K }} {
               %index_i_h = affine.apply #map_I_H(%o_h, %k_h)
-              %index1 = affine.apply #map1(%index_i_h, %k_w, %c0, %tile_k) // input index
+              %index1 = affine.apply #map1(%index_i_h, %k_w, %tile_m, %tile_k) // input index
               %index2 = affine.apply #map2(%k_h, %k_w, %tile_k, %tile_n) // weight index
               // Load input matrix
               memref.dma_start %X[%index1], %input_buffer[%c0, %c0, %c0, %c0], %c_mvin, %tag1[%c0], %input_axis, %vstride

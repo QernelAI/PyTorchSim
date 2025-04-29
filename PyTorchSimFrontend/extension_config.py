@@ -11,7 +11,7 @@ CONFIG_SPAD_INFO = {
 }
 CONFIG_PRECISION = 4 # 32bit
 CONFIG_NUM_CORES = 1
-CONFIG_VLEN = 32 // CONFIG_PRECISION # 256bits / 32bits = 8 [elements]
+CONFIG_VLEN = 256 # 256bits / 32bits = 8 [elements]
 
 # Tile size config
 CONFIG_TORCHSIM_DIR = os.environ.get('TORCHSIM_DIR', default='/workspace/PyTorchSim')
@@ -44,6 +44,10 @@ CONFIG_BACKENDSIM_DEBUG_LEVEL = os.environ.get("BACKENDSIM_DEBUG_LEVEL", "")
 CONFIG_GEM5_PATH = os.environ.get('GEM5_PATH', default="/workspace/gem5/build/RISCV/gem5.opt")
 CONFIG_GEM5_SCRIPT_PATH = os.environ.get('GEM5_SCRIPT_PATH',
                                   default=f"{CONFIG_TORCHSIM_DIR}/gem5_script/script_systolic.py")
+
+# AUTOTUNE config
+CONFIG_AUTOTUNE = int(os.environ.get('AUTOTUNE', default=True))
+CONFIG_MAX_AUTOTUNE_TRY = int(os.environ.get('MAX_AUTOTUNE_TRY', default=10))
 
 # For block sparse
 CONFIG_BLOCK_SPARSE = int(os.environ.get('BLOCK_SPARSE', default=0))

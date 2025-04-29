@@ -135,7 +135,8 @@ class MLIRScheduling(BaseScheduling):
             codecache_def.writeline(f"loop_size={loop_size},")
             codecache_def.writeline(f"spad_info={spad_info},")
             codecache_def.writeline(f"origins={origins},")
-            codecache_def.writeline("arg_attributes=arg_attributes)")
+            codecache_def.writeline("arg_attributes=arg_attributes,")
+            codecache_def.writeline(f"vlen={extension_config.CONFIG_VLEN})")
             wrapper.define_kernel(kernel_name, codecache_def.getvalue(), cuda=False)
         return kernel_name
 
@@ -180,8 +181,9 @@ class MLIRScheduling(BaseScheduling):
             src_code = self.codegen_template_code(kernel, render, template_node, epilogue_nodes)
 
         with V.set_kernel_handler(kernel):
-            spad_end_symbol = f"int spad_end[0] __attribute__ ((section(\".spad\"), aligned({kernel.spad_info['spad_size']*kernel.vector_lane})));"
-            codegen_header(src_code, (kernel.header.getvalue()+spad_end_symbol, kernel.gem5_header.getvalue()))
+            spad_end_symbol = f"int spad_end[0] __attribute__ ((section(\".spad\")));\n"
+            spad_section_end_symbol = f"int spad_section_end[0] __attribute__ ((section(\".spad\"), aligned({kernel.spad_info['spad_size']*kernel.vector_lane})));"
+            codegen_header(src_code, (kernel.header.getvalue()+spad_end_symbol+spad_section_end_symbol, kernel.gem5_header.getvalue()))
             kernel.meta_kernel()
             kernel_name = self.define_kernel(src_code, kernel.kernel_name, kernel.vector_lane, kernel.spad_info,
                                              kernel.loop_size, origins={str(i) for i in template_node.node.origins})

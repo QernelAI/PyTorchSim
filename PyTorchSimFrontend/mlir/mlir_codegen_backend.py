@@ -14,6 +14,7 @@ from torch._inductor.utils import (
 from torch.utils._sympy.functions import ModularIndexing
 import PyTorchSimFrontend.extension_codecache as extension_codecache
 
+from PyTorchSimFrontend import extension_config
 from . import mlir_common
 from .mlir_common import LoopLevel, LoopNest
 
@@ -770,6 +771,9 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         self.spad_buffer_dict = dict()
         self.base_vector_initialized = False
 
+    def reset(self):
+        self.__init__(self.kernel_group)
+
     # padding type 0: zero-padding 1: negative-padding(-inf) ...
     def get_padding_type(self):
         ops = self.current_node.node.origins
@@ -962,7 +966,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
             self.loads, f"reduction {reduction_key}", write=False
         )
         type_name = mlir_common.DTYPE_TO_MLIR[dtype]
-        init = self.cse.generate(self.reduction_prefix, f"arith.constant {reduction_init(reduction_type, dtype)} : {type_name}")
+        init = self.const_cse.generate(self.const_buffer, f"arith.constant {reduction_init(reduction_type, dtype)} : {type_name}")
         vec_len = self.kernel_group.tile_desc.get_compute_vec_size()
         reduced_shape = self.kernel_group.tile_desc.get_mlir_vshape(type_name)
 
@@ -972,7 +976,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
             init_vec = init
         else:
             # Adjust shape and inital value
-            init_vec = self.cse.generate(self.reduction_prefix, f"vector.broadcast %{init} : {type_name} to {reduced_shape}")
+            init_vec = self.const_cse.generate(self.const_buffer, f"vector.broadcast %{init} : {type_name} to {reduced_shape}")
         acc_var = init_vec
 
         # Reduction body prepare
@@ -999,7 +1003,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         reduction_size = self.kernel_group.tile_desc.get_numel_per_lane() // self.kernel_group.tile_desc.get_tile_size()[-1]
         assert(vec_len % reduction_size==0)
         if vec_len > reduction_size:
-            init = self.cse.generate(self.reductions_suffix, f"arith.constant {reduction_init(reduction_type, dtype)} : {type_name}")
+            init = self.const_cse.generate(self.reductions_suffix, f"arith.constant {reduction_init(reduction_type, dtype)} : {type_name}")
             if reduction_size == 1:
                 final_reduced_shape = f"{type_name}"
                 out = self.cse.generate(self.reductions_suffix, reduction_combine_vec(reduction_type, acc, init, axis=0, shape=reduced_shape, reduced_shape=final_reduced_shape))
@@ -1154,6 +1158,8 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
                 arg_lists.append(dim_list[int(str(arg)[1:])])
             else:
                 raise NotImplementedError("Not supporting format")
+        if isinstance(renamed_expression, sympy.Symbol):
+            arg_lists.append(dim_list[int(str(renamed_expression)[1:])])
         accum = arg_lists[0]
         for arg in arg_lists[1:]:
             accum = ops.add(accum, arg)
@@ -1254,20 +1260,37 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         return code
 
     def codegen_nodes(self, nodes, kernel_name):
-        src_code = super().codegen_nodes(nodes, kernel_name)
+        for n_try in range(extension_config.CONFIG_MAX_AUTOTUNE_TRY):
+            src_code = super().codegen_nodes(nodes, kernel_name)
+            self._prepare_simulator_headers(src_code)
+            if not extension_config.CONFIG_AUTOTUNE:
+                return src_code
 
-        # Create extra headers for simulators
+            try:
+                bench_runner = self.run_bench(nodes, kernel_name, src_code)
+                bench_runner(validate=True)
+                return src_code
+            except (extension_codecache.SpadOverflowError, RuntimeError) as e:
+                if isinstance(e, RuntimeError) and str(e) != "STACK_OVERFLOW":
+                    print(f"Benchmark[trial-{n_try}] failed with unexpected error: {e}")
+                    raise
+                print(f"Benchmark failed due to spad overflow with tile size: {self.kernel_group.tile_desc.get_tile_size()}")
+                self.reset()
+        raise RuntimeError("Exceeded maximum number of autotuning attempts")
+
+    def _prepare_simulator_headers(self, src_code):
         write_path = extension_codecache.get_write_path(src_code)
-        if not os.path.exists(write_path):
-            os.makedirs(write_path)
+        os.makedirs(write_path, exist_ok=True)
+
         spike_write_path = os.path.join(write_path, "global_var.h")
         gem5_write_path = os.path.join(write_path, "gem5_global_var.h")
-        if not os.path.exists(spike_write_path):
-            spad_end_symbol = f"int spad_end[0] __attribute__ ((section(\".spad\"), aligned({self.spad_info['spad_size']*self.vector_lane})));"
-            write_atomic(spike_write_path, self.header.getvalue() + spad_end_symbol)
-        if not os.path.exists(gem5_write_path):
-            write_atomic(gem5_write_path, self.gem5_header.getvalue())
-        return src_code
+
+        spad_end_symbol = "int spad_end[0] __attribute__ ((section(\".spad\")));\n"
+        spad_section_end_symbol = (
+            f"int spad_section_end[0] __attribute__ ((section(\".spad\"), aligned({self.spad_info['spad_size']*self.vector_lane})));"
+        )
+        write_atomic(spike_write_path, self.header.getvalue() + spad_end_symbol + spad_section_end_symbol)
+        write_atomic(gem5_write_path, self.gem5_header.getvalue())
 
     def get_dma_info(self, name, index, broadcast=True, store_reduction=False, buffer=None): # Need more argument?
         """
@@ -1429,7 +1452,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         # Case 1. vector kernel
         if len(self.itervars) == 1:
             tile_size = self.tile_desc.get_tile_size() if self.tile_desc.get_tile_size() < self.ranges[0] else self.ranges[0]
-            min_tile_size_unit = self.vector_lane * self.vlen # TODO: VCIX widening is not implemented
+            min_tile_size_unit = self.vector_lane * self.vlen // (8 * self.precision) # TODO: VCIX widening is not implemented
             self.tile_desc.n_col = math.ceil(tile_size / min_tile_size_unit) * min_tile_size_unit # padding
             self.tile_desc.n_row = 1
         elif len(self.itervars) == 0:

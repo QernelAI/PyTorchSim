@@ -78,6 +78,9 @@ class Instruction {
   int get_nr_inner_loop() { return _nr_inner_loop; }
   void set_is_async(bool is_async) { _is_async_dma = is_async; }
   void prepare_tag_key();
+  bool is_sparse_inst() { return _is_sparse_inst; }
+  void set_sparse_state(bool state) { _is_sparse_inst = state; }
+  std::set<std::shared_ptr<Instruction>>& get_child_inst() { return child_inst; }
 
   cycle_type start_cycle;
   cycle_type finish_cycle;
@@ -113,5 +116,6 @@ class Instruction {
   int _nr_inner_loop = 0;
   bool _is_async_dma=false;
   bool _is_indirect_mode=false;
+  bool _is_sparse_inst=false;
   std::string _indirect_index_path="";
 };

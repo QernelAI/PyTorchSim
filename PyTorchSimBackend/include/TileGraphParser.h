@@ -93,7 +93,33 @@ class TileGraphParser {
     fs::path new_path = base_folder / "indirect_access" / (std::string("indirect_index") + std::to_string(indirect_counter) + ".raw");
     return new_path.string();
   }
+  std::string get_sparse_tile_meta_path() {
+    namespace fs = std::filesystem;
+    fs::path original(_attribute_path);
+    fs::path base_folder = original.parent_path().parent_path();
+    fs::path new_path = base_folder / "dma_access" / (std::string("sparse_tile.raw"));
+    return new_path.string();
+  }
+  void load_sparse_meta_data() {
+    /* Prepare runtime attribute */
+    std::string sparse_meta_path = get_sparse_tile_meta_path();
+    std::ifstream file(sparse_meta_path, std::ios::binary);
+    if (file) {
+      file.seekg(0, std::ios::end);
+      std::streamsize size = file.tellg();
+      file.seekg(0, std::ios::beg);
+      size_t count = size / sizeof(int64_t);
+      for (size_t i = 0; i < count; ++i) {
+          int64_t val;
+          file.read(reinterpret_cast<char*>(&val), sizeof(int64_t));
+          sparse_tile_set.insert(val);
+      }
+    }
+  }
   void inc_indirect_counter() { indirect_counter++; }
+  uint64_t get_dma_counter() { return dma_counter; }
+  void inc_dma_counter() { dma_counter++; }
+  bool is_sparse_tile(uint64_t idx) { return sparse_tile_set.find(idx) != sparse_tile_set.end(); }
   int register_addr_name(const std::string& addr_name) {
     if (_addr_name_map.find(addr_name) == _addr_name_map.end())
       _addr_name_map[addr_name] = _addr_name_map.size();
@@ -112,6 +138,8 @@ class TileGraphParser {
   std::string _tog_path;
   std::string _attribute_path;
   uint64_t indirect_counter = 0;
+  uint64_t dma_counter = 0;
+  std::set<uint64_t> sparse_tile_set;
   std::map<std::string, std::shared_ptr<TileNode>> _output_map;
   std::vector<std::vector<std::shared_ptr<TileNode>>> _loop_nodes;
   std::vector<std::shared_ptr<TileNode>> _tile_vec;

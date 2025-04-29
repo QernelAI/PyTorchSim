@@ -38,6 +38,13 @@ class TMA {
     tag_table[subgraph_id][key] = 1;
   }
 
+  void set_tag_sparse(int subgraph_id, std::vector<int>& key) {
+    if (tag_table.find(subgraph_id) == tag_table.end()) {
+      throw std::runtime_error("Subgraph does not exist in tag_table");
+    }
+    tag_table[subgraph_id][key] = -1;
+  }
+
   void mark_tag_used(int subgraph_id, std::vector<int>& key) {
     if (tag_table.find(subgraph_id) == tag_table.end()) {
       throw std::runtime_error("Subgraph does not exist in tag_table");
@@ -70,7 +77,7 @@ class TMA {
     auto key_it = key_map.find(key);
     return key_it != key_map.end();
   }
-  bool get_tag_finish(int subgraph_id, std::vector<int>& key) {
+  uint32_t get_tag_finish(int subgraph_id, std::vector<int>& key) {
     auto subgraph_it = tag_table.find(subgraph_id);
     auto& key_map = subgraph_it->second;
     auto key_it = key_map.find(key);

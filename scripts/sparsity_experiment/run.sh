@@ -1,6 +1,8 @@
 export TORCHSIM_DUMP_PATH=$(pwd)/result
-export BLOCK_SPARSE=1
-export TORCHSIM_FORCE_TIME_M=32
+export SPIKE_DUMP_SPARSE_TILE=1
+export TORCHSIM_FORCE_TIME_K=8
+export TORCHSIM_FORCE_TIME_M=8
+export TORCHSIM_FORCE_TIME_N=8
 
 OUTPUT_DIR="12GB"
 export TORCHSIM_CONFIG="/workspace/PyTorchSim/PyTorchSimBackend/configs/systolic_ws_8x8_c1_12G_simple_noc.json"

@@ -629,4 +629,4 @@ jobs:
         run: |
           docker run --rm \
             -v /tmp/torchsim-ci/${GITHUB_SHA}:/dump \
-            ghcr.io/psal-postech/torchsim-ci:${GITHUB_SHA} ghcr.io/psal-postech/torchsim-ci:${GITHUB_SHA} chown -R $(id -u):$(id -g) /dump
+            ghcr.io/psal-postech/torchsim-ci:${GITHUB_SHA} chown -R $(id -u):$(id -g) /dump

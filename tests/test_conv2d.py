@@ -44,3 +44,5 @@ if __name__ == "__main__":
     module = ExecutionEngine.setup_device()
     device = module.custom_device()
     test_conv2d(device, batch_size=1, in_channels=128, out_channels=128, input_size=28, kernel_size=3, stride=1, padding=1)
+    test_conv2d(device, batch_size=1, in_channels=3, out_channels=64, input_size=64, kernel_size=7, stride=2, padding=3)
+    test_conv2d(device, batch_size=1, in_channels=3, out_channels=64, input_size=64, kernel_size=7, stride=1, padding=3)

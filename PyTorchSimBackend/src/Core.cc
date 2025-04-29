@@ -14,8 +14,8 @@ Core::Core(uint32_t id, SimulationConfig config)
   _stat_sa_compute_cycle.resize(_num_systolic_array_per_core);
   _stat_tot_sa_compute_idle_cycle.resize(_num_systolic_array_per_core);
   _stat_sa_compute_idle_cycle.resize(_num_systolic_array_per_core);
-  _stat_tot_sa_inst.resize(_num_systolic_array_per_core);
-  _stat_tot_sa_inst.resize(static_cast<size_t>(Opcode::COUNT), 0);
+  _stat_inst_count.resize(static_cast<size_t>(Opcode::COUNT), 0);
+  _stat_tot_skipped_inst.resize(static_cast<size_t>(Opcode::COUNT), 0);
 }
 
 bool Core::can_issue(const std::shared_ptr<Tile>& op) {
@@ -214,7 +214,14 @@ void Core::cycle() {
           {
             /* Check another MOVIN with same tag is issued */
             auto& key = inst->get_tag_id();
-            if (inst->is_async_dma() && _tma.tag_key_exist(inst->subgraph_id, key)) {
+            if (inst->is_sparse_inst()) {
+              _tma.register_tag(inst->subgraph_id, key);
+              _tma.set_tag_sparse(inst->subgraph_id, key);
+              finish_instruction(inst);
+              issued = true;
+              _stat_tot_skipped_inst.at(static_cast<size_t>(inst->get_opcode()))++;
+              break;
+            } else if (inst->is_async_dma() && _tma.tag_key_exist(inst->subgraph_id, key)) {
               bool finished = _tma.get_tag_finish(inst->subgraph_id, key);
               if (finished)
                 finish_instruction(inst);
@@ -227,7 +234,7 @@ void Core::cycle() {
                             fmt::format("[{}]", fmt::join(inst->get_tag_idx_list(), ", ")),
                             fmt::format("[{}]", fmt::join(inst->get_tag_stride_list(), ", ")));
               issued = true;
-              _stat_skip_dma++;
+              _stat_tot_skipped_inst.at(static_cast<size_t>(inst->get_opcode()))++;
               break;
             } else {
               spdlog::trace("[Core {}][{}] {} ISSUED, free_sram_size: {} addr_name: {} tag_id: {} tag_idx_list: {} tag_stride_list: {}", _id, _core_cycle,
@@ -260,11 +267,9 @@ void Core::cycle() {
               inst->bubble_cycle = bubble_cycle;
             }
             if (inst->get_compute_cycle() == 0) {
-              spdlog::trace("[Core {}][SA {}][{}] {} SKIPPED", _id, _systolic_array_rr, _core_cycle,
-                            opcode_to_string(inst->get_opcode()));
               inst->finish_instruction();
               static_cast<Tile*>(inst->get_owner())->inc_finished_inst();
-              _stat_tot_sa_inst.at(static_cast<size_t>(inst->get_opcode()))++;
+              _stat_tot_skipped_inst.at(static_cast<size_t>(inst->get_opcode()))++;
               auto it = instructions.begin() + j; // Position 2 is the third element
               instructions.erase(it);
             } else {
@@ -281,8 +286,15 @@ void Core::cycle() {
         case Opcode::BAR:
           {
             auto& key = inst->get_tag_id();
-            bool finished = _tma.get_tag_finish(inst->subgraph_id, key);
-            if (finished) {
+            uint32_t finished = _tma.get_tag_finish(inst->subgraph_id, key);
+            if (finished == -1) {
+              for (auto child_inst : inst->get_child_inst()) {
+                if (child_inst->get_opcode() == Opcode::COMP && child_inst->get_compute_type() == MATMUL) {
+                  child_inst->set_compute_cycle(0);
+                }
+              }
+              finish_instruction(inst);
+            } else if (finished != 0) {
               _tma.mark_tag_used(inst->subgraph_id, key);
               finish_instruction(inst);
             } else {
@@ -302,7 +314,7 @@ void Core::cycle() {
       }
 
       if (issued) {
-        _stat_tot_sa_inst.at(static_cast<size_t>(inst->get_opcode()))++;
+        _stat_inst_count.at(static_cast<size_t>(inst->get_opcode()))++;
         auto it = instructions.begin() + j; // Position 2 is the third element
         instructions.erase(it);
         break;
@@ -406,11 +418,10 @@ void Core::print_stats() {
   spdlog::info("===== Instructions count =====");
   for (int i=0; i < static_cast<size_t>(Opcode::COUNT); i++) {
     if (i == static_cast<size_t>(Opcode::COMP))
-      spdlog::info("Core [{}] : {} inst count {} (GEMM: {}, Vector: {})", _id, opcode_to_string(static_cast<Opcode>(i)), _stat_tot_sa_inst.at(i), _stat_gemm_inst, _stat_tot_sa_inst.at(i) - _stat_gemm_inst);
+      spdlog::info("Core [{}] : {} inst count {} (GEMM: {}, Vector: {}), skipped inst count {}", _id, opcode_to_string(static_cast<Opcode>(i)), _stat_inst_count.at(i), _stat_gemm_inst, _stat_inst_count.at(i) - _stat_gemm_inst, _stat_tot_skipped_inst.at(i));
     else
-      spdlog::info("Core [{}] : {} inst count {}", _id, opcode_to_string(static_cast<Opcode>(i)), _stat_tot_sa_inst.at(i));
+      spdlog::info("Core [{}] : {} inst count {}, skipped inst count {}", _id, opcode_to_string(static_cast<Opcode>(i)), _stat_inst_count.at(i), _stat_tot_skipped_inst.at(i));
   }
-  spdlog::trace("Core [{}] : SKipped MOVIN inst count {}", _id, _stat_skip_dma);
   spdlog::info("========= Core stat =========");
   for (int i=0; i<_num_systolic_array_per_core; i++)
     sa_utilization.push_back(static_cast<float>(_stat_tot_sa_compute_cycle.at(i) * 100) / _core_cycle);

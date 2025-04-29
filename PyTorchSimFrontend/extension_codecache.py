@@ -1,5 +1,3 @@
-import getpass
-import tempfile
 import os
 import re
 import shlex
@@ -30,6 +28,21 @@ def dump_metadata(args, arg_attributes, path):
         for (arg_name, arg_attribute), arg in zip(arg_attributes, args):
             file.write(f'{arg_name}=({arg_attribute[0]}, {arg.dtype}, {arg.shape})\n')
     return
+
+def parse_stack_sizes(file_path):
+    meta_path = file_path.split(".")[0]+".meta"
+    cmd = ["riscv64-unknown-elf-objcopy", "--dump-section", f".stack_sizes={meta_path}", file_path, "/dev/null"]
+    subprocess.run(cmd, check=True)
+
+    with open(meta_path, 'rb') as f:
+        stack_sizes_data = list(f.read())
+    if len(stack_sizes_data) <= 17:
+        raise ValueError("Invalid .stack_sizes section size")
+
+    stack_size_bytes = stack_sizes_data[8:-9]
+    stack_size = int.from_bytes(stack_size_bytes, byteorder='little')
+    return stack_size
+
 
 def llvm_compile_command(input, output):
     opt_output = f"{input[:-3]}_opt.ll"
@@ -77,7 +90,7 @@ def mlir_compile_command(filename, vectorlane_size, vlen=256):
             re.sub(r"[ \n]+", " ",
         f"""
             {extension_config.CONFIG_TORCHSIM_LLVM_PATH}/llc \
-                -relocation-model=pic -march=riscv64 -O3 \
+                -relocation-model=pic -march=riscv64 -O3 --stack-size-section \
                 -mattr=+m,+f,+d,+a,+c,+v,+xsfvcp,zvl{vlen}b \
                 {'--print-after-all' if extension_config.CONFIG_TORCHSIM_DUMP_LLVM_IR else ''} \
                 -O2 {filename}.ll -o {filename}.s
@@ -118,12 +131,16 @@ def mlir_gem5_compile_command(filename, sample_filename, tog_file, vectorlane_si
             re.sub(r"[ \n]+", " ",
         f"""
             {extension_config.CONFIG_TORCHSIM_LLVM_PATH}/llc \
-                -relocation-model=pic -march=riscv64 -O3 \
+                -relocation-model=pic -march=riscv64 -O3 --stack-size-section \
                 -mattr=+m,+f,+d,+a,+c,+v,+xsfvcp,zvl{vlen}b \
                 {'--print-after-all' if extension_config.CONFIG_TORCHSIM_DUMP_LLVM_IR else ''} \
                 -O2 {sample_filename}.ll -o {sample_filename}.s
         """,
     ).strip()]
+
+class SpadOverflowError(Exception):
+    def __init__(self, message="SPAD overflow occurred."):
+        super().__init__(message)
 
 class MLIRCodeCache:
     cache = dict()
@@ -141,6 +158,8 @@ class MLIRCodeCache:
              cycle_binary_name="cycle_bin",
              arg_attributes=[], vectorlane_size=16,
              spad_info=None, origins=None, **kwargs):
+        vlen = kwargs['vlen']
+        vlenb = vlen // 8
         write_path = get_write_path(source_code)
         key, input_path = write(source_code, "mlir", specified_dir=write_path)
         new_input_path = os.path.splitext(input_path)[0]
@@ -160,7 +179,7 @@ class MLIRCodeCache:
         if extension_config.CONFIG_TORCHSIM_VALIDATION_MODE:
             # Use custom malloc to avoid size error
             new_link_option = link_option + " -Wl,--wrap=malloc -Wl,--wrap=free"
-            cmds = mlir_compile_command(new_input_path, vectorlane_size, vlen=256)
+            cmds = mlir_compile_command(new_input_path, vectorlane_size, vlen=vlen)
             opt_cmd = shlex.split(cmds[0])
             translate_cmd = shlex.split(cmds[1])
             llc_cmd = shlex.split(cmds[2])
@@ -178,6 +197,15 @@ class MLIRCodeCache:
                 val_llvm_caller.generate_wrapper_file(write_path, validation_wrapper_name)
                 val_llvm_caller.compile_wih_kernel(write_path, key, validation_wrapper_name,
                                                    validation_binary_name, new_link_option)
+                target = os.path.join(write_path, validation_binary_name)
+                stack_size = val_llvm_caller.parse_stack_sizes(f"{write_path}/{key}.s", vlenb=vlenb)
+                spad_size =  val_llvm_caller.get_spad_size(target)
+                spad_usage = stack_size + spad_size # Spad usage per lane
+                if extension_config.CONFIG_SPAD_INFO["spad_size"] < spad_usage:
+                    print(f"[Warning] Scratchpad size exceeded: required {spad_usage} bytes, "
+                        f"but only {extension_config.CONFIG_SPAD_INFO['spad_size']} bytes available.")
+                    raise SpadOverflowError()
+
         # Launch tile graph generator
         gem5_sample_cmd = shlex.split(gem5_cmds[0])
         gem5_translate_cmd = shlex.split(gem5_cmds[1])
@@ -319,6 +347,7 @@ class CustomAsyncCompile(AsyncCompile):
         else:
             loop_size = []
         def dummy_simulator(*args, **kwargs):
+            validate = kwargs.get('validate', False)
             # Wait for compilation
             key = future.result()
 
@@ -327,7 +356,7 @@ class CustomAsyncCompile(AsyncCompile):
             # Dump arguments and meta data
             dump_metadata(args, arg_attributes, result_path)
             runtime_path = FunctionalSimulator.get_runtime_dump_path(result_path)
-            if extension_config.CONFIG_TORCHSIM_VALIDATION_MODE:
+            if extension_config.CONFIG_TORCHSIM_VALIDATION_MODE or validate:
                 funcsim = FunctionalSimulator(result_path, key)
                 funcsim.run_spike(args, arg_attributes,
                                   runtime_path, self.validation_binary_name,
