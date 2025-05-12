@@ -613,8 +613,6 @@ class BaseMLIRKernel(common.Kernel, BaseMLIRHardwareInfo):
         wrapper = V.graph.wrapper_code
         _, _, arg_attributes, _ = self.kernel_group.args.mlir_argdefs()
         wrapper.add_import_once('\nprint(f\'Wrapper Codegen Path = {__file__}\')')
-        wrapper.add_import_once(f'\nfrom PyTorchSimFrontend.extension_codecache import CustomAsyncCompile')
-        wrapper.add_import_once(f'\ncustom_async_compile = CustomAsyncCompile()')
         # Dump loop and load/store information
         wrapper.add_import_once(f"arg_attributes = {arg_attributes}")
         return arg_attributes

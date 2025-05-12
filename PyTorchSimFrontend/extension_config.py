@@ -1,6 +1,7 @@
 import os
 import sys
 import tempfile
+import importlib
 
 # Hardware info config
 CONFIG_VECTOR_LANE = int(os.environ.get("TORCHSIM_VECTOR_LANE", default=128))
@@ -54,3 +55,24 @@ CONFIG_BLOCK_SPARSE = int(os.environ.get('BLOCK_SPARSE', default=0))
 CONFIG_FORCE_TILE_M = int(os.environ.get("TORCHSIM_FORCE_TIME_M", default=sys.maxsize))
 CONFIG_FORCE_TILE_N = int(os.environ.get("TORCHSIM_FORCE_TIME_N", default=sys.maxsize))
 CONFIG_FORCE_TILE_K = int(os.environ.get("TORCHSIM_FORCE_TIME_K", default=sys.maxsize))
+
+# SRAM Buffer allocation plan
+def load_plan_from_module(module_path):
+    if module_path is None:
+      return None
+
+    try:
+        spec = importlib.util.spec_from_file_location("plan_module", module_path)
+        if spec is None:
+            return None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        if hasattr(module, 'plan'):
+            return module.plan
+        return None
+    except Exception as e:
+        print(f"[Warning] Failed to load SRAM buffer plan from module: {e}")
+        return None
+
+CONFIG_SRAM_BUFFER_PLAN_PATH = os.environ.get("SRAM_BUFFER_PLAN_PATH", default=None)
+CONFIG_SRAM_BUFFER_PLAN = load_plan_from_module(CONFIG_SRAM_BUFFER_PLAN_PATH)

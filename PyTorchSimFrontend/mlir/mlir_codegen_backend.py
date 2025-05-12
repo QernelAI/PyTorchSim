@@ -4,7 +4,8 @@ import re
 import os
 import math
 import torch
-from torch._inductor.codegen import cpp, wrapper, common
+from torch._dynamo.utils import dynamo_timed
+from torch._inductor.codegen import cpp, wrapper, common, memory_planning
 from torch._inductor.virtualized import V, _ops as ops
 from torch._inductor.codecache import write_atomic, write
 from torch._inductor.utils import (
@@ -91,6 +92,7 @@ class ExtensionWrapperCodegen(wrapper.WrapperCodeGen):
 
                 from torch import device, empty, empty_strided
                 from {extension_codecache.__name__} import CustomAsyncCompile
+                from PyTorchSimFrontend.extension_config import CONFIG_SRAM_BUFFER_PLAN
                 from PyTorchSimFrontend.extension_op import sparse_mm_dummy_stonne_outer
                 from torch._inductor.select_algorithm import extern_kernels
 
@@ -99,10 +101,91 @@ class ExtensionWrapperCodegen(wrapper.WrapperCodeGen):
                 assert_size_stride = torch._C._dynamo.guards.assert_size_stride
                 alloc_from_pool = torch.ops.inductor._alloc_from_pool
                 reinterpret_tensor = torch.ops.aten._reinterpret_tensor
-                async_compile = CustomAsyncCompile()
+                custom_async_compile = CustomAsyncCompile()
                 os.environ["TORCHSIM_LAST_COMPILED_MODULE"] = __file__
             """
         )
+        self.header.splice(
+            f"""
+            def sram_allocate(buffer):
+                pass
+
+            def sram_deallocate(buffer):
+                pass
+
+            def host2device_memcopy(buffer):
+                pass
+
+            def device2host_memcpy(buffer):
+                pass
+            """
+        )
+
+    def write_prefix(self):
+        self.prefix.splice(
+            """
+            def call(args):
+            """
+        )
+        with self.prefix.indent():
+            inp_len = len(V.graph.graph_inputs.keys())
+            if inp_len != 0:
+                lhs = f"{', '.join(V.graph.graph_inputs.keys())}{'' if inp_len != 1 else ','}"
+                self.prefix.writeline(f"{lhs} = args")
+                self.prefix.writeline("args.clear()")
+
+            self.codegen_inputs(self.prefix, V.graph.graph_inputs)
+            self.codegen_input_size_asserts()
+
+    @dynamo_timed
+    def generate(self, is_inference):
+        result = IndentedBuffer()
+        result.splice(self.header)
+
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(self.wrapper_call.indent())
+            self.memory_plan()
+            for line in self.lines:
+                if isinstance(line, wrapper.MemoryPlanningLine):
+                    line.codegen(self.wrapper_call)
+                else:
+                    self.wrapper_call.writeline(line)
+
+            output_refs = self.get_output_refs()
+            self.mark_output_type()
+            self.generate_return(output_refs)
+
+        self.append_precomputed_sizes_to_prefix()
+        self.finalize_prefix()
+        result.splice(self.prefix)
+
+        with result.indent():
+            result.splice(self.wrapper_call)
+
+        self.generate_end(result)
+        self.add_benchmark_harness(result)
+        return result.getvaluewithlinemap()
+
+    def memory_plan(self):
+        self.lines = memory_planning.MemoryPlanner(self).plan(self.lines)
+
+    def memory_plan_reuse(self):
+        out_names = V.graph.get_output_names()
+
+        while (
+            self.lines
+            and isinstance(self.lines[-1], wrapper.MemoryPlanningLine)
+            # TODO: this seems legit, NullLine has no node
+            and self.lines[-1].node.name not in out_names  # type: ignore[attr-defined]
+        ):
+            # these lines will be pointless
+            self.lines.pop()
+
+        # codegen allocations in two passes
+        planning_state = wrapper.MemoryPlanningState()
+        for i in range(len(self.lines)):
+            if isinstance(self.lines[i], wrapper.MemoryPlanningLine):
+                self.lines[i] = self.lines[i].plan(planning_state)
 
 class ExtensionOverrides(common.OpOverrides):
     # Binary element wise operations

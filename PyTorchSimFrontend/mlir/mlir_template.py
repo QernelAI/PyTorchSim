@@ -301,8 +301,6 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
                     if arg_attributes[idx][0] == name:
                         arg_attributes[idx][1] = attr
         wrapper.add_import_once('\nprint(f\'Wrapper Codegen Path = {__file__}\')')
-        wrapper.add_import_once(f'\nfrom PyTorchSimFrontend.extension_codecache import CustomAsyncCompile')
-        wrapper.add_import_once(f'\ncustom_async_compile = CustomAsyncCompile()')
         # Dump loop and load/store information
         wrapper.add_import_once(f"loop_info = {self.loop_info}")
         wrapper.add_import_once(f"load_tile_info = {self.load_desc}")
