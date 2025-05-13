@@ -188,6 +188,7 @@ class CycleSimulator():
 class BackendSimulator():
     BACKEND_RESULT_PATH_KEY = "BACKEND_RESULT_PATH"
     FINISH_STR = "Simulation Finished"
+    ALLOC_POOL = dict() # For eagermode buffer plan
     def __init__(self, backend_path, config_path, vectorlane_size=-1) -> None:
         self.base_dir = backend_path
         self.config_path = config_path
@@ -318,8 +319,18 @@ class BackendSimulator():
         ret = self.send_command(command)
         return
 
+    @classmethod
+    def sram_alloc(cls, buf_name, addr_range):
+        cls.ALLOC_POOL[buf_name] = addr_range
+
+    @classmethod
+    def sram_dealloc(cls, buf_name, addr_range):
+        if buf_name in cls.ALLOC_POOL:
+            del cls.ALLOC_POOL[buf_name]
+
     def create_attribute_file(self, attribute_path, inputs, **kwargs):
         address_info = {}
+        sram_buffer = {}
         json_content = {}
         os.makedirs(attribute_path, exist_ok=True)
         index = str(len(os.listdir(attribute_path)))
@@ -328,6 +339,10 @@ class BackendSimulator():
         for idx, tensor in enumerate(inputs):
             address_info[f"arg{idx}"] = tensor.data_ptr()
         json_content["address_info"] = address_info
+
+        for buf_name, range in self.ALLOC_POOL.items():
+            sram_buffer[buf_name] = range
+        json_content["sram_alloc"] = sram_buffer
 
         with open(attribute_path, "w") as f:
             json.dump(json_content, f, indent=4)
