@@ -118,11 +118,12 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
 
         return inner_I, inner_J, inner_K
 
-    def gemm_combination_mapping(self, M, N, K, n_extra_node=0, pad_k=True):
+    def gemm_combination_mapping(self, M, N, K, n_extra_node=0, pad_k=True, min_tile=False):
         spad_size_per_lane = self.spad_info["spad_size"]
         spad_size = spad_size_per_lane * self.vector_lane
         max_spad_size = spad_size // 2 # double buffer
         max_spad_per_lane = spad_size_per_lane // 2 # double buffer
+        minimum_n_tile = self.num_cores if min_tile else 1
         m_pad_factor = self.vector_lane if M > self.vector_lane else 8
         n_pad_factor = self.vector_lane if N > self.vector_lane else 8
         k_pad_factor = self.vector_lane if K > self.vector_lane else (8 if pad_k else 1)
@@ -149,7 +150,8 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
                     input_size_per_lane = self.get_spad_size_per_lane(tile_M, tile_K)
                     output_size_per_lane = self.get_spad_size_per_lane(tile_M * (1 + n_extra_node), tile_N)
                     used_spad_size_per_lane = (weight_size_per_lane + input_size_per_lane + output_size_per_lane) * self.precision
-                    if used_spad_size < max_spad_size and max_used_spad_size < used_spad_size and used_spad_size_per_lane < max_spad_per_lane and maximize_i_j <= tile_M * tile_N:
+                    n_tile = math.ceil(M / tile_M) * math.ceil(N / tile_N)
+                    if used_spad_size < max_spad_size and max_used_spad_size < used_spad_size and used_spad_size_per_lane < max_spad_per_lane and maximize_i_j <= tile_M * tile_N and n_tile >= minimum_n_tile:
                         max_used_spad_size = used_spad_size
                         maximize_i_j = tile_M * tile_N
                         mapping = (tile_M, tile_N, tile_K)
@@ -183,11 +185,11 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
 
         return mapping
 
-    def pseudo_auto_tune(self, mapping, stride, dilation, n_extra_node=0):
+    def pseudo_auto_tune(self, mapping, stride, dilation, O_H, O_W, n_extra_node=0):
         # pseudo auto-tune
-        if mapping[2] == 1:
+        if mapping[2] == 1 and not (O_H == 1):
             mapping = self.search_mapping_space(mapping, 2, 1, stride, dilation, n_extra_node=n_extra_node)
-        if mapping[3] == 1:
+        if mapping[3] == 1 and not (O_W == 1):
             mapping = self.search_mapping_space(mapping, 3, 1, stride, dilation, n_extra_node=n_extra_node)
         return mapping
 
@@ -200,6 +202,8 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
         max_used_spad_size = 0
         M, N, K = self.gemm_combination_mapping(M, N, K, n_extra_node=n_extra_node, pad_k=False)
         max_k_h_w = 1 # maximize kernel size
+        max_o_h_w = 1 # maximize output size
+        K = min(K, self.vector_lane)
         for o_h in sympy.divisors(O_H):
             for o_w in sympy.divisors(O_W):
                 for k_h in sympy.divisors(K_H):
@@ -214,16 +218,17 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
                         input_size_per_lane = self.get_spad_size_per_lane(i_w * i_h * M, K)
                         output_size_per_lane = self.get_spad_size_per_lane(o_w * o_h * M  * (1 + n_extra_node), N)
                         used_spad_size_per_lane = (weight_size_per_lane + input_size_per_lane + output_size_per_lane) * self.precision
-                        if used_spad_size < max_spad_size and max_used_spad_size < used_spad_size and used_spad_size_per_lane < max_spad_per_lane and max_k_h_w <= k_h * k_w:
+                        if used_spad_size < max_spad_size and max_used_spad_size < used_spad_size and used_spad_size_per_lane < max_spad_per_lane and max_k_h_w <= k_h * k_w and max_o_h_w <= o_h * o_w:
                             max_used_spad_size = used_spad_size
                             max_k_h_w = k_h * k_w
+                            max_o_h_w = o_h * o_w
                             mapping = (k_h, k_w, o_h, o_w, M, N, K)
-
-        # FIXME: this should be implemented with auto-tuning
-        mapping = self.pseudo_auto_tune(mapping, stride, dilation, n_extra_node=n_extra_node)
-
         if max_used_spad_size == 0:
             raise RuntimeError("Cannot find a valid mapping")
+
+        # FIXME: this should be implemented with auto-tuning
+        mapping = self.pseudo_auto_tune(mapping, stride, dilation, O_H, O_W, n_extra_node=n_extra_node)
+
         return mapping
 
     def conv_multi_tile_mapping(self, M, N, K, K_H, K_W, O_H, O_W, stride, dilation, n_extra_node=0):

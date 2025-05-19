@@ -73,14 +73,9 @@ void Simulator::run_simulator() {
 }
 
 void Simulator::core_cycle() {
-  for (int core_id = 0; core_id < _n_cores; core_id++) {
-    std::shared_ptr<Tile> finished_tile = _cores[core_id]->pop_finished_tile();
-    if (finished_tile->get_status() == Tile::Status::FINISH) {
-      get_partition_scheduler(core_id)->finish_tile(std::move(finished_tile));
-    }
-
+  for (int i=0; i<_max_slot; i++, _slot_id=(_slot_id + 1) % _max_slot) {
     // Issue new tile to core
-    for (int i=0; i<_max_slot; i++, _slot_id=(_slot_id + 1) % _max_slot) {
+    for (int core_id = 0; core_id < _n_cores; core_id++) {
       const std::shared_ptr<Tile> tile = get_partition_scheduler(core_id)->peek_tile(core_id, _slot_id, _config.core_type[core_id]);
       if (tile->get_status() != Tile::Status::EMPTY && _cores[core_id]->can_issue(tile))  {
         if (tile->get_status() == Tile::Status::INITIALIZED) {
@@ -92,6 +87,12 @@ void Simulator::core_cycle() {
         }
       }
     }
+  }
+  for (int core_id = 0; core_id < _n_cores; core_id++) {
+      std::shared_ptr<Tile> finished_tile = _cores[core_id]->pop_finished_tile();
+      if (finished_tile->get_status() == Tile::Status::FINISH) {
+        get_partition_scheduler(core_id)->finish_tile(std::move(finished_tile));
+      }
     _cores[core_id]->cycle();
   }
   /* L2 cache */
@@ -284,6 +285,7 @@ void Simulator::print_core_stat()
 {
   _icnt->print_stats();
   _dram->print_stat();
+  _dram->print_cache_stats();
   for (int core_id = 0; core_id < _n_cores; core_id++) {
     _cores[core_id]->print_stats();
   }

@@ -664,8 +664,10 @@ class MLIRConvTemplate(MLIRTemplate):
           TILE_K_H, TILE_K_W, TILE_O_H, TILE_O_W, TILE_M, TILE_N, TILE_K = kernel.conv_single_batch_mapping(BATCH, O_C, I_C, K_H, K_W, O_H, O_W, self.stride, self.dilation, n_extra_node) # TODO: implement K_W
           TILE_I_H = 1 + (TILE_O_H - 1) * self.stride[0] + (TILE_K_H - 1) * self.dilation[0]
           x_spad_size_per_lane = kernel.get_spad_size_per_lane(TILE_K_W * TILE_I_H * TILE_M, TILE_K)
+          w_spad_size_per_lane = kernel.get_spad_size_per_lane(TILE_K_W * TILE_K_H * TILE_K, TILE_N)
           y_spad_size_per_lane = kernel.get_spad_size_per_lane(TILE_O_H * TILE_M, TILE_N)
           x_spad_size = TILE_K_W * TILE_I_H * TILE_M * TILE_K
+          w_spad_size = TILE_K_W * TILE_K_H * TILE_K * TILE_N
           y_spad_size = TILE_O_H * TILE_M * TILE_N
           SUB_TILE_M = TILE_M if TILE_M < kernel.vector_lane else kernel.vector_lane
           SUB_TILE_N = TILE_N if TILE_N < kernel.vector_lane else kernel.vector_lane
@@ -680,8 +682,10 @@ class MLIRConvTemplate(MLIRTemplate):
           SUB_TILE_N = TILE_N if TILE_N < kernel.vector_lane else kernel.vector_lane
           SUB_TILE_K = TILE_K
           x_spad_size_per_lane = kernel.get_spad_size_per_lane(TILE_I_W * TILE_I_H, TILE_K)
+          w_spad_size_per_lane = kernel.get_spad_size_per_lane(TILE_K_W * TILE_K_H * TILE_K, TILE_N)
           y_spad_size_per_lane = kernel.get_spad_size_per_lane(TILE_O_H  * TILE_M, TILE_N)
           x_spad_size = TILE_I_W * TILE_I_H * TILE_K
+          w_spad_size = TILE_K_W * TILE_K_H * TILE_K * TILE_N
           y_spad_size = TILE_O_H * TILE_M * TILE_N
           TOG_latency = O_W if TILE_M > O_W else TILE_M
         TOG_latency = 8 if TOG_latency < 8 else TOG_latency
