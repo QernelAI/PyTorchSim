@@ -162,10 +162,14 @@ class ExtensionWrapperCodegen(wrapper.WrapperCodeGen):
                 continue
             if sympy_product(buf.get_size()) == 0:
                 continue
+            if buf is None:
+                continue
             self.prefix.writeline(f"sram_plan_prefix('{name}', {name})")
 
     def codegen_sram_plan_postfix(self, outputs):
         for name in outputs:
+            if name is None or name == "None":
+                continue
             self.wrapper_call.writeline(f"sram_plan_postfix('{name}', {name})")
 
     @dynamo_timed
@@ -175,7 +179,7 @@ class ExtensionWrapperCodegen(wrapper.WrapperCodeGen):
 
         with contextlib.ExitStack() as stack:
             stack.enter_context(self.wrapper_call.indent())
-            self.memory_plan()
+            self.memory_plan_reuse()
             for line in self.lines:
                 # Add buffer plan hook for dealloc
                 if isinstance(line, memory_planning.DeallocFromPoolLine):
@@ -189,7 +193,7 @@ class ExtensionWrapperCodegen(wrapper.WrapperCodeGen):
                 else:
                     self.wrapper_call.writeline(line)
                 # Add buffer plan hook for alloc
-                if isinstance(line, memory_planning.AllocFromPoolLine):
+                if isinstance(line, memory_planning.AllocFromPoolLine) or isinstance(line, wrapper.AllocateLine):
                     self.wrapper_call.writeline(f"sram_plan_prefix('{line.node.get_name()}', {line.node.get_name()})")
             output_refs = self.get_output_refs()
             self.codegen_sram_plan_postfix(output_refs)
