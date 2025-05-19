@@ -8,6 +8,7 @@
 #include "TileGraph.h"
 #include "Instruction.h"
 #include "sstStonne.h"
+#include "IntervalTree.h"
 #include "onnx/defs/schema.h"
 #include "onnx/onnx-operators_pb.h"
 #include "onnx/onnx_pb.h"
@@ -146,6 +147,7 @@ class TileGraphParser {
   std::unique_ptr<TileGraph> _tile_graph;
   std::map<std::string, addr_type> _arg_to_address;
   std::map<std::string, std::vector<uint32_t>> _arg_numa_stride;
+  std::vector<Interval<unsigned long long, int>> _cache_plan;
   std::map<std::string, std::tuple<int, int, LoopType>> _loop_size_map;
   std::map<std::string, std::string> _tog_meta;
   std::map<std::pair<std::string, std::vector<int>>, uint32_t> _tag_table;

@@ -43,7 +43,7 @@ class Dram {
   std::vector<std::queue<mem_fetch*>> m_from_crossbar_queue;
   std::vector<std::queue<mem_fetch*>> m_to_crossbar_queue;
   std::vector<std::queue<mem_fetch*>> m_to_mem_queue;
-  std::vector<L2Cache*> _m_caches;
+  std::vector<L2CacheBase*> _m_caches;
 };
 
 class DramRamulator2 : public Dram {

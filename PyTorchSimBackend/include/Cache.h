@@ -372,4 +372,100 @@ class ReadOnlyCache : public Cache {
                                     std::deque<CacheEvent> &event) override;
 };
 
+class DataCache : public Cache {
+ public:
+  DataCache(std::string name, CacheConfig &config, int core_id, int type_id,
+            std::queue<mem_fetch*> *to_mem_queue, bool is_l1 = false)
+      : Cache(name, config, core_id, type_id, to_mem_queue) {
+    init();
+    m_write_alloc_type = L2_CACHE_WA;
+    m_write_back_type = L2_CACHE_WB;
+  }
+  virtual void init();
+  virtual void print_cache_stats();
+  virtual CacheRequestStatus access(uint64_t addr, uint32_t time, mem_fetch *mf,
+                                    std::deque<CacheEvent> &event) override;
+ protected:
+  mem_access_type m_write_alloc_type;
+  mem_access_type m_write_back_type;
+  CacheRequestStatus process_tag_probe(bool wr, CacheRequestStatus status,
+                                       uint64_t addr, uint32_t cache_index,
+                                       mem_fetch *mf, uint32_t time,
+                                       std::deque<CacheEvent> &events);
+  // Functions for data cache access
+  /// Sends write request to lower level memory (write or writeback)
+  void send_write_request(mem_fetch *mf, CacheEvent request, uint32_t time,
+                          std::deque<CacheEvent> &events);
+  void write_back(EvictedBlockInfo &evicted, uint32_t time, std::deque<CacheEvent> &events);
+
+  CacheRequestStatus (DataCache::*m_wr_hit)(uint64_t addr, uint32_t cache_index,
+                                            mem_fetch *mf, uint32_t time,
+                                            std::deque<CacheEvent> &event,
+                                            CacheRequestStatus status);
+  CacheRequestStatus (DataCache::*m_wr_miss)(uint64_t addr,
+                                             uint32_t cache_index,
+                                             mem_fetch *mf, uint32_t time,
+                                             std::deque<CacheEvent> &event,
+                                             CacheRequestStatus status);
+  CacheRequestStatus (DataCache::*m_rd_hit)(uint64_t addr, uint32_t cache_index,
+                                            mem_fetch *mf, uint32_t time,
+                                            std::deque<CacheEvent> &event,
+                                            CacheRequestStatus status);
+  CacheRequestStatus (DataCache::*m_rd_miss)(uint64_t addr,
+                                             uint32_t cache_index,
+                                             mem_fetch *mf, uint32_t time,
+                                             std::deque<CacheEvent> &event,
+                                             CacheRequestStatus status);
+
+  // Function pointers for different cache access
+  // Write hit
+  CacheRequestStatus wr_hit_wb(
+      uint64_t addr, uint32_t cache_index, mem_fetch *mf, uint32_t time,
+      std::deque<CacheEvent> &event,
+      CacheRequestStatus status);  // write hit with write back
+  CacheRequestStatus wr_hit_wt(
+      uint64_t addr, uint32_t cache_index, mem_fetch *mf, uint32_t time,
+      std::deque<CacheEvent> &event,
+      CacheRequestStatus status);  // write hit with write through
+  CacheRequestStatus wr_hit_we(
+      uint64_t addr, uint32_t cache_index, mem_fetch *mf, uint32_t time,
+      std::deque<CacheEvent> &event,
+      CacheRequestStatus status);  // write hit with write evict
+  CacheRequestStatus wr_hit_global_we_local_wb(
+      uint64_t addr, uint32_t cache_index, mem_fetch *mf, uint32_t time,
+      std::deque<CacheEvent> &event,
+      CacheRequestStatus status);  // write hit with write evict for global and
+                                   // write back for local
+  // Write miss
+  CacheRequestStatus wr_miss_wa_naive(
+      uint64_t addr, uint32_t cache_index, mem_fetch *mf, uint32_t time,
+      std::deque<CacheEvent> &event,
+      CacheRequestStatus status);  // write allocate send write and read requsts
+  CacheRequestStatus wr_miss_wa_lazy_fetch_on_read(
+      uint64_t addr, uint32_t cache_index, mem_fetch *mf, uint32_t time,
+      std::deque<CacheEvent> &event,
+      CacheRequestStatus status);  // write allocate with read-fetch-only
+  CacheRequestStatus wr_miss_wa_write_validate(
+      uint64_t addr, uint32_t cache_index, mem_fetch *mf, uint32_t time,
+      std::deque<CacheEvent> &event,
+      CacheRequestStatus
+          status);  // write-allocate that writes with no read fetch
+  CacheRequestStatus wr_miss_no_wa(
+      uint64_t addr, uint32_t cache_index, mem_fetch *mf, uint32_t time,
+      std::deque<CacheEvent> &event,
+      CacheRequestStatus status);  // no write allocate
+
+  // Read hit
+  CacheRequestStatus rd_hit_base(uint64_t addr, uint32_t cache_index,
+                                 mem_fetch *mf, uint32_t time,
+                                 std::deque<CacheEvent> &event,
+                                 CacheRequestStatus status);  // read hit base
+
+  // Read miss
+  CacheRequestStatus rd_miss_base(uint64_t addr, uint32_t cache_index,
+                                  mem_fetch *mf, uint32_t time,
+                                  std::deque<CacheEvent> &event,
+                                  CacheRequestStatus status);  // read miss base
+};
+
 #endif

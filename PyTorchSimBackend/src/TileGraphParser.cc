@@ -754,6 +754,18 @@ TileGraphParser::TileGraphParser(std::string onnx_path, std::string attribute_pa
       spdlog::info("[TOGParser/Attribute] Address numa info key: {} numa stride : {}", it.key(), fmt::join(_arg_numa_stride[it.key()], ", "));
     }
   }
+  if (_attribute_json.contains("sram_alloc")) {
+    auto sram_alloc_list = _attribute_json["sram_alloc"];
+    spdlog::info("[TOGParser/Attribute] ================= SRAM Alloc Plan ================");
+    for (auto it = sram_alloc_list.begin(); it != sram_alloc_list.end(); ++it) {
+      auto value_list = it.value();
+      unsigned long long start = value_list.at(0);
+      unsigned long long end = value_list.at(1);
+      spdlog::info("[TOGParser/Attribute] {:16s}: 0x{:016x} ~ 0x{:016x}", it.key(), start, end);
+      Interval<unsigned long long, int> entry = {start, end, 0};
+      _cache_plan.push_back(entry);
+    }
+  }
   load_sparse_meta_data();
 
   /* ONNX file parsing */
@@ -829,6 +841,7 @@ TileGraphParser::TileGraphParser(std::string onnx_path, std::string attribute_pa
   }
 
   _tile_graph = std::make_unique<TileGraph>(TileGraph(onnx_path, graph_name));
+  _tile_graph->init_cache_plan(_cache_plan);
   if (std::stoi(this->getMetaByName("stonneGraph")))
     _tile_graph->StonneGraph=true;
 

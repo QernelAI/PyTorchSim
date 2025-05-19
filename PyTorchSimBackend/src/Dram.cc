@@ -34,15 +34,15 @@ Dram::Dram(SimulationConfig config, cycle_type* core_cycle) {
     spdlog::info("[Config/L2Cache] No L2 cache");
     for (int ch = 0; ch < _n_ch; ch++)
       _m_caches[ch] = new NoL2Cache(name, _m_cache_config, ch, _core_cycles, &m_to_crossbar_queue[ch], &m_from_crossbar_queue[ch]);
-  } else if (config.l2d_type == L2CacheType::READONLY) {
-    std::string name = "L2 ReadOnly cache";
+  } else if (config.l2d_type == L2CacheType::DATACACHE) {
+    std::string name = "L2 cache";
     _m_cache_config.init(config.l2d_config_str);
     spdlog::info("[Config/L2Cache] Total Size: {} KB, Partition Size: {} KB, Set: {}, Assoc: {}, Line Size: {}B Sector Size: {}B",
             _m_cache_config.get_total_size_in_kb() * _n_ch, _m_cache_config.get_total_size_in_kb(),
             _m_cache_config.get_num_sets(), _m_cache_config.get_num_assoc(),
             _m_cache_config.get_line_size(), _m_cache_config.get_sector_size());
     for (int ch = 0; ch < _n_ch; ch++)
-      _m_caches[ch] = new ReadOnlyL2Cache(name, _m_cache_config, ch, _core_cycles, _config.l2d_hit_latency, &m_to_crossbar_queue[ch], &m_from_crossbar_queue[ch]);
+      _m_caches[ch] = new L2DataCache(name, _m_cache_config, ch, _core_cycles, _config.l2d_hit_latency, &m_to_crossbar_queue[ch], &m_from_crossbar_queue[ch]);
   } else {
     spdlog::error("[Config/L2D] Invalid L2 cache type...!");
     exit(EXIT_FAILURE);

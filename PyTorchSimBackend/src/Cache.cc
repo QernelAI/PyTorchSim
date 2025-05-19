@@ -112,7 +112,9 @@ void LineCacheBlock::fill(uint32_t time, SectorMask) {
 
 SectorMask LineCacheBlock::get_dirty_mask() {
   SectorMask dirty_mask;
-  dirty_mask.set();
+  dirty_mask.reset();
+  if (m_status == MODIFIED)
+    dirty_mask.set();
   return dirty_mask;
 }
 
@@ -126,13 +128,8 @@ void SectorCacheBlock::allocate(uint64_t tag, uint64_t block_addr,
   uint32_t sidx = get_sector_index(sector_mask);
   m_sector_alloc_time[sidx] = time;
   m_sector_last_access_time[sidx] = time;
-  m_sector_fill_time[sidx] = 0;
-  m_status[sidx] = RESERVED;
-  m_ignore_on_fill_status[sidx] = false;
-  m_set_modified_on_fill_status[sidx] = false;
   m_line_alloc_time = time;
   m_line_last_access_time = time;
-  m_line_fill_time = 0;
 }
 
 void SectorCacheBlock::allocate_sector(uint32_t time, SectorMask sector_mask) {
@@ -140,16 +137,11 @@ void SectorCacheBlock::allocate_sector(uint32_t time, SectorMask sector_mask) {
   uint32_t sidx = get_sector_index(sector_mask);
   m_sector_alloc_time[sidx] = time;
   m_sector_last_access_time[sidx] = time;
-  m_sector_fill_time[sidx] = 0;
-  if (m_status[sidx] == MODIFIED)
-    m_set_modified_on_fill_status[sidx] = true;
-  else
-    m_set_modified_on_fill_status[sidx] = false;
+  m_line_last_access_time = time;
+  m_set_modified_on_fill_status[sidx] = m_status[sidx] == MODIFIED ? true : false; 
   m_status[sidx] = RESERVED;
   m_ignore_on_fill_status[sidx] = false;
   m_readable[sidx] = true;
-  m_line_last_access_time = time;
-  m_line_fill_time = 0;
 }
 
 void SectorCacheBlock::fill(uint32_t time, SectorMask sector_mask) {
@@ -158,6 +150,7 @@ void SectorCacheBlock::fill(uint32_t time, SectorMask sector_mask) {
   m_sector_fill_time[sidx] = time;
   m_line_fill_time = time;
 }
+
 bool SectorCacheBlock::is_valid_line() { return !(is_invalid_line()); }
 
 bool SectorCacheBlock::is_invalid_line() {
@@ -300,47 +293,51 @@ CacheRequestStatus TagArray::probe(uint64_t addr, uint32_t &idx,
   for (uint32_t way = 0; way < m_config.get_num_assoc(); way++) {
     uint32_t index = set_index * m_config.get_num_assoc() + way;
     CacheBlock *line = m_lines[index];
-    if (line->match_tag(tag)) {  // tag matched
+
+    // Handle tag matched case
+    if (line->match_tag(tag)) {
+      idx = index;
       if (line->get_status(mask) == RESERVED) {
-        idx = index;
         return HIT_RESERVED;
       } else if (line->get_status(mask) == VALID ||
                  (line->get_status(mask) == MODIFIED &&
                   line->is_readable(mask))) {
-        idx = index;
         return HIT;
       } else if ((line->get_status(mask) == MODIFIED &&
                   !line->is_readable(mask)) ||
                  (line->is_valid_line() && line->get_status(mask) == INVALID)) {
-        idx = index;
         return SECTOR_MISS;
       } else {
         assert(line->get_status(mask) == INVALID);
       }
-    }
-    if (!line->is_reserved_line()) {
+    } else if (!line->is_reserved_line()) {
       all_reserved = false;
       if (line->is_invalid_line()) {
         invalid_line = index;
-      } else {
-        if (m_config.get_evict_policy() == LRU) {
-          if (line->get_last_access_time() < valid_timestamp) {
-            valid_timestamp = line->get_last_access_time();
-            valid_line = index;
-          }
-        } else if (m_config.get_evict_policy() == FIFO) {
-          if (line->get_alloc_time() < valid_timestamp) {
-            valid_timestamp = line->get_alloc_time();
-            valid_line = index;
-          }
+        continue;
+      }
+
+      // Choose cacheline for eviction
+      if (m_config.get_evict_policy() == LRU) {
+        if (line->get_last_access_time() < valid_timestamp) {
+          valid_timestamp = line->get_last_access_time();
+          valid_line = index;
+        }
+      } else if (m_config.get_evict_policy() == FIFO) {
+        if (line->get_alloc_time() < valid_timestamp) {
+          valid_timestamp = line->get_alloc_time();
+          valid_line = index;
         }
       }
     }
   }
+
+  // All target cachelines are reserved
   if (all_reserved) {
     assert(m_config.get_alloc_policy() == ON_MISS);
     return RESERVATION_FAIL;
   }
+
   if (invalid_line != (uint32_t)-1) {
     idx = invalid_line;
   } else if (valid_line != (uint32_t)-1) {
@@ -709,4 +706,254 @@ CacheRequestStatus ReadOnlyCache::access(uint64_t addr, uint32_t time,
 
   m_bandwidth_management.use_data_port(mf, cache_status, events);
   return cache_status;
+}
+
+/* Data Cache */
+void DataCache::init() {
+  m_rd_hit = &DataCache::rd_hit_base;
+  m_rd_miss = &DataCache::rd_miss_base;
+  switch (m_config.get_write_policy()) {
+    case READ_ONLY:
+      assert(0);  // Data cache cannot be read only
+    case WRITE_BACK:
+      m_wr_hit = &DataCache::wr_hit_wb;
+      break;
+    case WRITE_THROUGH:
+      m_wr_hit = &DataCache::wr_hit_wt;
+      break;
+    case WRITE_EVICT:
+      m_wr_hit = &DataCache::wr_hit_we;
+      break;
+    default:
+      assert(0);
+  }
+  switch (m_config.get_write_alloc_policy()) {
+    case NO_WRITE_ALLOCATE:
+      m_wr_miss = &DataCache::wr_miss_no_wa;
+      break;
+    case WRITE_ALLOCATE:
+      m_wr_miss = &DataCache::wr_miss_wa_naive;
+      break;
+    default:
+      assert(0);
+  }
+}
+
+void DataCache::print_cache_stats() {
+  uint64_t hit = m_stats.get_interval_hit();
+  uint64_t miss = m_stats.get_interval_miss();
+  if (m_id == 0) {
+    spdlog::info("NDP {:2}: average Data Cache Hit : {}, Miss : {} , Hit Raito : {:.2f}\%", m_id,
+                 hit, miss, ((float)hit) / (hit + miss) * 100);
+  } else {
+    spdlog::debug("NDP {:2}: average Data Cache Hit : {}, Miss : {} , Hit Raito : {:.2f}\%", m_id,
+                 hit, miss, ((float)hit) / (hit + miss) * 100);
+  }
+}
+
+CacheRequestStatus DataCache::access(uint64_t addr, uint32_t time,
+                                     mem_fetch *mf,
+                                     std::deque<CacheEvent> &events) {
+  bool wr = mf->is_write();
+  uint64_t block_addr = m_config.get_block_addr(addr);
+  uint32_t cache_index = (uint32_t)-1;
+  CacheRequestStatus probe_status =
+      m_tag_array->probe(block_addr, cache_index, mf, true);
+  CacheRequestStatus access_status =
+      process_tag_probe(wr, probe_status, addr, cache_index, mf, time, events);
+  m_stats.inc_stats(mf->get_access_type(),
+                    m_stats.select_stats_status(probe_status, access_status));
+  return access_status;
+}
+
+CacheRequestStatus DataCache::process_tag_probe(bool wr,
+                                                CacheRequestStatus probe_status,
+                                                uint64_t addr,
+                                                uint32_t cache_index,
+                                                mem_fetch *mf, uint32_t time,
+                                                std::deque<CacheEvent> &events) {
+  CacheRequestStatus access_status = probe_status;
+  if (wr) {  // Write
+    if (probe_status == HIT) {
+      access_status =
+          (this->*m_wr_hit)(addr, cache_index, mf, time, events, probe_status);
+    } else if (probe_status != RESERVATION_FAIL ||
+               (probe_status == RESERVATION_FAIL &&
+                m_config.get_write_alloc_policy() == NO_WRITE_ALLOCATE)) {
+      access_status =
+          (this->*m_wr_miss)(addr, cache_index, mf, time, events, probe_status);
+    } else {
+      m_stats.inc_fail_stats(mf->get_access_type(), LINE_ALLOC_FAIL);
+    }
+  } else {  // Read
+    if (probe_status == HIT) {
+      access_status =
+          (this->*m_rd_hit)(addr, cache_index, mf, time, events, probe_status);
+    } else if (probe_status != RESERVATION_FAIL) {
+      access_status =
+          (this->*m_rd_miss)(addr, cache_index, mf, time, events, probe_status);
+    } else {
+      m_stats.inc_fail_stats(mf->get_access_type(), LINE_ALLOC_FAIL);
+    }
+  }
+  m_bandwidth_management.use_data_port(mf, access_status, events);
+  return access_status;
+}
+
+void DataCache::send_write_request(mem_fetch *mf, CacheEvent request,
+                                   uint32_t time,
+                                   std::deque<CacheEvent> &events) {
+  events.push_back(request);
+  m_miss_queue.push_back(mf);
+}
+
+void DataCache::write_back(EvictedBlockInfo &evicted, uint32_t time, std::deque<CacheEvent> &events) {
+  auto packet_size = m_config.get_atom_size();
+  for(int i = 0; i < evicted.m_modified_size / packet_size; i++) {
+    uint64_t evicted_addr = evicted.m_block_addr + i * packet_size;
+    mem_fetch *wb_mf =
+        new mem_fetch(evicted_addr, m_write_back_type, WRITE_REQUEST,
+                      packet_size);
+    wb_mf->set_dirty_mask(evicted.m_dirty_mask);
+    send_write_request(wb_mf, CacheEvent(WRITE_BACK_REQUEST_SENT, evicted),
+                       time, events);
+  }
+}
+
+/*** WRITE-hit functions (Set by config file) ***/
+// Write hit: Write back
+CacheRequestStatus DataCache::wr_hit_wb(uint64_t addr, uint32_t cache_index,
+                                        mem_fetch *mf, uint32_t time,
+                                        std::deque<CacheEvent> &events,
+                                        CacheRequestStatus status) {
+  uint64_t block_addr = m_config.get_block_addr(addr);
+  m_tag_array->access(block_addr, time, cache_index, mf);
+  CacheBlock *block = m_tag_array->get_block(cache_index);
+  block->set_status(MODIFIED, mf->get_access_sector_mask());
+  return HIT;
+}
+
+// Write hit: Write through
+CacheRequestStatus DataCache::wr_hit_wt(uint64_t addr, uint32_t cache_index,
+                                        mem_fetch *mf, uint32_t time,
+                                        std::deque<CacheEvent> &events,
+                                        CacheRequestStatus status) {
+  if (miss_queue_full(0)) {
+    m_stats.inc_fail_stats(mf->get_access_type(), MISS_QUEUE_FULL);
+    return RESERVATION_FAIL;
+  }
+  uint64_t block_addr = m_config.get_block_addr(addr);
+  m_tag_array->access(block_addr, time, cache_index, mf);
+  CacheBlock *block = m_tag_array->get_block(cache_index);
+  block->set_status(MODIFIED, mf->get_access_sector_mask());
+
+  // Generate a write-through
+  send_write_request(mf, CacheEvent(WRITE_REQUEST_SENT), time, events);
+  return HIT;
+}
+
+// Write hit: Write evict
+CacheRequestStatus DataCache::wr_hit_we(uint64_t addr, uint32_t cache_index,
+                                        mem_fetch *mf, uint32_t time,
+                                        std::deque<CacheEvent> &events,
+                                        CacheRequestStatus status) {
+  if (miss_queue_full(0)) {
+    m_stats.inc_fail_stats(mf->get_access_type(), MISS_QUEUE_FULL);
+    return RESERVATION_FAIL;
+  }
+  CacheBlock *block = m_tag_array->get_block(cache_index);
+  send_write_request(mf, CacheEvent(WRITE_REQUEST_SENT), time, events);
+  block->set_status(INVALID, mf->get_access_sector_mask());
+  return HIT;
+}
+
+/*** WRITE-miss functions (Set by config file) ***/
+// Write miss: Write allocate naive
+CacheRequestStatus DataCache::wr_miss_wa_naive(uint64_t addr,
+                                               uint32_t cache_index,
+                                               mem_fetch *mf, uint32_t time,
+                                               std::deque<CacheEvent> &events,
+                                               CacheRequestStatus status) {
+  uint64_t block_addr = m_config.get_block_addr(addr);
+  uint64_t mshr_addr = m_config.get_mshr_addr(addr);
+  bool mshr_hit = m_mshrs->probe(mshr_addr);
+  bool mshr_avail = !m_mshrs->full(mshr_addr);
+  if (miss_queue_full(2)) {
+    m_stats.inc_fail_stats(mf->get_access_type(), MISS_QUEUE_FULL);
+    return RESERVATION_FAIL;
+  } else if (mshr_hit && !mshr_avail) {
+    m_stats.inc_fail_stats(mf->get_access_type(), MSHR_MERGE_ENTRY_FAIL);
+    return RESERVATION_FAIL;
+  } else if (!mshr_hit && !mshr_avail) {
+    m_stats.inc_fail_stats(mf->get_access_type(), MSHR_ENTRY_FAIL);
+    return RESERVATION_FAIL;
+  }
+  send_write_request(mf, CacheEvent(WRITE_REQUEST_SENT), time, events);
+  mem_fetch *new_mf = new mem_fetch(
+      mf->get_addr(), m_write_alloc_type, READ_REQUEST, m_config.get_atom_size());
+  bool do_miss = false;
+  bool wb = false;
+  EvictedBlockInfo evicted;
+
+  // Send read request resulting from write miss
+  send_read_request(addr, block_addr, cache_index, new_mf, time, do_miss, wb,
+                    evicted, events, false, true);
+  if (do_miss) {
+    if (wb && (m_config.get_write_policy() != WRITE_THROUGH)) {
+      assert(status == MISS);
+      write_back(evicted, time, events);
+    }
+    return MISS;
+  }
+  return RESERVATION_FAIL;
+}
+
+// Write miss: Write allocate no write allocate
+CacheRequestStatus DataCache::wr_miss_no_wa(uint64_t addr, uint32_t cache_index,
+                                            mem_fetch *mf, uint32_t time,
+                                            std::deque<CacheEvent> &events,
+                                            CacheRequestStatus status) {
+  if (miss_queue_full(0)) {
+    m_stats.inc_fail_stats(mf->get_access_type(), MISS_QUEUE_FULL);
+    return RESERVATION_FAIL;
+  }
+  send_write_request(mf, CacheEvent(WRITE_REQUEST_SENT), time, events);
+  return MISS;
+}
+
+CacheRequestStatus DataCache::rd_hit_base(uint64_t addr, uint32_t cache_index,
+                                          mem_fetch *mf, uint32_t time,
+                                          std::deque<CacheEvent> &events,
+                                          CacheRequestStatus status) {
+  uint64_t block_addr = m_config.get_block_addr(addr);
+  m_tag_array->access(block_addr, time, cache_index, mf);
+  if (mf->is_atomic()) {
+    CacheBlock *block = m_tag_array->get_block(cache_index);
+    block->set_status(MODIFIED, mf->get_access_sector_mask());
+  }
+  return HIT;
+}
+
+CacheRequestStatus DataCache::rd_miss_base(uint64_t addr, uint32_t cache_index,
+                                           mem_fetch *mf, uint32_t time,
+                                           std::deque<CacheEvent> &events,
+                                           CacheRequestStatus status) {
+  if (miss_queue_full(1)) {
+    mf->current_state = "MISS_QUEUE_FULL";
+    m_stats.inc_fail_stats(mf->get_access_type(), MISS_QUEUE_FULL);
+    return RESERVATION_FAIL;
+  }
+  uint64_t block_addr = m_config.get_block_addr(addr);
+  bool do_miss = false;
+  bool wb = false;
+  EvictedBlockInfo evicted;
+  send_read_request(addr, block_addr, cache_index, mf, time, do_miss, wb,
+                    evicted, events, false, true);
+  if (do_miss) {
+    if (wb && (m_config.get_write_policy() != WRITE_THROUGH)) {
+      write_back(evicted, time, events);
+    }
+    return MISS;
+  }
+  return RESERVATION_FAIL;
 }

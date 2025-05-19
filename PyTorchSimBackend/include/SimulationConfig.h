@@ -11,7 +11,7 @@ enum class DramType { SIMPLE, RAMULATOR1, RAMULATOR2 };
 
 enum class IcntType { SIMPLE, BOOKSIM2 };
 
-enum class L2CacheType { NOCACHE, READONLY };
+enum class L2CacheType { NOCACHE, DATACACHE };
 
 struct SimulationConfig {
   /* Core config */

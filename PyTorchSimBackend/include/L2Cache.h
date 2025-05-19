@@ -3,10 +3,11 @@
 #include "Memfetch.h"
 #include "Cache.h"
 #include "Instruction.h"
+#include "IntervalTree.h"
 
-class L2Cache {
+class L2CacheBase {
 public:
-  L2Cache(std::string name, CacheConfig &cache_config, uint32_t id, cycle_type *core_cycle,
+  L2CacheBase(std::string name, CacheConfig &cache_config, uint32_t id, cycle_type *core_cycle,
     uint32_t l2d_hit_latency, std::queue<mem_fetch*> *to_xbar_queue,
     std::queue<mem_fetch*> *from_xbar_queue) : 
     l_name(name), l_cache_config(cache_config), l_id(id), l_core_cycle(core_cycle),
@@ -33,18 +34,19 @@ protected:
   std::unique_ptr<Cache> l_cache;
 };
 
-class NoL2Cache : public L2Cache {
+class NoL2Cache : public L2CacheBase {
 public:
   NoL2Cache(std::string name,  CacheConfig &cache_config, uint32_t id, cycle_type *core_cycle,
     std::queue<mem_fetch*> *to_xbar_queue, std::queue<mem_fetch*> *from_xbar_queue) : 
-    L2Cache(name, cache_config, id, core_cycle, 0, to_xbar_queue, from_xbar_queue) {}
+    L2CacheBase(name, cache_config, id, core_cycle, 0, to_xbar_queue, from_xbar_queue) {}
   void cycle() override;
   bool push(mem_fetch* req) override;  // Push memory response from DRAM
 };
 
-class ReadOnlyL2Cache : public L2Cache {
+class L2DataCache : public L2CacheBase {
 public:
-  ReadOnlyL2Cache(std::string name,  CacheConfig &cache_config, uint32_t id, cycle_type *core_cycle,
+  typedef IntervalTree<new_addr_type, int> CachePlan;
+  L2DataCache(std::string name,  CacheConfig &cache_config, uint32_t id, cycle_type *core_cycle,
     uint32_t l2d_hit_latency, std::queue<mem_fetch*> *to_xbar_queue,
     std::queue<mem_fetch*> *from_xbar_queue);
   void cycle() override;

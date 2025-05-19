@@ -82,8 +82,8 @@ SimulationConfig initialize_config(json config) {
   if (config.contains("l2d_type")) {
     if ((std::string)config["l2d_type"] == "nocache")
       parsed_config.l2d_type = L2CacheType::NOCACHE;
-    else if ((std::string)config["l2d_type"] == "readonly")
-      parsed_config.l2d_type = L2CacheType::READONLY;
+    else if ((std::string)config["l2d_type"] == "datacache")
+      parsed_config.l2d_type = L2CacheType::DATACACHE;
     else
       throw std::runtime_error(fmt::format("Not implemented l2 cache type {} ",
                                           (std::string)config["l2d_type"]));

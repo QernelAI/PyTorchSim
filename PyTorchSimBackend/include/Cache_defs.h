@@ -8,7 +8,12 @@
 
 const int SECTOR_CHUNCK_SIZE = 4;
 typedef std::bitset<SECTOR_CHUNCK_SIZE> SectorMask;
-enum CacheBlockState { INVALID, RESERVED, VALID, MODIFIED };
+enum CacheBlockState {
+  INVALID,  // Initial state
+  RESERVED, // Reserved state (alloc())
+  VALID,    // Filled state (fill)
+  MODIFIED  // Filled with modified data (fill)
+};
 enum CacheRequestStatus {
   HIT,
   HIT_RESERVED,

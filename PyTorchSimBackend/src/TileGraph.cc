@@ -47,6 +47,7 @@ std::shared_ptr<Tile> TileSubGraph::get_tile() {
 
 
 void TileGraph::append_subgraph(std::shared_ptr<TileSubGraph> subgraph) {
+  subgraph->set_owner(this);
   _subgraph_vec.push_back(std::move(subgraph));
 }
 
@@ -62,7 +63,6 @@ bool TileGraph::is_finished() {
       if (tile_pair.second != nullptr)
         finished &= tile_pair.second->is_finished();
   }
-
   return finished;
 }
 
@@ -119,4 +119,9 @@ void TileGraph::allocate_subgraph(int core_id, int slot_id) {
     }
   }
   return;
+}
+
+bool TileGraph::is_cacheable(unsigned long long start, unsigned long long end) {
+  auto result = _cache_plan.findOverlapping(start, end);
+  return result.size() != 0;
 }

@@ -14,9 +14,9 @@
   "dram_nbl" : 2,
   "dram_print_interval": 10000,
   "dram_config_path" : "../configs/ramulator2_configs/HBM2.yaml",
-  "l2d_type" : "readonly",
-  "l2d_config" : "S:64:128:512,32,L:R:m:L:L,A:192:4,32:0,32",
-
+  "l2d_type" : "datacache",
+  "l2d_config" : "S:64:128:512,32,L:T:m:L:L,A:192:4,32:0,32",
+ 
   "icnt_type" : "simple",
   "icnt_latency" : 7,
   "icnt_freq" : 38400,

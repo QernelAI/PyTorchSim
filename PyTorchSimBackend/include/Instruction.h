@@ -60,6 +60,7 @@ class Instruction {
     int offset = std::inner_product(_idx_list.begin(), _idx_list.end(), _stride_list.begin(), 0);
     dram_addr += offset * _precision;
   }
+  addr_type get_base_dram_address() { return dram_addr; }
   void set_free_sram_size(size_t sram_size) { _free_sram_size=sram_size; }
   void* get_owner() { return _owner; }
   void set_owner(void *owner) { _owner = owner;}
