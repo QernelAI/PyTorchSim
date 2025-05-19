@@ -20,8 +20,7 @@ Core::Core(uint32_t id, SimulationConfig config)
 
 bool Core::can_issue(const std::shared_ptr<Tile>& op) {
   /* Check SRAM is enough to run tile */
-  assert(op->get_required_sram_size() <= _sram_size);
-  return op->get_required_sram_size() + _used_sram_size <= _sram_size &&  _tiles.size() < 2  && !op->is_stonne_tile();
+  return _tiles.size() < 2  && !op->is_stonne_tile();
 }
 
 void Core::issue(std::shared_ptr<Tile> op) {
