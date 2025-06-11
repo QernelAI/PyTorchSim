@@ -76,3 +76,6 @@ def load_plan_from_module(module_path):
 
 CONFIG_SRAM_BUFFER_PLAN_PATH = os.environ.get("SRAM_BUFFER_PLAN_PATH", default=None)
 CONFIG_SRAM_BUFFER_PLAN = load_plan_from_module(CONFIG_SRAM_BUFFER_PLAN_PATH)
+
+# For ILS experiment
+CONFIG_TLS_MODE = int(os.environ.get('TORCHSIM_TLS_MODE', default=1))

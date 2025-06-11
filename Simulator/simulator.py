@@ -157,7 +157,7 @@ class CycleSimulator():
             print("")
 
         dir_path = os.path.join(os.path.dirname(target_binary), "m5out")
-        gem5_cmd = [extension_config.CONFIG_GEM5_PATH, "-d", dir_path, extension_config.CONFIG_GEM5_SCRIPT_PATH, "-c", target_binary, "--vlane", str(vectorlane_size)]
+        gem5_cmd = [extension_config.CONFIG_GEM5_PATH, "-r", "--stdout-file=sto.log", "-d", dir_path, extension_config.CONFIG_GEM5_SCRIPT_PATH, "-c", target_binary, "--vlane", str(vectorlane_size)]
         try:
             # Create progress thread
             is_dryrun = int(os.environ.get('BACKENDSIM_DRYRUN', default=False))

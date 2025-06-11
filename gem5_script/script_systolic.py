@@ -1,3 +1,4 @@
+import time
 import argparse
 import sys
 import math
@@ -185,11 +186,11 @@ system.cpu.createThreads()
 # Simulation
 root = Root(full_system=False, system=system)
 m5.instantiate()
+start_time = time.time()
 exit_event = m5.simulate()
 
 if exit_event.getCause() != "exiting with last active thread context":
     exit(1)
-
-# print(f"Exiting @ tick {m5.curTick()} because {exit_event.getCause()}")
-print(f"{m5.curTick() / 1000}")
-print(f"{m5.curTick()}")
+end_time = time.time()
+elapsed_seconds = end_time - start_time
+print(f"Simulation time: {elapsed_seconds:.6f} seconds")

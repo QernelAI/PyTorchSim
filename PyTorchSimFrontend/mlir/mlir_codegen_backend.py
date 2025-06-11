@@ -1372,7 +1372,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         for n_try in range(extension_config.CONFIG_MAX_AUTOTUNE_TRY):
             src_code = super().codegen_nodes(nodes, kernel_name)
             self._prepare_simulator_headers(src_code)
-            if not extension_config.CONFIG_AUTOTUNE:
+            if not extension_config.CONFIG_AUTOTUNE or not extension_config.CONFIG_TORCHSIM_VALIDATION_MODE:
                 return src_code
 
             try:
