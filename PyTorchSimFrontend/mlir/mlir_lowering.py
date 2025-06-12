@@ -93,6 +93,10 @@ def convolution(
         "groups": groups,
     }
 
+    x.realize()
+    weight.realize()
+    x = ir.ExternKernel.require_channels_last(x)
+    weight = ir.ExternKernel.require_channels_last(weight)
     layout = conv_layout(x, weight, None, **kwargs)
     mlir_template = MLIRConvTemplate([x, weight, bias], layout, **kwargs)
     return mlir_template.generate().output_node()

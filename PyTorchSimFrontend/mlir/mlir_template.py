@@ -10,7 +10,7 @@ from collections import OrderedDict
 from typing import List, Optional
 from unittest.mock import patch
 
-from torch._inductor.codegen.common import Kernel, KernelTemplate, ChoiceCaller, OpOverrides, CSE
+from torch._inductor.codegen.common import Kernel, KernelTemplate, ChoiceCaller, OpOverrides, CSE, DeferredLine
 from torch._inductor.ir import Buffer, IRNode, TemplateBuffer, Pointwise
 from torch._inductor.select_algorithm import PartialRender
 from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
@@ -312,7 +312,7 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
         _, call_args, _, _ = self.kernel_group.args.mlir_argdefs()
         # generate the code to call this
         wrapper.generate_kernel_call(
-            kernel_name if self.outer_func_name is None else self.outer_func_name,
+            kernel_name if self.outer_func_name is None else self.outer_func_name + f"_{len(call_args)}",
             call_args, cuda=False)
 
     def codegen_body(self):
@@ -611,12 +611,12 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
         else:
             operation = "affine.store"
             line = f"{operation} %{value}, %{sram_var}[{compute_index_var}] : {tile_shape}"
-        self.cse.generate(self.stores, line, assignment = False)
+        self.stores.writeline(DeferredLine(name, line))
 
         # Generate DMA instruction
         code = self.get_dma_code("MVOUT", vlane_split_axis, vlane_stride, mlir_dtype, dram_var, index_var, sram_var, sram_index_var,
                                  f"{name}_tag", dram_shape, tile_shape, tile_stride)
-        self.cse.generate(self.dma_stores, code, assignment = False)
+        self.dma_stores.writeline(DeferredLine(name, code))
 
     def get_scratchpad_buffer(self, dtype, name, tile_size_per_lane, dram_tile_shape, index_var, raw_index):
         return super().get_scratchpad_buffer(dtype, name, tile_size_per_lane, dram_tile_shape, index_var, raw_index, True)
