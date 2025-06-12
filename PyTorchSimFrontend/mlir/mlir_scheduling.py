@@ -49,6 +49,12 @@ class MLIRScheduling(BaseScheduling):
 
         # Check template node fusion
         if node1.is_template() or node2.is_template():
+            # Don't fuse maxpool template code
+            from PyTorchSimFrontend.mlir.mlir_maxpool_template import MLIRMaxPoolTemplate
+            if node1.is_template() and isinstance(node1.node.template, MLIRMaxPoolTemplate) or \
+                node2.is_template() and isinstance(node2.node.template, MLIRMaxPoolTemplate):
+                return False
+
             # Different layout is not supported
             if node1.get_nodes()[0].node.layout.dtype != node2.get_nodes()[0].node.layout.dtype:
                 return False
