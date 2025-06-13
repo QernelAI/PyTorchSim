@@ -437,7 +437,7 @@ class BaseMLIRKernel(common.Kernel, BaseMLIRHardwareInfo):
                     raise NotImplementedError("Not supporting type...")
 
         vlane_split_axis = len(vars) - 1 # Set split_axis as a last normal loop not reduction loop
-        vlane_stride = 8
+        vlane_stride = 2
 
         # FIXME: Naive decrease tile size
         def decrease_tile_size(tile_size, vlane_split_axis):
