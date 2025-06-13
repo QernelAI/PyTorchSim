@@ -127,6 +127,7 @@ class MLIRGemmTemplate(MLIRTemplate):
             SUB_TILE_N = TILE_N if TILE_N < kernel.vector_lane else kernel.vector_lane
         else: # Avoid Row Conflict of weights
             SUB_TILE_N = TILE_N
+        SUB_TILE_N = TILE_N if TILE_N > 512 else SUB_TILE_N # FIXME: hardcoded & 126 line has same feature
         SUB_TILE_K = TILE_K
         TOG_latency = M if SUB_TILE_M > M else SUB_TILE_M
         kernel.loop_size =[TOG_latency, SUB_TILE_N, SUB_TILE_K]
