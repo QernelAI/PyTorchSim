@@ -728,7 +728,7 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
         self.compute_body_loop.affine_yield[result] = reduced_shape
 
         # Final reduction
-        reduction_size = self.kernel_group.tile_desc.get_numel_per_lane() // self.kernel_group.tile_desc.get_tile_size()[-1]
+        reduction_size = self.kernel_group.tile_desc.get_numel_per_lane() // self.kernel_group.tile_desc.get_tile_size()[-2]
         assert(vec_len % reduction_size==0)
         if vec_len > reduction_size:
             init = self.const_cse.generate(self.const_buffer, f"arith.constant {reduction_init(reduction_type, dtype)} : {type_name}")
@@ -787,7 +787,7 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
 
         # Tile is always reuduced in inner loop
         numel_per_lane = self.kernel_group.tile_desc.get_numel_per_lane()
-        reduction_axis_size = self.kernel_group.tile_desc.get_tile_size()[-1]
+        reduction_axis_size = self.kernel_group.tile_desc.get_tile_size()[-2]
         nr_outer_loop = numel_per_lane // reduction_axis_size
 
         vlane_split_axis = 0
@@ -795,7 +795,7 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
         tile_numel_per_lane = vlane_stride * nr_outer_loop
 
         dram_shape = mlir_common.MLIRKernelArgs.get_mlir_shape(self.buffer_types[name])
-        tile_shape = f"memref<{self.kernel_group.tile_desc.get_tile_size()[0]}x{mlir_dtype}, 1>"
+        tile_shape = f"memref<{self.kernel_group.tile_desc.get_tile_size()[1]}x{mlir_dtype}, 1>"
         tile_stride = [1]
         compute_vec_size = self.var_info[value][0]
         if compute_vec_size == 1:
@@ -838,7 +838,7 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
         if 'nr_rdim' in template_store_info and template_store_info['nr_rdim']==1:
             tile_desc.nr_rdim = 1
             numel_per_lane = tile_desc.get_numel_per_lane()
-            reduction_axis_size = tile_desc.get_tile_size()[-1]
+            reduction_axis_size = tile_desc.get_tile_size()[-2]
             nr_outer_loop = (numel_per_lane + reduction_axis_size-1) // reduction_axis_size
 
             self.reduction_body_loop = mlir_common.LoopLevel(self.reduction_idx, nr_outer_loop, 0 , nr_outer_loop)

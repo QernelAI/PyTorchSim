@@ -1109,7 +1109,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         self.compute_body_loop.affine_yield[result] = reduced_shape
 
         # Final reduction
-        reduction_size = self.kernel_group.tile_desc.get_numel_per_lane() // self.kernel_group.tile_desc.get_tile_size()[-1]
+        reduction_size = self.kernel_group.tile_desc.get_numel_per_lane() // self.kernel_group.tile_desc.get_tile_size()[-2]
         assert(vec_len % reduction_size==0)
         if vec_len > reduction_size:
             init = self.const_cse.generate(self.reductions_suffix, f"arith.constant {reduction_init(reduction_type, dtype)} : {type_name}")
