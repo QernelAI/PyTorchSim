@@ -143,11 +143,11 @@ func.func @{{ KERNEL_NAME }}{{kernel.def_kernel(inputs=[X, W, Bias], outputs=[Y]
            : memref<{{ K * N }}xf32>, memref<{{ TILE_K }}x{{ TILE_N }}xf32, 1>, memref<1xi32> { subtile_size=[{{ SUB_TILE_K }}, {{ SUB_TILE_N }}], async=1, sram_stride=[1, {{ TILE_K }}]}
         linalg.matmul ins(%X_buffer, %W_buffer : memref<{{ TILE_M }}x{{ TILE_K }}x{{ DATA_STYPE }}, 1>, memref<{{ TILE_K }}x{{ TILE_N }}x{{ DATA_STYPE }}, 1>)
                 outs(%Y_buffer : memref<{{ TILE_M }}x{{ TILE_N }}x{{ DATA_STYPE }}, 1>)
-      } { accumulation_loop=true }
+      } { accumulation_loop=true, loop_k=true }
       {{kernel.store_output(indent_size=6)}}
-    } { outer_loop=true }
+    } { outer_loop=true, loop_m=true}
     {{kernel.reduction_output(indent_size=4)}}
-  } { outer_loop=true }
+  } { outer_loop=true, loop_n=true }
   return
 }
 """

@@ -55,8 +55,7 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
         self.const_cse = CSE(self.newvar_prefix, self.suffix, name_prefix="template_const")
         self.alloc_cse = CSE(self.newvar_prefix, self.suffix, name_prefix="template_alloc")
         self.reduction_epilogue_suffix = IndentedBuffer()
-        self.reduction_body_loop = None # For reduction fusion
-        self.reduction_idx = "reduction_idx"
+        self.reduction_fusion = False
 
         # Overwrite ops
         self.load = self.load_epilogue
@@ -345,11 +344,6 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
         compute_body = mlir_common.ParallelLoopBuffer()
         with contextlib.ExitStack() as stack:
             stack.enter_context(compute_body.indent(attribute="{inner_loop=false}",suffix=self.compute_body_loop.epilogue_line()))
-            if self.reduction_body_loop is not None:
-                compute_body.writelines(self.reduction_body_loop.lines())
-                stack.enter_context(compute_body.indent(attribute="{inner_loop=false}",suffix=self.reduction_body_loop.epilogue_line()))
-                if (self.compute.getvalue()==''):
-                    print('here')
             compute_body.splice(self.loads)
             compute_body.splice(self.compute)
             if len(self.stores._lines) == 0:
@@ -364,7 +358,6 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
         self.loads.clear()
         self.compute.clear()
         self.stores.clear()
-        self.reduction_body_loop = None
 
     def def_kernel(
         self,
@@ -607,23 +600,38 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
         # Load vector from sram
         sram_var = self.buffer_names[name]
         zero_var = self.get_const_cse(0)
-        if self.reduction_body_loop is None:
+        if not self.reduction_fusion:
             compute_index_var = ",".join([f"%{zero_var}"] * (self.kernel_group.tile_desc.get_nr_dim()-1) + [f"%{self.compute_idx}"])
-        else:
-            reduce_size = self.reduction_body_loop.size
-            compute_index_var = ",".join([f"%{zero_var}"] * (self.kernel_group.tile_desc.get_nr_dim()-2) + [f"%{self.reduction_idx}"] + [f"%{self.compute_idx}"])
-            vshape = f"vector<{reduce_size}x{compute_vec_size//reduce_size}x{mlir_dtype}>"
+            if compute_vec_size > 1:
+                operation = "affine.vector_load"
+                line = f"{operation} %{sram_var}[{compute_index_var}] : {tile_shape}, {vshape}"
+            else:
+                operation = "affine.load"
+                line = f"{operation} %{sram_var}[{compute_index_var}] : {tile_shape}"
+            out = self.cse.generate(self.loads, line)
+        else: # For reduction case
+            reduce_size = self.reduction_nr_outer_loop
+            vsize = compute_vec_size//reduce_size
+            vshape = f"vector<{vsize}x{mlir_dtype}>"
+            tshape = f"vector<{reduce_size}x{vsize}x{mlir_dtype}>"
 
-        if compute_vec_size > 1:
-            pad = self.const_cse.generate(self.const_buffer, f"arith.constant 0.0 : {mlir_dtype}")
-            operation = "vector.transfer_read"
-            line = f"{operation} %{sram_var}[{compute_index_var}], %{pad} : {tile_shape}, {vshape}"
-        else:
-            operation = "affine.load"
-            line = f"{operation} %{sram_var}[{compute_index_var}] : {tile_shape}"
+            init = self.cse.generate(self.loads, f"arith.constant 0.0 : {mlir_dtype}")
+            init_vec = self.cse.generate(self.loads, f"vector.broadcast %{init} : {mlir_dtype} to {tshape}")
+            if compute_vec_size > 1:
+                for i in range(reduce_size):
+                    offset = self.cse.generate(self.loads, f"affine.apply affine_map<(d0) -> (d0 + {i*(self.reduction_axis_size)})>(%{self.compute_idx})")
+                    compute_index_var = ",".join([f"%{zero_var}"] * (self.kernel_group.tile_desc.get_nr_dim()-1) + [f"%{offset}"])
+                    operation = "affine.vector_load"
+                    line = f"{operation} %{sram_var}[{compute_index_var}] : {tile_shape}, {vshape}"
+                    out = self.cse.generate(self.loads, line)
+                    init_vec = self.cse.generate(self.loads, f"vector.insert %{out}, %{init_vec}[{i}] : {vshape} into {tshape}")
+                out = init_vec
+                vshape = tshape
+            else:
+                line = f"{operation} %{sram_var}[{compute_index_var}] : {tile_shape}"
+                out = self.cse.generate(self.loads, line)
 
-        out = self.cse.generate(self.loads, line)
-        if self.reduction_body_loop is not None:
+        if self.reduction_fusion:
             new_vshape = self.kernel_group.tile_desc.get_mlir_vshape(mlir_dtype)
             out = self.cse.generate(self.loads, f"vector.shape_cast %{out} : {vshape} to {new_vshape}")
         self.register_var_info(out, [compute_vec_size, mlir_dtype])
@@ -728,8 +736,7 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
         self.compute_body_loop.affine_yield[result] = reduced_shape
 
         # Final reduction
-        reduction_size = self.kernel_group.tile_desc.get_numel_per_lane() // self.kernel_group.tile_desc.get_tile_size()[-2]
-        assert(vec_len % reduction_size==0)
+        reduction_size = self.reduction_nr_outer_loop
         if vec_len > reduction_size:
             init = self.const_cse.generate(self.const_buffer, f"arith.constant {reduction_init(reduction_type, dtype)} : {type_name}")
             if reduction_size == 1:
@@ -755,24 +762,6 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
 
         # Specail handling for fusion
         self.reduction_epilogue_suffix.writeline(f"affine.yield %{body_acc} : {self.affine_yield[body_acc]}")
-        self.reduction_body_loop.affine_yield = dict(self.compute_body_loop.affine_yield)
-        self.compute_body_loop.affine_yield.clear()
-
-        reduction_attr= self.compute_body_loop.reduction_vars[body_acc]
-        reduction_key = "reduction_epilogue"
-        new_body_acc = self.reduction_cse.generate(
-            self.compute, f"reduction {reduction_key}body_acc", write=False
-        )
-        body_iter_arg = self.iterator_cse.generate(
-            self.compute, f"reduction {reduction_key}body_iter_arg", write=False
-        )
-        iterator = self.iterator_cse.generate(
-            self.loads, f"reduction {reduction_key}", write=False
-        )
-
-        self.reduction_body_loop.reduction_vars[new_body_acc] = (reduction_attr[0], reduction_attr[1], body_iter_arg, reduction_attr[3])
-        self.compute_body_loop.reduction_vars[body_acc] = (reduction_attr[0], body_iter_arg, reduction_attr[2], reduction_attr[3])
-        self.compute_body_loop.affine_yield[new_body_acc] = reduction_attr[3]
         return acc
 
     def store_reduction_epilogue(self, name, index, value):
@@ -840,8 +829,9 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
             numel_per_lane = tile_desc.get_numel_per_lane()
             reduction_axis_size = tile_desc.get_tile_size()[-2]
             nr_outer_loop = (numel_per_lane + reduction_axis_size-1) // reduction_axis_size
-
-            self.reduction_body_loop = mlir_common.LoopLevel(self.reduction_idx, nr_outer_loop, 0 , nr_outer_loop)
+            self.reduction_fusion = True
+            self.reduction_axis_size =  tile_desc.get_tile_size()[-2]
+            self.reduction_nr_outer_loop = (numel_per_lane + reduction_axis_size-1) // reduction_axis_size
             self.compute_body_loop.size = reduction_axis_size
             self.compute_body_loop.step = tile_desc.get_compute_vec_size() // nr_outer_loop
         else:

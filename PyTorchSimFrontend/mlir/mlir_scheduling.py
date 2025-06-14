@@ -30,7 +30,11 @@ class MLIRScheduling(BaseScheduling):
             # For matmul+reduction case
             if node1.is_template() and len(node1.get_nodes())==1 and isinstance(node1.node.template, MLIRGemmTemplate) and node2.is_reduction() and len(node2.get_nodes())==1:
                 reduction_axis = node2.node.origin_node.args[1]
+                if isinstance(reduction_axis, list):
+                    reduction_axis = reduction_axis[0]
                 output_dims = len(node1.node.get_size())
+                if reduction_axis < 0:
+                    reduction_axis = output_dims + reduction_axis
                 possible = node1.node.get_size()[:-1] == node2.node.get_size() and ((reduction_axis==0 and output_dims==2) or (reduction_axis==1 and output_dims==3))
                 return possible
         return self.scheduler.can_fuse_origin(node1, node2)
