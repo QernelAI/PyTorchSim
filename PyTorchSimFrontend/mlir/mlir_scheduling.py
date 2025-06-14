@@ -1,5 +1,6 @@
 import os
 import math
+from sympy import symbols, sympify
 from PyTorchSimFrontend import extension_config
 from PyTorchSimFrontend.mlir.mlir_codegen_backend import MLIRKernel
 
@@ -27,16 +28,17 @@ class MLIRScheduling(BaseScheduling):
     def can_fuse_with_exceptions(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode) -> bool:
         if node1.get_device() == node2.get_device():
             from PyTorchSimFrontend.mlir.mlir_gemm_template import MLIRGemmTemplate
-            # For matmul+reduction case
-            if node1.is_template() and len(node1.get_nodes())==1 and isinstance(node1.node.template, MLIRGemmTemplate) and node2.is_reduction() and len(node2.get_nodes())==1:
-                reduction_axis = node2.node.origin_node.args[1]
-                if isinstance(reduction_axis, list):
-                    reduction_axis = reduction_axis[0]
-                output_dims = len(node1.node.get_size())
-                if reduction_axis < 0:
-                    reduction_axis = output_dims + reduction_axis
-                possible = node1.node.get_size()[:-1] == node2.node.get_size() and ((reduction_axis==0 and output_dims==2) or (reduction_axis==1 and output_dims==3))
-                return possible
+            from PyTorchSimFrontend.mlir.mlir_bmm_template import MLIRBMMTemplate
+            if (node1.is_template() and len(node1.get_nodes())==1 and \
+                (isinstance(node1.node.template, MLIRGemmTemplate) or isinstance(node1.node.template, MLIRBMMTemplate)) and \
+                node2.is_reduction() and len(node2.get_nodes())==1):
+                # For matmul/bmm+reduction case
+                size_match =node1.node.get_size() == node2.node.get_size() + node2.node.get_reduction_size()
+                stride = [i.strip()[:-1].split(",")[-1].strip() for i in str(node2.node).split("\n") if "r0" in i][1]
+                target_symbol = symbols("r0")
+                # We can't fuse dim=-1
+                possible = int(sympify(stride).coeff(target_symbol)) != 1
+                return size_match and possible
         return self.scheduler.can_fuse_origin(node1, node2)
 
     def _set_flush_status(self, status: bool):

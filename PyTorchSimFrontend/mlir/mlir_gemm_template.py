@@ -244,7 +244,8 @@ class MLIRGemmTemplate(MLIRTemplate):
             dram_shape = f"memref<{kernel.render_options['Y_numel']}x{kernel.render_options['DATA_STYPE']}>",
             tile_size = (TILE_M, TILE_N),
             tile_stride = [1, TILE_M],
-            nr_rdim = nr_rdim
+            nr_rdim = nr_rdim,
+            reduction_idx = "t_n"
         )
         code = self._template_from_string(template).render(**kernel.render_options)
         kernel.add_loop_info([kernel.render_options["M"], kernel.render_options["N"], kernel.render_options["K"]], [kernel.render_options["TILE_M"], kernel.render_options["TILE_N"], kernel.render_options["TILE_K"]])

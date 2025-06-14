@@ -83,6 +83,81 @@ func.func @{{ KERNEL_NAME }}{{kernel.def_kernel(inputs=[X, W, Bias], outputs=[Y]
 }
 """
 
+BMM_REDUCTION_TEMPLATE = r"""
+// BMM kernel
+// BATCH = {{ B }}
+// M = {{ M }}
+// N = {{ N }}
+// K = {{ K }}
+// TILE_M = {{ TILE_M }}
+// TILE_N = {{ TILE_N }}
+// TILE_K = {{ TILE_K }}
+// SUB_TILE_M = {{ SUB_TILE_M }}
+// SUB_TILE_N = {{ SUB_TILE_N }}
+#map0 = affine_map<(d0, d1, d2) -> ({{ X_map }})>
+#map1 = affine_map<(d0, d1, d2) -> ({{ W_map }})>
+#map2 = affine_map<(d0, d1, d2) -> (d0 * {{ M * N }} + d1 * {{ N }} + d2)>
+memref.global @X_spad : memref<1x{{ TILE_M }}x{{ TILE_K }}xf32, 1>
+memref.global @W_spad : memref<1x{{ TILE_K }}x{{ TILE_N }}xf32, 1>
+memref.global @Y_spad : memref<1x{{ TILE_M }}x{{ TILE_N }}xf32, 1>
+{{kernel.def_global_vars()}}
+
+func.func @{{ KERNEL_NAME }}{{kernel.def_kernel(inputs=[X, W, Bias], outputs=[Y], names_str="X, W, Bias, Y", input_reorder=input_reorder)}} {
+  %c_mvin = arith.constant 2 : index
+  %c_mvin2 = arith.constant 1 : index{% if Bias %}
+  %c_mvin3 = arith.constant 14 : index{% endif %}
+  %c_mvout = arith.constant 3 : index
+  %vstride = arith.constant 1 : index
+  %axis = arith.constant 2 : index
+  %X_buffer = memref.get_global @X_spad : memref<1x{{ TILE_M }}x{{ TILE_K }}xf32, 1>
+  %W_buffer = memref.get_global @W_spad : memref<1x{{ TILE_K }}x{{ TILE_N }}xf32, 1>
+  %Y_buffer = memref.get_global @Y_spad : memref<1x{{ TILE_M }}x{{ TILE_N }}xf32, 1>
+  %tag = memref.alloc() : memref<1xi32>
+  %tag0 = memref.alloc() : memref<1xi32>
+  %tag1 = memref.alloc() : memref<1xi32>
+  %tag2 = memref.alloc() : memref<1xi32>{% if not Bias %}
+  %v0 = arith.constant dense<0.0> : vector<{{ kernel.get_spad_size_per_lane(TILE_M, TILE_N) }}xf32>{% endif %}
+  %c0 = arith.constant 0 : index
+{{ kernel.def_local_vars() }}
+  affine.for %b=0 to {{ B }} {
+    affine.for %t_n = 0 to {{ N }} step {{ TILE_N }} {
+      %red_idx = affine.apply affine_map<(d0, d1) -> ({{M}}*d0 + d1)>(%b, %t_n)
+      {{kernel.reduction_acc()}} affine.for %t_m = 0 to {{ M }} step {{ TILE_M }} {{kernel.reduction_iter_arg()}} {
+        %X_buffer2D = memref.reinterpret_cast %X_buffer to offset: [0], sizes: [{{ TILE_M }}, {{ TILE_K }}], strides: [{{ TILE_K }}, 1] : memref<1x{{ TILE_M }}x{{ TILE_K }}xf32, 1> to memref<{{ TILE_M }}x{{ TILE_K }}xf32, 1>
+        %W_buffer2D = memref.reinterpret_cast %W_buffer to offset: [0], sizes: [{{ TILE_K }}, {{ TILE_N }}], strides: [{{ TILE_N }}, 1] : memref<1x{{ TILE_K }}x{{ TILE_N }}xf32, 1> to memref<{{ TILE_K }}x{{ TILE_N }}xf32, 1>
+        %Y_buffer2D = memref.reinterpret_cast %Y_buffer to offset: [0], sizes: [{{ TILE_M }}, {{ TILE_N }}], strides: [{{ TILE_N }}, 1] : memref<1x{{ TILE_M }}x{{ TILE_N }}xf32, 1> to memref<{{ TILE_M }}x{{ TILE_N }}xf32, 1>
+
+        %index2 = affine.apply #map2(%b, %t_m, %t_n)
+        {% if Bias -%}
+        memref.dma_start %Bias[
+        {%- if Bias_rank == 2 -%} %index2 {%- else -%} %t_n {%- endif -%}
+          ], %Y_buffer2D[0, 0], %c_mvin3, %tag0[%c0], %
+        {%- if Bias_rank == 2 -%} axis {%- else -%} c0 {%- endif -%}
+          , %vstride : memref<
+        {%- if Bias_rank == 2 -%} {{ M * N }} {%- else -%} {{ N }} {%- endif -%}
+          xf32>, memref<{{ TILE_M }}x{{ TILE_N }}xf32, 1>, memref<1xi32> { subtile_size=[{{ SUB_TILE_M }}, {{ SUB_TILE_N }}], async=1, sram_stride=[1 , {{ TILE_M }}] }
+        {%- else -%}
+        affine.vector_store %v0, %Y_buffer2D[0, 0] : memref<{{ TILE_M }}x{{ TILE_N }}xf32, 1>, vector<{{ kernel.get_spad_size_per_lane(TILE_M, TILE_N) }}xf32>{% endif %}
+        affine.for %t_k = 0 to {{ K }} step {{ TILE_K }} {
+          %index0 = affine.apply #map0(%b, %t_m, %t_k)
+          %index1 = affine.apply #map1(%b, %t_k, %t_n)
+          memref.dma_start %X[%index0], %X_buffer2D[%c0, %c0], %c_mvin, %tag1[%c0], %axis, %vstride
+             : memref<{{ B * M * K }}xf32>, memref<{{ TILE_M }}x{{ TILE_K }}xf32, 1>, memref<1xi32> { subtile_size=[{{ SUB_TILE_M }}, {{ SUB_TILE_K }}], async=1, sram_stride=[1, {{ TILE_M }}]}
+          memref.dma_start %W[%index1], %W_buffer2D[%c0, %c0], %c_mvin2, %tag2[%c0], %axis, %vstride
+             : memref<{{ B * K * N }}xf32>, memref<{{ TILE_K }}x{{ TILE_N }}xf32, 1>, memref<1xi32> { subtile_size=[{{ SUB_TILE_K }}, {{ SUB_TILE_N }}], async=1, sram_stride=[1, {{ TILE_K }}]}
+
+          linalg.matmul ins(%X_buffer2D, %W_buffer2D : memref<{{ TILE_M }}x{{ TILE_K }}x{{ DATA_STYPE }}, 1>, memref<{{ TILE_K }}x{{ TILE_N }}x{{ DATA_STYPE }}, 1>)
+                  outs(%Y_buffer2D : memref<{{ TILE_M }}x{{ TILE_N }}x{{ DATA_STYPE }}, 1>)
+        } { accumulation_loop=true, loop_k=true }
+        {{kernel.store_output(indent_size=8)}}
+      } { outer_loop=true, loop_m=true }
+      {{kernel.reduction_output(indent_size=6)}}
+    } { outer_loop=true, loop_n=true}
+  } { outer_loop=true }
+  return
+}
+"""
+
 class MLIRBMMTemplate(MLIRTemplate):
     def __init__(self, input_nodes, layout, input_reorder=None):
         super().__init__("kernel", input_nodes, layout, input_reorder)
@@ -120,6 +195,13 @@ class MLIRBMMTemplate(MLIRTemplate):
         SUB_TILE_M = TILE_M if TILE_M < kernel.vector_lane else kernel.vector_lane
         SUB_TILE_N = TILE_N if TILE_N < kernel.vector_lane else kernel.vector_lane
         SUB_TILE_K = TILE_K if TILE_K < kernel.vector_lane else kernel.vector_lane
+
+        if n_extra_node==1 and epilogue_nodes[0].is_reduction():
+          template = BMM_REDUCTION_TEMPLATE
+          nr_rdim = 1
+        else:
+          template = BMM_TEMPLATE
+          nr_rdim = 0
 
         kernel.render_options = dict(
             KERNEL_NAME=self.name,
@@ -159,9 +241,11 @@ class MLIRBMMTemplate(MLIRTemplate):
             mlir_dtype = kernel.render_options['DATA_STYPE'],
             dram_shape = f"memref<{kernel.render_options['Y_numel']}x{kernel.render_options['DATA_STYPE']}>",
             tile_size = (1, TILE_M, TILE_N),
-            tile_stride = [1, 1, TILE_M]
+            tile_stride = [1, 1, TILE_M],
+            nr_rdim = nr_rdim,
+            reduction_idx = "red_idx"
         )
-        code = self._template_from_string(BMM_TEMPLATE).render(**kernel.render_options)
+        code = self._template_from_string(template).render(**kernel.render_options)
         kernel.add_loop_info([kernel.render_options["M"], kernel.render_options["N"], kernel.render_options["K"]], [kernel.render_options["TILE_M"], kernel.render_options["TILE_N"], kernel.render_options["TILE_K"]])
 
         self.header = f"float X_spad[{kernel.get_spad_size_per_lane(TILE_M, TILE_K)}] __attribute__ ((section(\".spad\")));\n"

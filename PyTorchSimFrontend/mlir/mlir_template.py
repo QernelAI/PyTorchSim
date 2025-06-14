@@ -56,6 +56,7 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
         self.alloc_cse = CSE(self.newvar_prefix, self.suffix, name_prefix="template_alloc")
         self.reduction_epilogue_suffix = IndentedBuffer()
         self.reduction_fusion = False
+        self.reduction_idx = None
 
         # Overwrite ops
         self.load = self.load_epilogue
@@ -349,8 +350,7 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
             if len(self.stores._lines) == 0:
                 template_store()
             compute_body.splice(self.stores)
-        if (compute_body.getvalue()):
-            self.body.splice(compute_body)
+        self.body.splice(compute_body)
         self.body.splice(self.dma_stores)
         self.body.splice(self.reduction_epilogue_suffix)
 
@@ -765,7 +765,7 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
         return acc
 
     def store_reduction_epilogue(self, name, index, value):
-        index = "t_n" # TODO. conversion required...
+        index = self.reduction_idx
         tmp_cse = self.cse
         self.cse = self.reduction_cse
 
@@ -779,7 +779,7 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
         reduction_axis_size = self.kernel_group.tile_desc.get_tile_size()[-2]
         nr_outer_loop = numel_per_lane // reduction_axis_size
 
-        vlane_split_axis = 0
+        vlane_split_axis = self.kernel_group.tile_desc.vlane_split_axis - 1
         vlane_stride = self.kernel_group.tile_desc.vlane_stride
         tile_numel_per_lane = vlane_stride * nr_outer_loop
 
@@ -832,6 +832,7 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
             self.reduction_fusion = True
             self.reduction_axis_size =  tile_desc.get_tile_size()[-2]
             self.reduction_nr_outer_loop = (numel_per_lane + reduction_axis_size-1) // reduction_axis_size
+            self.reduction_idx = template_store_info["reduction_idx"]
             self.compute_body_loop.size = reduction_axis_size
             self.compute_body_loop.step = tile_desc.get_compute_vec_size() // nr_outer_loop
         else:
