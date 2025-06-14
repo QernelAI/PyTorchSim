@@ -178,9 +178,10 @@ class MLIRKernelArgs(common.KernelArgs):
         return arg_defs, call_args, arg_attributes, buffer_types
 
 class MLIRMultiDimTile():
-    def __init__(self, tile_size, vector_lane, vlane_split_axis=None, vlane_stride=None):
+    def __init__(self, tile_size, vector_lane, vlane_split_axis=None, vlane_stride=None, vec_size=None):
         self._tile_size = list(tile_size)
         self.tile_axis_order = list(range(len(tile_size)))
+        self.vec_size = vec_size
 
         # Vector lane mapping config
         self.vector_lane = vector_lane
@@ -272,6 +273,8 @@ class MLIRMultiDimTile():
 
     def get_compute_vec_size(self):
         # Granule size used in compute loop
+        if self.vec_size is not None:
+            return self.vec_size
         if self.nr_rdim:
             assert self.nr_rdim==1
             val = self.get_numel_per_lane() // self._tile_size[-1]

@@ -626,7 +626,7 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
         tile_desc = mlir_common.MLIRMultiDimTile(template_store_info['tile_size'],
             self.vector_lane,
             vlane_split_axis=template_store_info['vlane_split_axis'],
-            vlane_stride=template_store_info['vlane_stride'])
+            vlane_stride=template_store_info['vlane_stride'], vec_size=64)
         self.compute_body_loop.size = tile_desc.get_numel_per_lane()
         self.compute_body_loop.step = tile_desc.get_compute_vec_size()
         return tile_desc
