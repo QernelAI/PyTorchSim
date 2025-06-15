@@ -76,7 +76,7 @@ def test_conv_bn_relu(device, batch_size=1, in_channels=8, out_channels=16, inpu
     def custom_conv_bn_relu(a, b, bias, c, d, e, f):
         i_c = a.shape[1]
         o_c = b.shape[0]
-        conv2d = torch.nn.Conv2d(in_channels, out_channels, b.shape[-1], stride=stride, padding=padding, dilation=1, bias=True)
+        conv2d = torch.nn.Conv2d(in_channels, out_channels, b.shape[-1], stride=stride, padding=padding, dilation=1, bias=True).eval()
         conv2d.weight = torch.nn.Parameter(b)
         conv2d.bias = torch.nn.Parameter(bias)
         # return torch.nn.functional.batch_norm(conv2d(a), c, d, weight=e, bias=f)
@@ -90,7 +90,8 @@ def test_conv_bn_relu(device, batch_size=1, in_channels=8, out_channels=16, inpu
     bn_mean = torch.zeros(out_channels).to(device=device)
     bn_var = torch.ones(out_channels).to(device=device)
     opt_fn = torch.compile(dynamic=False)(custom_conv_bn_relu)
-    res = opt_fn(conv_input, conv_kernel, conv_bias, bn_mean, bn_var, bn_weight, bn_bias)
+    with torch.no_grad():
+        res = opt_fn(conv_input, conv_kernel, conv_bias, bn_mean, bn_var, bn_weight, bn_bias)
     out = custom_conv_bn_relu(conv_input.cpu(), conv_kernel.cpu(), conv_bias.cpu(), bn_mean.cpu(), bn_var.cpu(), bn_weight.cpu(), bn_bias.cpu())
     test_result("Conv2d + BN + ReLU Fusion Forward", res, out, rtol=1e-3, atol=1e-3)
     print("Max diff > ", torch.max(torch.abs(res.cpu() - out)))

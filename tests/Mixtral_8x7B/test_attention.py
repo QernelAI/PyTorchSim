@@ -143,7 +143,6 @@ if __name__ == "__main__":
     import os
     import sys
     sys.path.append(os.environ.get('TORCHSIM_DIR', default='/workspace/PyTorchSim'))
-    os.environ['TORCHSIM_VECTOR_LANE_STRIDE'] = "8"
 
     from Scheduler.scheduler import ExecutionEngine
     module = ExecutionEngine.setup_device()
