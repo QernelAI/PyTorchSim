@@ -42,6 +42,7 @@ if __name__ == "__main__":
     os.environ['TORCHSIM_DUMP_PATH'] = result_path
     # only timing simulation
     os.environ['TORCHSIM_VALIDATION_MODE'] = "0"
+    os.environ['TORCHSIM_VECTOR_LANE_STRIDE'] = "8"
     if 'BACKENDSIM_SPIKE_ONLY' in os.environ:
         del os.environ['BACKENDSIM_SPIKE_ONLY']
 

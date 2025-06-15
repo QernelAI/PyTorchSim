@@ -1389,7 +1389,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
                 os.environ['TORCHSIM_VECTOR_LANE_STRIDE'] = str(vlane_stride)
                 previous_tile_size = initial_tile_size
                 incrase_dim = -1 # only increase the last dimension
-                while previous_tile_size[incrase_dim] * 2 <= previous_ranges[incrase_dim]:
+                while previous_tile_size[incrase_dim] * 2 <= previous_ranges[incrase_dim] and previous_tile_size[incrase_dim] <= 2 ** 13:
                     src_code = super().codegen_nodes(nodes, kernel_name)
                     print(f"[Auto-tune] Trying tile size: {self.kernel_group.tile_desc.get_tile_size()}, vlane_stride: {vlane_stride}")
                     if self.stop_autotune:
