@@ -1,0 +1,49 @@
+import torch
+import torch._dynamo
+import torch.utils.cpp_extension
+
+def test_result(name, out, cpu_out, rtol=1e-4, atol=1e-4):
+    if torch.allclose(out.cpu(), cpu_out, rtol=rtol, atol=atol):
+        message = f"|{name} Test Passed|"
+        print("-" * len(message))
+        print(message)
+        print("-" * len(message))
+    else:
+        message = f"|{name} Test Failed|"
+        print("-" * len(message))
+        print(message)
+        print("-" * len(message))
+        print("custom out: ", out.cpu())
+        print("cpu out: ", cpu_out)
+        exit(1)
+
+def test_matmul_reduce(device, size=512):
+    def matmul_fused(a, b, c):
+        result = torch.matmul(a, b)
+        return result, result.max(dim=-2).values
+    torch.manual_seed(0)
+    N = size
+    input = torch.randn(N, N)
+    weight = torch.randn(N, N)
+    #input = torch.arange(1, N * N + 1, dtype=torch.float32).reshape(N, N).to(dtype=torch.float32)
+    #weight = torch.eye(N, dtype=torch.float32)
+    x1 = input.to(device=device)
+    w1 = weight.to(device=device)
+    x2 = input.to("cpu")
+    w2 = weight.to("cpu")
+    c = 7
+    opt_fn = torch.compile(dynamic=False)(matmul_fused)
+    res = opt_fn(x1, w1, c)
+    y = matmul_fused(x2, w2, c)
+    test_result("Matmul Reduction Fusion activation", res[0], y[0])
+    test_result("Matmul Reduction Fusion reduction", res[1], y[1])
+
+if __name__ == "__main__":
+    import os
+    import sys
+    sys.path.append(os.environ.get('TORCHSIM_DIR', default='/workspace/PyTorchSim'))
+
+    from Scheduler.scheduler import ExecutionEngine
+    module = ExecutionEngine.setup_device()
+    device = module.custom_device()
+    test_matmul_reduce(device)

@@ -67,6 +67,7 @@ def mlir_compile_command(filename, vectorlane_size, vlen=256):
             -test-pytorchsim-to-vcix='systolic-array-size={vectorlane_size} vlen={vlen}' \
             -test-memref-to-gemmini="vectorlane={vectorlane_size}" \
             -convert-linalg-to-loops \
+            -convert-vector-to-scf='full-unroll' \
             -lower-affine \
             -finalize-memref-to-llvm \
             -lower-vector-multi-reduction \
@@ -108,6 +109,7 @@ def mlir_gem5_compile_command(filename, sample_filename, tog_file, vectorlane_si
             -test-tile-operation-graph='vectorlane={vectorlane_size} tls_mode={extension_config.CONFIG_TLS_MODE}' \
             -test-memref-to-gemmini="vectorlane={vectorlane_size} timing=1" \
             -convert-linalg-to-loops \
+            -convert-vector-to-scf='full-unroll' \
             -lower-affine \
             -finalize-memref-to-llvm \
             -lower-vector-multi-reduction \

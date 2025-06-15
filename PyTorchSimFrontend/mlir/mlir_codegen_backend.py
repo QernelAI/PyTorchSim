@@ -1155,8 +1155,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
             vshape = f"{mlir_dtype}"
         else:
             vshape = f"vector<{compute_vec_size}x{mlir_dtype}>"
-        sram_var, index_var, sram_index_var = self.get_scratchpad_buffer(dtype, name, tile_numel_per_lane, tile_shape, index_var,
-                                                                         index, buffer=self.reduction_suffix)
+        sram_var, index_var, sram_index_var = self.get_scratchpad_buffer(dtype, name, tile_numel_per_lane, tile_shape, index_var, index)
         if self.welford_reduce_out is not None:
             # raise NotImplementedError()
             sum, sqr_sum, _ = self.welford_reduce_out
@@ -1596,7 +1595,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         tile_size = max(tile_size_per_lane, 2) * self.vector_lane
 
         if buffer is None:
-            buffer = self.loads
+            buffer = self.spad_buffer
 
         if name not in self.global_vars_dict:
             self.global_vars_dict[name] = list()
@@ -1610,7 +1609,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
             self.global_vars_dict[name].append(str(raw_index))
         else:
             new_name = f"{name}_{self.global_vars_dict[name].index(str(raw_index))}"
-        sram_var = self.spad_cse.generate(self.spad_buffer, f"memref.get_global @{new_name}_spad : {dram_tile_shape}")
+        sram_var = self.spad_cse.generate(buffer, f"memref.get_global @{new_name}_spad : {dram_tile_shape}")
 
         zero_cse = self.get_const_cse(0)
         sram_dims = len(dram_tile_shape.split("x")) - 1
