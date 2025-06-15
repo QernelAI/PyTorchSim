@@ -613,27 +613,25 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
             reduce_size = self.reduction_nr_outer_loop
             vsize = compute_vec_size//reduce_size
             vshape = f"vector<{vsize}x{mlir_dtype}>"
-            tshape = f"vector<{reduce_size}x{vsize}x{mlir_dtype}>"
+            flatten_tshape = f"vector<{compute_vec_size}x{mlir_dtype}>"
 
             init = self.cse.generate(self.loads, f"arith.constant 0.0 : {mlir_dtype}")
-            init_vec = self.cse.generate(self.loads, f"vector.broadcast %{init} : {mlir_dtype} to {tshape}")
+            init_vec = self.cse.generate(self.loads, f"vector.broadcast %{init} : {mlir_dtype} to {flatten_tshape}")
             if compute_vec_size > 1:
+                out_list = []
                 for i in range(reduce_size):
                     offset = self.cse.generate(self.loads, f"affine.apply affine_map<(d0) -> (d0 + {i*(self.reduction_axis_size)})>(%{self.compute_idx})")
                     compute_index_var = ",".join([f"%{zero_var}"] * (self.kernel_group.tile_desc.get_nr_dim()-1) + [f"%{offset}"])
                     operation = "affine.vector_load"
                     line = f"{operation} %{sram_var}[{compute_index_var}] : {tile_shape}, {vshape}"
                     out = self.cse.generate(self.loads, line)
-                    init_vec = self.cse.generate(self.loads, f"vector.insert %{out}, %{init_vec}[{i}] : {vshape} into {tshape}")
+                    out_list.append(out)
+                for idx, partial_out in enumerate(out_list):
+                    init_vec = self.cse.generate(self.loads, f"vector.insert_strided_slice %{partial_out}, %{init_vec} {{offsets=[{vsize*idx}],strides=[1]}} : {vshape} into {flatten_tshape}")
                 out = init_vec
-                vshape = tshape
             else:
                 line = f"{operation} %{sram_var}[{compute_index_var}] : {tile_shape}"
                 out = self.cse.generate(self.loads, line)
-
-        if self.reduction_fusion:
-            new_vshape = self.kernel_group.tile_desc.get_mlir_vshape(mlir_dtype)
-            out = self.cse.generate(self.loads, f"vector.shape_cast %{out} : {vshape} to {new_vshape}")
         self.register_var_info(out, [compute_vec_size, mlir_dtype])
         return out
 
