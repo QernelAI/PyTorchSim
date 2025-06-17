@@ -226,37 +226,37 @@ class MLIRCodeCache:
                 print("Error output:", e.output)
                 assert(0)
 
-        if extension_config.CONFIG_BACKENDSIM_SPIKE_ONLY:
-            return key
+            if extension_config.CONFIG_BACKENDSIM_SPIKE_ONLY:
+                return key
 
-        # Generate MLIR kernel calller and binary for cycle calculation
-        cycle_llvm_caller = MLIRKernelCallerCodeGen(False, arg_attributes, cycle_sim=True)
-        cycle_llvm_caller.generate_wrapper_file(write_path, cycle_wrapper_name)
-        cycle_llvm_caller.compile_wih_kernel(write_path, key + "_sample", cycle_wrapper_name, cycle_binary_name, link_option)
-        array_size = []
-        for (arg_name, arg_attribute) in arg_attributes:
-            array_size.append(str(arg_attribute[2]))
+            # Generate MLIR kernel calller and binary for cycle calculation
+            cycle_llvm_caller = MLIRKernelCallerCodeGen(False, arg_attributes, cycle_sim=True)
+            cycle_llvm_caller.generate_wrapper_file(write_path, cycle_wrapper_name)
+            cycle_llvm_caller.compile_wih_kernel(write_path, key + "_sample", cycle_wrapper_name, cycle_binary_name, link_option)
+            array_size = []
+            for (arg_name, arg_attribute) in arg_attributes:
+                array_size.append(str(arg_attribute[2]))
 
-        # Run cyclesim
-        cyclesim = CycleSimulator()
-        cycle_list = cyclesim.compile_and_simulate(os.path.join(write_path, cycle_binary_name), " ".join(array_size), vectorlane_size)
+            # Run cyclesim
+            cyclesim = CycleSimulator()
+            cycle_list = cyclesim.compile_and_simulate(os.path.join(write_path, cycle_binary_name), " ".join(array_size), vectorlane_size)
 
-        # Create TOG
-        w_offset, x_offset = vectorlane_size, vectorlane_size
-        if kwargs['loop_size'] is not None and kwargs['loop_size'][-3] < vectorlane_size:
-            x_offset = kwargs['loop_size'][-3]
-        if kwargs['loop_size'] is not None and kwargs['loop_size'][-1] < vectorlane_size:
-            w_offset = kwargs['loop_size'][-1]
-        w_offset = 0 # max(w_offset - x_offset, 0)
-        tile_graph_generator = tog_generator(origins)
-        tile_graph_generator.load_file(raw_tog_path)
-        tile_graph_generator.generate_tile_graph(
-            os.path.join(write_path, "tile_graph.onnx"),
-            cycle_list=cycle_list,
-            x_offset=x_offset, # FIXME.
-            w_offset=w_offset, # FIXME.
-            vector_lane=vectorlane_size
-        )
+            # Create TOG
+            w_offset, x_offset = vectorlane_size, vectorlane_size
+            if kwargs['loop_size'] is not None and kwargs['loop_size'][-3] < vectorlane_size:
+                x_offset = kwargs['loop_size'][-3]
+            if kwargs['loop_size'] is not None and kwargs['loop_size'][-1] < vectorlane_size:
+                w_offset = kwargs['loop_size'][-1]
+            w_offset = 0 # max(w_offset - x_offset, 0)
+            tile_graph_generator = tog_generator(origins)
+            tile_graph_generator.load_file(raw_tog_path)
+            tile_graph_generator.generate_tile_graph(
+                os.path.join(write_path, "tile_graph.onnx"),
+                cycle_list=cycle_list,
+                x_offset=x_offset, # FIXME.
+                w_offset=w_offset, # FIXME.
+                vector_lane=vectorlane_size
+            )
         return key
 
 class LLVMCodeCache:
@@ -378,12 +378,26 @@ class CustomAsyncCompile(AsyncCompile):
             return result
 
         def dryrun_simulator(*args, **kwargs):
+            autotune = kwargs.get('autotune', False)
             key = future.result()
              # Run simulator pass
             result_path = os.path.join(extension_config.CONFIG_TORCHSIM_DUMP_PATH, "tmp", hash_prefix(key))
             # Dump arguments and meta data
             dump_metadata(args, arg_attributes, result_path)
             runtime_path = FunctionalSimulator.get_runtime_dump_path(result_path)
+            if extension_config.CONFIG_BACKENDSIM_SPIKE_ONLY:
+                return
+
+            if autotune:
+                onnx_path = os.path.join(result_path, "tile_graph.onnx")
+                attribute_path = os.path.join(runtime_path, "attribute")
+                backend_path = os.path.join(extension_config.CONFIG_TORCHSIM_DIR, "PyTorchSimBackend")
+                backsim = BackendSimulator(backend_path, extension_config.CONFIG_TORCHSIM_BACKEND_CONFIG)
+                backsim.vectorlane_size = vectorlane_size
+                attribute_path = backsim.create_attribute_file(attribute_path, args, loop_size=loop_size)
+                result_path_2 = backsim.simulation(onnx_path, attribute_path)
+                result = BackendSimulator.get_result_from_file(result_path_2)
+                return result_path, runtime_path, result
 
             # Todo. Support valude dependent mode for graph mode
             if False: # extension_config.CONFIG_TORCHSIM_VALIDATION_MODE:
@@ -392,7 +406,7 @@ class CustomAsyncCompile(AsyncCompile):
                                   runtime_path, self.validation_binary_name,
                                   vectorlane_size=vectorlane_size, spad_info=spad_info,
                                   cleanup=extension_config.CONFIG_CLEANUP_DUMP_ARGS)
-            return result_path, runtime_path
+            return result_path, runtime_path, None
 
         is_dryrun = int(os.environ.get('BACKENDSIM_DRYRUN', default=False))
         target_simulator = dryrun_simulator if is_dryrun else dummy_simulator

@@ -322,7 +322,7 @@ class BaseMLIRKernel(common.Kernel, BaseMLIRHardwareInfo):
     load_format = None
     store_format = None
 
-    def __init__(self, kernel_group):
+    def __init__(self, kernel_group, reason=None):
         super().__init__(kernel_group.args)
         self.kernel_group = kernel_group
         # Kernel iteration range info
@@ -339,6 +339,8 @@ class BaseMLIRKernel(common.Kernel, BaseMLIRHardwareInfo):
         self.buffer_types : dict = None # format: dtype, numel, size, stride
         self.compute_idx = "compute_idx"
         self.compute_body_loop = LoopLevel(self.compute_idx, 1)
+        self.recodegen = reason # spad overflow, tile size, vlane stride
+        self.stop_autotune = False
 
     def set_ranges(self, lengths, reduction_lengths):
         if self.call_ranges:
@@ -440,7 +442,6 @@ class BaseMLIRKernel(common.Kernel, BaseMLIRHardwareInfo):
                     raise NotImplementedError("Not supporting type...")
 
         vlane_split_axis = len(vars) - 1 # Set split_axis as a last normal loop not reduction loop
-        vlane_stride = 2
 
         # FIXME: Naive decrease tile size
         def decrease_tile_size(tile_size, vlane_split_axis):
@@ -466,14 +467,11 @@ class BaseMLIRKernel(common.Kernel, BaseMLIRHardwareInfo):
             return tile_size
 
         # Dummy tile size
-        if self.kernel_group.tile_desc:
-            tile_size = self.kernel_group.tile_desc.get_tile_size()
-            decrease_tile_size(tile_size, vlane_split_axis)
-        else:
+        def dummy_tile_size():
             tile_size = [1] * (len(vars) + len(reduction_vars))
             if len(tile_size) == 2:
                 tile_size[-1] = vlane_stride * self.vector_lane
-                tile_size[-2] = 2 * vlane_stride * self.vector_lane
+                tile_size[-2] = 2 * self.vector_lane
             elif len(tile_size) == 0: # Scalar
                 tile_size = [1]
                 self.ranges = [1]
@@ -485,6 +483,23 @@ class BaseMLIRKernel(common.Kernel, BaseMLIRHardwareInfo):
                 tile_size[-3] = 2
             else:
                 raise NotImplementedError("dummy tile size fail!")
+            return tile_size
+
+        vlane_stride = extension_config.CONFIG_VECTOR_LANE_STRIDE
+        if self.recodegen is None:
+            tile_size = dummy_tile_size()
+        else:
+            if self.recodegen == "spad_overflow":
+                tile_size = self.kernel_group.tile_desc.get_tile_size()
+                decrease_tile_size(tile_size, vlane_split_axis)
+            elif self.recodegen == "vlane_stride":
+                tile_size = dummy_tile_size()
+            elif "tile_size" in self.recodegen:
+                dim = int(self.recodegen.split("_")[-1])
+                tile_size = self.kernel_group.tile_desc.get_tile_size() # TODO:
+                tile_size[dim] = tile_size[dim] * 2
+            else:
+                raise NotImplementedError(f"Unknown recodegen reason: {self.recodegen}")
 
         # FIXME: Not considering removed buffers
         n_buffer = sum(
@@ -503,6 +518,7 @@ class BaseMLIRKernel(common.Kernel, BaseMLIRHardwareInfo):
 
                 if tile_size[-i] > target_range:
                     remains = (target_range % vlane_stride)
+                    self.stop_autotune = True
                     tile_size[-i] = target_range
                     if remains:
                         tile_size[-i] += vlane_stride - remains
@@ -523,6 +539,7 @@ class BaseMLIRKernel(common.Kernel, BaseMLIRHardwareInfo):
                     raise NotImplementedError("Error: Cannot find proper tile size")
                 tile_size = new_tile_size
                 spad_overflow = True
+                self.stop_autotune = True # for auto-tune
                 continue
             else:
                 spad_overflow = False

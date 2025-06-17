@@ -240,7 +240,7 @@ class ExecutionEngine:
             self.finish_req_dict[req] = RequestReturn(RequestReturn.FINISHED)
 
     def prepare_launch_kernel(self, kernel, inputs):
-        result_path, runtime_path = kernel(*inputs)
+        result_path, runtime_path, _ = kernel(*inputs)
         onnx_path = os.path.join(result_path, "tile_graph.onnx")
 
         attribute_path = os.path.join(runtime_path, "attribute")

@@ -4,6 +4,7 @@ import re
 import os
 import math
 import torch
+from concurrent.futures import ThreadPoolExecutor
 from torch._dynamo.utils import dynamo_timed
 from torch._inductor.codegen import cpp, wrapper, common, memory_planning
 from torch._inductor.virtualized import V, _ops as ops
@@ -836,8 +837,8 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
     overrides = ExtensionOverrides
     newvar_prefix = "%"
 
-    def __init__(self, kernel_group):
-        super().__init__(kernel_group)
+    def __init__(self, kernel_group, reason=None):
+        super().__init__(kernel_group, reason=reason)
         self.const_buffer = IndentedBuffer()
         self.alloc_buffer = IndentedBuffer()
         self.spad_buffer = IndentedBuffer()
@@ -880,8 +881,8 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         self.spad_buffer_dict = dict()
         self.base_vector_initialized = False
 
-    def reset(self):
-        self.__init__(self.kernel_group)
+    def reset(self, reason):
+        self.__init__(self.kernel_group, reason=reason)
 
     # padding type 0: zero-padding 1: negative-padding(-inf) ...
     def get_padding_type(self):
@@ -1380,24 +1381,73 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         code.writeline(f"return")
         return code
 
-    def codegen_nodes(self, nodes, kernel_name):
-        for n_try in range(extension_config.CONFIG_MAX_AUTOTUNE_TRY):
-            src_code = super().codegen_nodes(nodes, kernel_name)
-            self._prepare_simulator_headers(src_code)
-            if not extension_config.CONFIG_AUTOTUNE or not extension_config.CONFIG_TORCHSIM_VALIDATION_MODE:
-                return src_code
+    def make_choices(self, nodes, kernel_name):
+        choices = []
+        initial_tile_size = self.kernel_group.tile_desc.get_tile_size()
+        previous_ranges = self.ranges
+        for vlane_stride in [2, 4, 8]:
+                os.environ['TORCHSIM_VECTOR_LANE_STRIDE'] = str(vlane_stride)
+                previous_tile_size = initial_tile_size
+                incrase_dim = -1 # only increase the last dimension
+                while previous_tile_size[incrase_dim] * 2 <= previous_ranges[incrase_dim] and previous_tile_size[incrase_dim] <= 2 ** 13:
+                    src_code = super().codegen_nodes(nodes, kernel_name)
+                    print(f"[Auto-tune] Trying tile size: {self.kernel_group.tile_desc.get_tile_size()}, vlane_stride: {vlane_stride}")
+                    if self.stop_autotune:
+                        print(f"[Auto-tune] Skipping autotuning due to enough tile size: {self.kernel_group.tile_desc.get_tile_size()}")
+                        break
+                    previous_tile_size = self.kernel_group.tile_desc.get_tile_size()
+                    self._prepare_simulator_headers(src_code)
+                    bench_runner = self.run_bench(nodes, kernel_name, src_code)
+                    choices.append((bench_runner, src_code, self.kernel_group))
+                    self.reset(f"tile_size_{incrase_dim}")
+                self.reset("vlane_stride")
+        return choices
 
-            try:
-                bench_runner = self.run_bench(nodes, kernel_name, src_code)
-                bench_runner(validate=True)
+    def autotune(self, nodes, kernel_name):
+        def get_cycle(choice):
+            bench_runner, src_code, kernel_group = choice
+            for n_try in range(extension_config.CONFIG_MAX_AUTOTUNE_TRY): # TODO: make simple
+                try:
+                    # bench_runner = self.run_bench(nodes, kernel_name, src_code)
+                    if int(os.environ.get('BACKENDSIM_DRYRUN', default=False)):
+                        _, _, out = bench_runner(autotune=1)
+                    else:
+                        out = bench_runner(validate=extension_config.CONFIG_TORCHSIM_VALIDATION_MODE)
+                    return out[-1]
+                except (extension_codecache.SpadOverflowError, RuntimeError) as e:
+                    if isinstance(e, RuntimeError) and str(e) != "STACK_OVERFLOW":
+                        print(f"Benchmark[trial-{n_try}] failed with unexpected error: {e}")
+                        raise
+                    print(f"Benchmark failed due to spad overflow with tile size: {self.kernel_group.tile_desc.get_tile_size()}")
+                    self.kernel_group = kernel_group # Reset to the original tile desc
+                    self.reset("spad_overflow")
+                    src_code = super().codegen_nodes(nodes, kernel_name)
+                    bench_runner = self.run_bench(nodes, kernel_name, src_code)
+                    kernel_group = self.kernel_group
+                    self._prepare_simulator_headers(src_code)
+            raise RuntimeError("[Auto-tune] Exceeded maximum number of autotuning attempts")
+
+        choices = self.make_choices(nodes, kernel_name)
+
+        if len(choices) == 0: # can't autotune
+            return None
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            results = list(executor.map(get_cycle, choices))
+        max_idx = results.index(min(results))
+        optimal_src_code = choices[max_idx][1]
+        return optimal_src_code
+
+    def codegen_nodes(self, nodes, kernel_name):
+        src_code = super().codegen_nodes(nodes, kernel_name)
+        self._prepare_simulator_headers(src_code)
+        if not extension_config.CONFIG_AUTOTUNE or extension_config.CONFIG_BACKENDSIM_SPIKE_ONLY:
+            return src_code
+        else:
+            optimal_src_code = self.autotune(nodes, kernel_name)
+            if optimal_src_code:
+                return optimal_src_code
+            else:
                 return src_code
-            except (extension_codecache.SpadOverflowError, RuntimeError) as e:
-                if isinstance(e, RuntimeError) and str(e) != "STACK_OVERFLOW":
-                    print(f"Benchmark[trial-{n_try}] failed with unexpected error: {e}")
-                    raise
-                print(f"Benchmark failed due to spad overflow with tile size: {self.kernel_group.tile_desc.get_tile_size()}")
-                self.reset()
-        raise RuntimeError("Exceeded maximum number of autotuning attempts")
 
     def _prepare_simulator_headers(self, src_code):
         write_path = extension_codecache.get_write_path(src_code)

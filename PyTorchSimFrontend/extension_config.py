@@ -5,6 +5,7 @@ import importlib
 
 # Hardware info config
 CONFIG_VECTOR_LANE = int(os.environ.get("TORCHSIM_VECTOR_LANE", default=128))
+CONFIG_VECTOR_LANE_STRIDE = int(os.environ.get("TORCHSIM_VECTOR_LANE_STRIDE", default=2))
 CONFIG_SPAD_INFO = {
   "spad_vaddr" : 0xD0000000,
   "spad_paddr" : 0x2000000000,
