@@ -180,17 +180,6 @@ void SparseCore::subCoreCycle(uint32_t subcore_id) {
       coreBusy.at(subcore_id) = false;
     }
   } else {
-    auto& instructions = percore_tiles.at(subcore_id).front()->get_instructions();
-    /* Finish stonne core */
-    if (coreBusy.at(subcore_id) && instructions.empty()) {
-      std::shared_ptr<Tile> target_tile = percore_tiles.at(subcore_id).front();
-      target_tile->set_status(Tile::Status::FINISH);
-      _finished_tiles.push(target_tile);
-      percore_tiles.at(subcore_id).erase(percore_tiles.at(subcore_id).begin());
-      coreBusy.at(subcore_id) = false;
-      return;
-    }
-
     /* Check finished computation */
     auto& target_pipeline = get_compute_pipeline(0);
     if (!target_pipeline.empty()) {
@@ -221,10 +210,28 @@ void SparseCore::subCoreCycle(uint32_t subcore_id) {
       }
     }
 
-    /* Peek instruction*/
-    auto& inst = instructions.front();
-    if (instructions.empty() || !inst->is_ready())
+    auto& tile_queue = percore_tiles.at(subcore_id);
+    if (tile_queue.empty())
       return;
+    auto& instructions = tile_queue.front()->get_instructions();
+
+    /* Finish stonne core */
+    if (coreBusy.at(subcore_id) && instructions.empty()) {
+      std::shared_ptr<Tile> target_tile = percore_tiles.at(subcore_id).front();
+      target_tile->set_status(Tile::Status::FINISH);
+      _finished_tiles.push(target_tile);
+      percore_tiles.at(subcore_id).erase(percore_tiles.at(subcore_id).begin());
+      coreBusy.at(subcore_id) = false;
+      return;
+    }
+
+    /* Peek instruction*/
+    if (instructions.empty())
+      return;
+    auto& inst = instructions.front();
+    if (!inst->is_ready())
+      return;
+
 
     bool issued = false;
     switch (inst->get_opcode()) {
