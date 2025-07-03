@@ -26,8 +26,8 @@ func.func @{{ KERNEL_NAME }} {{kernel.def_kernel(inputs=[X], outputs=[Y], names_
   affine.for %i = 0 to {{ BCH }} step {{ out_tile }} {
     affine.for %j = 0 to {{ W }} step {{ out_tile }} {
       %index0 = affine.apply #map0(%i, %j)
-      memref.dma_start %X[%index0], %X_buffer[%c0, %c0], %c_mvin, %tag[%c0], %axis, %vstride : memref<{{ IN }}xf32>, memref<{{ in_tile }}x{{ in_tile }}xf32, 1>, memref<1xi32>
-      memref.dma_start %Y_buffer[%c0, %c0], %Y[%index0], %c_mvout, %tag[%c0], %axis, %vstride : memref<{{ out_tile }}x{{ out_tile }}xf32, 1>, memref<{{ OUT }}xf32>, memref<1xi32>
+      memref.dma_start %X[%index0], %X_buffer[%c0, %c0], %c_mvin, %tag[%c0], %axis, %vstride : memref<{{ IN }}xf32>, memref<{{ in_tile }}x{{ in_tile }}xf32, 1>, memref<1xi32> {dram_stride=[{{W}}, 1]}
+      memref.dma_start %Y_buffer[%c0, %c0], %Y[%index0], %c_mvout, %tag[%c0], %axis, %vstride : memref<{{ out_tile }}x{{ out_tile }}xf32, 1>, memref<{{ OUT }}xf32>, memref<1xi32> {dram_stride=[{{W}}, 1]}
     } { outer_loop=true }
   } { outer_loop=true }
   return
@@ -62,6 +62,7 @@ class MLIRMaxPoolTemplate(MLIRTemplate):
         W = Y.get_size()[3]
         BCH = B * C * H
         kernel.loop_size = None
+
         kernel.render_options = dict(
             KERNEL_NAME=self.name,
             kernel=kernel,
@@ -77,26 +78,10 @@ class MLIRMaxPoolTemplate(MLIRTemplate):
         )
         kernel.epilogue_info = dict(
             output_node = self.output_node.name,
-            dependent_buf = [],
             sram_var = "Y_buffer",
             dram_var = "Y",
-            index_var = "index0",
-            tag_var = "tag",
-            vlane_split_axis = 1,
-            vlane_stride = 1,
-            mlir_dtype = kernel.render_options['DATA_STYPE'],
-            tile_nr_dim = 2,
-            dram_shape = f"memref<{kernel.render_options['OUT']}x{kernel.render_options['DATA_STYPE']}>",
-            tile_shape = f"memref<{out_tile}x{out_tile}x{kernel.render_options['DATA_STYPE']}, 1>",
-            tile_size = (out_tile, out_tile),
-            tile_stride = [1, out_tile]
         )
         code = self._template_from_string(TEMPLATE).render(**kernel.render_options)
-        self.header = f"float X_spad[{in_tile * in_tile // kernel.vector_lane}] __attribute__ ((section(\".spad\")));\n"
-        self.header += f"float Y_spad[{out_tile * out_tile // kernel.vector_lane}] __attribute__ ((section(\".spad\")));\n"
-        self.gem5_header = f"float X_spad[{in_tile * in_tile // kernel.vector_lane}] __attribute__ ((section(\".spad\")));\n"
-        self.gem5_header += f"float Y_spad[{out_tile * out_tile // kernel.vector_lane}] __attribute__ ((section(\".spad\")));\n"
-
         kernel.add_loop_info([kernel.render_options["IN"]], [kernel.vector_lane, kernel.vector_lane])
         return code
 
@@ -107,6 +92,6 @@ class MLIRMaxPoolTemplate(MLIRTemplate):
         spike_write_path = os.path.join(write_path, "global_var.h")
         gem5_write_path = os.path.join(write_path, "gem5_global_var.h")
         if not os.path.exists(spike_write_path):
-            write_atomic(spike_write_path, self.header+extra_headers[0])
+            write_atomic(spike_write_path, extra_headers[0])
         if not os.path.exists(gem5_write_path):
-            write_atomic(gem5_write_path, self.gem5_header+extra_headers[1])
+            write_atomic(gem5_write_path, extra_headers[1])

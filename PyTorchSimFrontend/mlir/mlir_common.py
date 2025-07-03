@@ -179,6 +179,7 @@ class MLIRKernelArgs(common.KernelArgs):
 
 class MLIRMultiDimTile():
     def __init__(self, tile_size, vector_lane, vlane_split_axis=None, vlane_stride=None, vec_size=None):
+        self.name = ""
         self._tile_size = list(tile_size)
         self._tile_stride = None
         self.tile_axis_order = list(range(len(tile_size)))
@@ -192,6 +193,9 @@ class MLIRMultiDimTile():
         self.implicit_dim_size = None
         self.nr_rdim = 0
 
+    def set_name(self, name: str):
+        self.name = name
+
     def set_tile_size(self, tile_size, tile_axis_order=None):
         self._tile_size = tile_size
         if tile_axis_order is None:
@@ -203,6 +207,9 @@ class MLIRMultiDimTile():
     def set_tile_size_stride(self, tile_size, tile_stride):
         self._tile_size = tile_size
         self._tile_stride = tile_stride
+
+    def get_name(self) -> str:
+        return self.name
 
     def get_tile_size(self):
         return self._tile_size
@@ -315,9 +322,6 @@ class MLIRWrapperKenrelGroup(cpp.KernelGroup):
 
     def set_tile_info(self, tile_desc : MLIRMultiDimTile):
         self.tile_desc = tile_desc
-
-    def set_prologue_tile_info(self, tile_desc : MLIRMultiDimTile):
-        self.prologue_tile_desc = tile_desc
 
 class BaseMLIRHardwareInfo():
     def __init__(self):

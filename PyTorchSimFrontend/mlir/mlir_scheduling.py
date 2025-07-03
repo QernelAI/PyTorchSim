@@ -2,7 +2,7 @@ import os
 import math
 from functools import reduce
 import operator
-from sympy import symbols, sympify
+from sympy import symbols, sympify, Symbol
 from PyTorchSimFrontend import extension_config
 from PyTorchSimFrontend.mlir.mlir_codegen_backend import MLIRKernel
 
@@ -10,6 +10,8 @@ from torch._inductor import config
 from torch._inductor.scheduler import BaseScheduling, FusedSchedulerNode, SchedulerNode, BaseSchedulerNode
 from torch._inductor.utils import IndentedBuffer
 from torch._inductor.virtualized import V
+from torch._inductor.ir import LoopBody
+from torch._inductor import dependencies
 
 from . import mlir_common
 from . import mlir_lowering
@@ -47,7 +49,7 @@ class MLIRScheduling(BaseScheduling):
                 # Directed linked?
                 dependency_check = node2 in [node.node for node in base_template_node1[0].users]# and len(node2.read_writes.reads)==1
                 dependency_size = all([i.get_numel() == node1.get_nodes()[0].node.get_numel() for i in node2.read_writes.reads])
-                return size_match and layout_possible and dependency_check & dependency_size
+                return size_match and layout_possible and dependency_check and dependency_size
 
         # For prologue fusion case
         if extension_config.CONFIG_FUSION_PROLOGUE and len(base_template_node1) == 0 and len(node1.get_nodes())==1 and len(base_template_node2) == 1:
@@ -63,6 +65,7 @@ class MLIRScheduling(BaseScheduling):
             if len(node1.read_writes.writes) != 1:
                 return False
             if list(node1.read_writes.writes)[0].name in [dep.name for dep in node2.read_writes.reads]:
+                node1 = self.revert_group(node1)
                 return True
 
         return self.scheduler.can_fuse_origin(node1, node2)
@@ -84,12 +87,7 @@ class MLIRScheduling(BaseScheduling):
             return False
 
         # Can't fuse two template node
-        nr_template = 0
-        for node in node1.get_nodes() + node2.get_nodes():
-            if node.is_template():
-                nr_template += 1
-
-        if nr_template > 1:
+        if node1.is_template() and node2.is_template():
             return False
 
         # Check template node fusion
@@ -100,33 +98,47 @@ class MLIRScheduling(BaseScheduling):
                 node2.is_template() and len(node1.get_nodes())==1 and isinstance(node2.node.template, MLIRMaxPoolTemplate):
                 return False
 
-            # Different layout is not supported
-            if node1.get_nodes()[0].node.layout.dtype != node2.get_nodes()[0].node.layout.dtype:
-                return False
-
-            # Convolution is currently not supported
-            # if node1.is_template() and node1.get_nodes()[0].node.origin_node is not None and hasattr(node1.get_nodes()[0].node.origin_node.target, "_name") and node1.get_nodes()[0].node.origin_node.target._name == 'aten::convolution':
-            #     return False
-
-            # if node2.is_template() and node2.get_nodes()[0].node.origin_node is not None and hasattr(node2.get_nodes()[0].node.origin_node.target, "_name") and node2.get_nodes()[0].node.origin_node.target._name == 'aten::convolution':
-            #     return False
-
+            # Pointwise check
             v1_total = math.prod(vars1) if len(vars1) else 0
             v2_total = math.prod(vars2) if len(vars2) else 0
             if v1_total != v2_total:
                 return False
 
-            has_depedency = False
-            template_node = node1 if node1.is_template() else node2
-            act_node = node2 if node1.is_template() else node1
-            for write_buf in template_node.read_writes.writes:
-                has_depedency = has_depedency or (write_buf in act_node.read_writes.reads)
-            return has_depedency
+            # Pattern check
+            template_node, act_node = (node1, node2) if node1.is_template() else (node2, node1)
+            has_depedency = set(act_node.inverse_users) <= set(template_node.get_nodes())
+            if not has_depedency:
+                return False
+
+            # Revert act_node.group : simplify_and_reorder() modified _body, _size, group
+            if template_node.group != act_node.group:
+                self.revert_group(act_node)
+            return True
 
         # Check elementwise fusion
         if vars1 == vars2 and reduce1 == reduce2:
             return True
         return False
+
+    def revert_group(self, act_node):
+        args, var_ranges = dependencies.index_vars_no_squeeze(
+                act_node.node.data.get_size(), act_node.node.data.get_reduction_size(), prefix="q"
+        )
+        body = LoopBody(
+            act_node.node.get_store_function(),
+            (args if act_node.node.get_reduction_type() else args[:1]),
+            var_ranges,
+        )
+        index_size = []
+        reduce_size = []
+        for v, s in var_ranges.items():
+            if v in args[0]:
+                index_size.append(s)
+            else:
+                reduce_size.append(s)
+        node_device = act_node.get_device()
+        ranges = (index_size, reduce_size)
+        act_node._sizes, act_node._body, act_node.group = (ranges), body, (node_device, self.group_fn(ranges))
 
     def group_fn(self, sizes):
         return tuple(tuple(map(V.graph.sizevars.simplify, s)) for s in sizes)
@@ -196,74 +208,73 @@ class MLIRScheduling(BaseScheduling):
             for node in [template_node, *prologue_nodes, *epilogue_nodes]:
                 node.mark_run()
             partial_code = render()
+            if prologue_nodes:
+                # Flush created varaibles, since template fusion doen't share variable
+                with kernel.prologue_buffer_group.as_local():
+                    kernel.load = kernel.load_epilogue
+                    kernel.store = kernel.store_prologue
+                    _, (group, reduction_group) = max(
+                        [prologue_nodes[-1]], key=lambda x: int(x.is_reduction())
+                    ).group
+                    prologue_tile_desc = kernel.set_tile_size(kernel.prologue_info, prologue=True)
+                    kernel.kernel_group.set_tile_info(prologue_tile_desc)
+                    vars, reduction_vars = kernel.set_ranges(group, reduction_group)
+                    for node in prologue_nodes:
+                        # Reuse created spad
+                        read_list = sorted(list(node.read_writes.reads))
+                        candidate_found = False
+                        # Why? There is a case that memdep.get_size() != data.get_size()
+                        buf_dict = {}
+                        buf_dict.update({val.name : val for val in V.graph.buffers})
+                        buf_dict.update(V.graph.graph_inputs)
+                        for candidate_read in read_list:
+                            if candidate_read.name in buf_dict and reduce(operator.mul, buf_dict[candidate_read.name].get_size(), 1) == node.node.get_numel():
+                                prologue_input_arg = candidate_read.name
+                                candidate_found = True
+                                break
+                        assert(candidate_found)
+                        assert(len(node.read_writes.writes)==1)
+                        prologue_output_arg = list(node.read_writes.writes)[0].name
+                        template_buf = self.kernel_group.args.input_buffers[prologue_output_arg]
+                        target_buf = f"{template_buf}_buffer" # FIXME. How to pass spad buffer name?
+
+                        # To skip the dma code gen
+                        kernel.buffer_names[prologue_input_arg] = target_buf
+                        kernel.buffer_names[prologue_output_arg] = target_buf
+
+                        # Edge delete
+                        kernel.kernel_group.args.input_buffers = {
+                            (arg if buf != template_buf else prologue_input_arg): buf
+                            for arg, buf in kernel.kernel_group.args.input_buffers.items()
+                        }
+                        node.codegen((vars, reduction_vars))
+
             tile_desc = kernel.set_tile_size(kernel.epilogue_info)
             kernel.kernel_group.set_tile_info(tile_desc)
-            if prologue_nodes:
-                _, (group, reduction_group) = max(
-                    [prologue_nodes[-1]], key=lambda x: int(x.is_reduction())
-                ).group
-                prologue_tile_desc = kernel.set_tile_size(kernel.prologue_info, prologue=True)
-                kernel.kernel_group.set_prologue_tile_info(prologue_tile_desc)
-                vars, reduction_vars = kernel.set_ranges(group, reduction_group)
-            # Flush created varaibles, since template fusion doen't share variable
-            kernel.cse.cache.clear()
-            kernel.prologue_buffer_group.set_buffers()
-            kernel.call_ranges = None
-            kernel.load = kernel.load_prologue
-            kernel.store = kernel.store_prologue
-            for node in prologue_nodes:
-                # Reuse created spad
-                read_list = sorted(list(node.read_writes.reads))
-                candidate_found = False
-                # Why? There is a case that memdep.get_size() != data.get_size()
-                buf_dict = {}
-                buf_dict.update({val.name : val for val in V.graph.buffers})
-                for candidate_read in read_list:
-                    if candidate_read.name in buf_dict and reduce(operator.mul, buf_dict[candidate_read.name].get_size(), 1) == node.node.get_numel():
-                        prologue_input_arg = candidate_read.name
-                        candidate_found = True
-                        break
-                assert(candidate_found)
-                assert(len(node.read_writes.writes)==1)
-                prologue_output_arg = list(node.read_writes.writes)[0].name
-                template_buf = self.kernel_group.args.input_buffers[prologue_output_arg]
-                if template_node.get_nodes()[0].node.origin_node.target._name == 'aten::bmm':
-                    target_buf = f"{template_buf}_buffer2D"
-                else:
-                    target_buf = f"{template_buf}_buffer"
-
-                # To skip the dma code gen
-                kernel.buffer_names[prologue_input_arg] = target_buf
-                kernel.buffer_names[prologue_output_arg] = target_buf
-
-                # Edge delete
-                kernel.kernel_group.args.input_buffers = {
-                    (arg if buf != template_buf else prologue_input_arg): buf
-                    for arg, buf in kernel.kernel_group.args.input_buffers.items()
-                }
-                node.codegen((vars, reduction_vars))
-
             if epilogue_nodes:
-                _, (group, reduction_group) = max(
-                    epilogue_nodes, key=lambda x: int(x.is_reduction())
-                ).group
-                vars, reduction_vars = kernel.set_ranges(group, reduction_group)
-            # Flush created varaibles, since template fusion doen't share variable
-            kernel.cse.cache.clear()
-            kernel.epilogue_buffer_group.set_buffers()
-            kernel.load = kernel.load_epilogue
-            kernel.store = kernel.store_epilogue
-            for node in epilogue_nodes:
-                if template_node.node.name in [dep[0] for dep in list(node.read_writes.reads)]:
-                    kernel.epilogue_info['dependent_buf'].append(node.node.name)
-                node.codegen((vars, reduction_vars))
+                with kernel.epilogue_buffer_group.as_local():
+                    kernel.load = kernel.load_epilogue
+                    kernel.store = kernel.store_epilogue
+                    kernel.store_reduction = kernel.store_reduction_epilogue
+                    kernel.reduction = kernel.reduction_epilogue
+
+                    _, (group, reduction_group) = max(
+                        epilogue_nodes, key=lambda x: int(x.is_reduction())
+                    ).group
+                    vars, reduction_vars = kernel.set_ranges(group, reduction_group)
+                    for node in epilogue_nodes:
+                        node.codegen((vars, reduction_vars))
+
         with V.set_kernel_handler(kernel):
             src_code = (
                 partial_code
                 if isinstance(partial_code, str)
                 else partial_code.finalize()
             )
-        return src_code
+        # For consistency, white space could make wrong write_path
+        buffer = IndentedBuffer()
+        buffer.splice(src_code)
+        return buffer.getvalue()
 
     def codegen_template(self, template_node, epilogue_nodes):
         # Handle prologue pattern

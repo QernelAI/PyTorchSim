@@ -11,7 +11,11 @@ from PyTorchSimFrontend.extension_op import MLIRExternKernelChoice
 from PyTorchSimFrontend.mlir.mlir_gemm_template import MLIRGemmTemplate
 from PyTorchSimFrontend.mlir.mlir_bmm_template import MLIRBMMTemplate
 from PyTorchSimFrontend.mlir.mlir_conv_template import MLIRConvTemplate
+from PyTorchSimFrontend.mlir.mlir_conv_mt_template import MLIRConvMultiTileTemplate
+from PyTorchSimFrontend.mlir.mlir_conv_sb_template import MLIRConvSingleBatchTemplate
+from PyTorchSimFrontend.mlir.mlir_conv_sbs_template import MLIRConvSingleBatchStridedTemplate
 from PyTorchSimFrontend.mlir.mlir_maxpool_template import MLIRMaxPoolTemplate
+from PyTorchSimFrontend.extension_config import CONFIG_VECTOR_LANE
 
 aten = torch.ops.aten
 aten_spmm = MLIRExternKernelChoice(torch.sparse.mm, "custom_op::sparse_addmm")
@@ -96,9 +100,20 @@ def convolution(
     x.realize()
     weight.realize()
     x = ir.ExternKernel.require_channels_last(x)
+    BATCH = x.layout.size[0]
+    I_C = x.layout.size[1]
     weight = ir.ExternKernel.require_channels_last(weight)
     layout = conv_layout(x, weight, None, **kwargs)
-    mlir_template = MLIRConvTemplate([x, weight, bias], layout, **kwargs)
+
+    # Select conv kernel
+    if BATCH == 1 and stride[0] == 1:
+        mlir_template = MLIRConvSingleBatchTemplate([x, weight, bias], layout, **kwargs)
+    elif BATCH == 1 and stride[0] != 1:
+        mlir_template = MLIRConvSingleBatchStridedTemplate([x, weight, bias], layout, **kwargs)
+    elif I_C < CONFIG_VECTOR_LANE // 8: # 8 is hard-coded for now. This should be changed to a better heuristic.
+        mlir_template = MLIRConvMultiTileTemplate([x, weight, bias], layout, **kwargs)
+    else:
+        mlir_template = MLIRConvTemplate([x, weight, bias], layout, **kwargs)
     return mlir_template.generate().output_node()
 
 def maxpool_layout(

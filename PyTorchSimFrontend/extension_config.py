@@ -37,7 +37,7 @@ CONFIG_TORCHSIM_DUMP_LLVM_IR = int(os.environ.get("TORCHSIM_DUMP_LLVM_IR", defau
 # Backendsim config
 CONFIG_TORCHSIM_BACKEND_CONFIG = os.environ.get('TORCHSIM_CONFIG',
                                         default=f'{CONFIG_TORCHSIM_DIR}/PyTorchSimBackend/configs/systolic_ws_128x128_c1_simple_noc_tpuv3.json')
-CONFIG_BACKENDSIM_SPIKE_ONLY = int(os.environ.get("BACKENDSIM_SPIKE_ONLY", False))
+CONFIG_BACKENDSIM_SPIKE_ONLY = int(os.environ.get("BACKENDSIM_SPIKE_ONLY", True))
 CONFIG_BACKENDSIM_EAGER_MODE = int(os.environ.get("BACKENDSIM_EAGER_MODE", default=False))
 CONFIG_BACKENDSIM_DRYRUN = int(os.environ.get('BACKENDSIM_DRYRUN', default=False))
 CONFIG_BACKENDSIM_DEBUG_LEVEL = os.environ.get("BACKENDSIM_DEBUG_LEVEL", "")
@@ -71,8 +71,8 @@ CONFIG_SUBTILE_N = int(os.environ.get('TORCHSIM_SUBTILE_N', default=CONFIG_VECTO
 CONFIG_SUBTILE_K = int(os.environ.get('TORCHSIM_SUBTILE_K', default=CONFIG_VECTOR_LANE))
 
 # Advanced fusion options
-CONFIG_FUSION_REDUCTION = int(os.environ.get('TORCHSIM_FUSION_REDUCTION', default=False))
-CONFIG_FUSION_PROLOGUE = int(os.environ.get('TORCHSIM_FUSION_PROLOGUE', default=False))
+CONFIG_FUSION_REDUCTION = int(os.environ.get('TORCHSIM_FUSION_REDUCTION', default=True))
+CONFIG_FUSION_PROLOGUE = int(os.environ.get('TORCHSIM_FUSION_PROLOGUE', default=True))
 
 # SRAM Buffer allocation plan
 def load_plan_from_module(module_path):
