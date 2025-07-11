@@ -260,6 +260,7 @@ class MLIRScheduling(BaseScheduling):
 
             tile_desc = kernel.set_tile_size(kernel.epilogue_info)
             kernel.kernel_group.set_tile_info(tile_desc)
+            kernel.call_ranges = None
             if epilogue_nodes:
                 with kernel.epilogue_buffer_group.as_local():
                     kernel.load = kernel.load_epilogue

@@ -4,6 +4,7 @@ import re
 import os
 import math
 import torch
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from torch._dynamo.utils import dynamo_timed
 from torch._inductor.codegen import cpp, wrapper, common, memory_planning
@@ -1619,14 +1620,27 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
             local_tile_desc.vlane_split_axis = new_vlane_split_axis
 
         # Calculate dram stride
+        dram_stride = [0] * local_tile_desc.get_nr_dim()
         if index.is_Symbol:
-            dram_stride = [0] * local_tile_desc.get_nr_dim()
             dim_idx = int(str(index)[5:])
             dram_stride[dim_idx] = 1
         elif index.is_Number:
-            dram_stride = [0] * local_tile_desc.get_nr_dim()
+            pass
         else:
-            dram_stride = [arg.as_coeff_mul()[0] for arg in index.as_ordered_terms()]
+            dram_dict = defaultdict(list)
+            # Assume that div will have high priority than mod
+            for arg in index.as_ordered_terms():
+                coeff, dim = arg.as_coeff_mul()
+                real_dim = list(dim[0].free_symbols)[0]
+                dram_dict[str(real_dim)].append(coeff)
+            # Add missing dims if not added
+            max_dim = len(self.ranges) if not store_reduction else len(self.ranges) - 1
+            for i in range(max_dim):
+                target_dim = f"index{i}"
+                if target_dim not in str(index):
+                    dram_dict[target_dim] = [0]
+            sorted_keys = sorted(dram_dict.keys())
+            dram_stride = sum((dram_dict[key] for key in sorted_keys), [])
         return local_tile_desc, index_var, dram_stride
 
     def get_dma_code(self, dma_type_name, vlane_split_axis, vlane_stride, mlir_dtype, dram_var, dram_index_var, sram_var, sram_index_var,
