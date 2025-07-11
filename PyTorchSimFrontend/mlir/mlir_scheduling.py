@@ -278,12 +278,12 @@ class MLIRScheduling(BaseScheduling):
                     for node in epilogue_nodes:
                         node.codegen((vars, reduction_vars))
 
-            with V.set_kernel_handler(kernel):
-                src_code = (
-                    partial_code
-                    if isinstance(partial_code, str)
-                    else partial_code.finalize()
-                )
+        with V.set_kernel_handler(kernel):
+            src_code = (
+                partial_code
+                if isinstance(partial_code, str)
+                else partial_code.finalize()
+            )
         # For consistency, white space could make wrong write_path
         buffer = IndentedBuffer()
         buffer.splice(src_code)
@@ -304,6 +304,7 @@ class MLIRScheduling(BaseScheduling):
         _, (numel, rnumel) = template_node.group
         template_buffer = template_node.node
         kernel, render, codegen_header = template_buffer.make_kernel_render(template_buffer, prologue_nodes=prologue_nodes, epilogue_nodes=epilogue_nodes, kernel_group=self.kernel_group)
+        _, _, _, kernel.buffer_types = self.kernel_group.args.mlir_argdefs()
 
         src_code = self.codegen_template_code(kernel, render, template_node, prologue_nodes, epilogue_nodes)
         wrapper = V.graph.wrapper_code
