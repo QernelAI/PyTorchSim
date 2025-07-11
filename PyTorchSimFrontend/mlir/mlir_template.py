@@ -2,6 +2,7 @@ import functools
 import itertools
 import textwrap
 import re
+import os
 import contextlib
 import math
 import sympy
@@ -218,7 +219,9 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
                     used_spad_size_per_lane = (weight_size_per_lane + input_size_per_lane + output_size_per_lane) * self.precision
                     check_spad_size = (used_spad_size < max_spad_size and used_spad_size_per_lane < max_spad_per_lane)
                     if check_spad_size:
-                        file_path = f"{CONFIG_TORCHSIM_DIR}/validation/gemm_candidates/gemm_{M}_{K}_{N}.txt"
+                        dir_path = f"{CONFIG_TORCHSIM_DIR}/validation/gemm_candidates"
+                        os.makedirs(dir_path, exist_ok=True)
+                        file_path = f"{dir_path}/gemm_{M}_{K}_{N}.txt"
                         line_to_write = f"{tile_M} {tile_K} {tile_N}\n"
                         try:
                             with open(file_path, "r") as f:
@@ -978,10 +981,8 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
 
                 if self.buffer_types[name][1] > 1:
                     divider_vec = self.cse.generate(self.reductions_suffix, f"vector.broadcast %{divider} : f32 to {new_reduced_shape}")
-                    divider_vec2 = self.cse.generate(self.reductions_suffix, f"vector.broadcast %{divider2} : f32 to {new_reduced_shape}")
                 else:
                     divider_vec = divider
-                    divider_vec2 = divider2
 
                 if self.current_node.node.origin_node: # FIXME: This is a temporary solution
                     # mean = SUM(X) / N
@@ -992,7 +993,7 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
                     sqr_mean = self.cse.generate(self.reductions_suffix, f"arith.divf %{out}, %{divider_vec} : {new_reduced_shape}")
                     mean_sqr = self.cse.generate(self.reductions_suffix, f"arith.mulf %{self.reduction_mean[i]}, %{self.reduction_mean[i]} : {new_reduced_shape}")
                     variance = self.cse.generate(self.reductions_suffix, f"arith.subf %{sqr_mean}, %{mean_sqr} : {new_reduced_shape}")
-                    m2 = self.cse.generate(self.reductions_suffix, f"arith.mulf %{variance}, %{divider_vec2} : {new_reduced_shape}")
+                    m2 = self.cse.generate(self.reductions_suffix, f"arith.mulf %{variance}, %{divider_vec} : {new_reduced_shape}")
                     out = m2
 
             final_zero_var_list[-1] = f"%{body_index_var}"
