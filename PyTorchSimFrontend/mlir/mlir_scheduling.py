@@ -115,6 +115,9 @@ class MLIRScheduling(BaseScheduling):
                 self.revert_group(act_node)
                 if template_node.group != act_node.group:
                     return False
+                # We don't fuse this case...
+                if template_node.group[1][0][0] == 1:
+                    return False
             return True
 
         # Check elementwise fusion
