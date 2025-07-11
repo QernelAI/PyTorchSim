@@ -1631,6 +1631,8 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
             # Assume that div will have high priority than mod
             for arg in index.as_ordered_terms():
                 coeff, dim = arg.as_coeff_mul()
+                if len(dim) == 0:
+                    continue
                 real_dim = list(dim[0].free_symbols)[0]
                 dram_dict[str(real_dim)].append(coeff)
             # Add missing dims if not added
