@@ -1212,7 +1212,6 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
             vshape = f"vector<{compute_vec_size}x{mlir_dtype}>"
         sram_var, sram_index_var = self.get_scratchpad_buffer(dtype, name, local_tile_desc, index)
         if self.welford_reduce_out is not None:
-            # raise NotImplementedError()
             sum, sqr_sum, _ = self.welford_reduce_out
             # mean
             divider = self.cse.generate(self.reductions_suffix, f"arith.constant {float(self.ranges[self.reduction_depth])} : f32")
@@ -1559,9 +1558,14 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
 
         # Case 0. Tile is 0-D scalar
         if len(local_dims) == 0:
-            local_tile_desc.set_tile_size([kg_tile_desc.get_used_vlane() * kg_tile_desc.vlane_stride])         # Force it to use vector instruction.
-            local_tile_desc.vlane_split_axis = local_vlane_split_axis    # last axis
-            local_tile_desc.vlane_stride = kg_tile_desc.vlane_stride
+            if not store_reduction:
+                local_tile_desc.set_tile_size([kg_tile_desc.get_used_vlane() * kg_tile_desc.vlane_stride])         # Force it to use vector instruction.
+                local_tile_desc.vlane_split_axis = local_vlane_split_axis    # last axis
+                local_tile_desc.vlane_stride = kg_tile_desc.vlane_stride
+            else:
+                local_tile_desc.set_tile_size([1])
+                local_tile_desc.vlane_split_axis = 0
+                local_tile_desc.vlane_stride = 1
             dram_stride = [0] # Edge case
         # Case 1. Tile is 1-D vector type
         elif len(local_dims) == 1 and len(local_dims) <= self.reduction_depth:
@@ -1571,7 +1575,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         # Case 2. Tile is 1-D vector type with reduction
         elif len(local_dims) == 1 and len(local_dims) == self.reduction_depth + 1:
             local_tile_desc.set_tile_size([1, kg_tile_desc.get_dim_size(local_dims[0])])
-            local_tile_desc.vlane_split_axis = local_vlane_split_axis
+            local_tile_desc.vlane_split_axis = local_vlane_split_axis + 1
             local_tile_desc.vlane_stride = kg_tile_desc.vlane_stride
         # Case 3. Tile is 2-D tile
         elif len(local_dims) == 2:
@@ -1643,6 +1647,11 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
                     dram_dict[target_dim] = [0]
             sorted_keys = sorted(dram_dict.keys())
             dram_stride = sum((dram_dict[key] for key in sorted_keys), [])
+
+        # FIXME. It will be nice to modify node instead of this exception handling...
+        if len(self.itervars) == 1 and self.reduction_depth == 0:
+            # In case of reduction loop only case, we will add dummy loop so shift it once
+            dram_stride = [0] + dram_stride[:-1]
         return local_tile_desc, index_var, dram_stride
 
     def get_dma_code(self, dma_type_name, vlane_split_axis, vlane_stride, mlir_dtype, dram_var, dram_index_var, sram_var, sram_index_var,
