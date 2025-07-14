@@ -919,19 +919,22 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         index = self.apply_cse.generate(buffer, f"affine.apply #{map_var}({args})")
         return index
 
-    def parse_indices(self, expr, buffer=None, comments="") -> common.CSEVariable:
+    def parse_indices(self, expr, buffer=None, comments="", indirect_dims=[]) -> common.CSEVariable:
         if buffer is None:
             buffer = self.applys
 
         # Constant case
-        if expr.is_number:
+        if expr.is_number and len(indirect_dims) == 0:
             return self.get_const_cse(int(expr))
 
         # Identity case
-        if len(expr.args) == 0:
+        if len(expr.args) == 0 and len(indirect_dims) == 0:
             return expr
 
-        args = list(expr.args)
+        if len(expr.args) == 0:
+            args = [expr]
+        else:
+            args = list(expr.args)
         # Sort index variable.. ex) (%index1, %index0)
         args_dict = {term: list(term.free_symbols)[0] for term in args if term.free_symbols}
         sorted_args = sorted(args_dict.keys(), key=lambda term: str(args_dict[term]))
@@ -947,11 +950,12 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
                 indices.append(str(new_arg))
 
         # Extract index var
+        indirect_args = [f"%{i}" for i in indirect_dims]
         expr_str = str(expr)
         args = ", ".join(map(str, indices))
-        map_var = self.map_cse.generate(self.global_vars, f"affine_map<({args})[] -> ({expr_str})>")
+        map_var = self.map_cse.generate(self.global_vars, f"affine_map<({args})[{','.join(indirect_dims)}] -> ({expr_str})>")
         args = ", ".join([f"%{i}" for i in indices])
-        index = self.apply_cse.generate(buffer, f"affine.apply #{map_var}({args})[] {comments}")
+        index = self.apply_cse.generate(buffer, f"affine.apply #{map_var}({args})[{','.join(indirect_args)}] {comments}")
         return index
 
     def parse_index_list(self, expr_list:list, buffer=None) -> common.CSEVariable:
@@ -1554,7 +1558,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         if broadcast and (total_dims != local_dims or (self.reduction_depth!=len(total_dims) and total_dims[:self.reduction_depth] == local_dims)):
             local_dims = total_dims # Brodatcast tile shape
 
-        index_var = self.parse_indices(index, buffer=buffer)
+        index_var = self.parse_indices(index, buffer=buffer, indirect_dims=indirect_dims)
 
         if kg_tile_desc.vlane_split_axis in local_dims:
             local_vlane_split_axis = local_dims.index(kg_tile_desc.vlane_split_axis)

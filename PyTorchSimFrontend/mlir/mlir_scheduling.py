@@ -122,7 +122,7 @@ class MLIRScheduling(BaseScheduling):
                 if (isinstance(template_node, MLIRBMMTemplate) or isinstance(template_node, MLIRGemmTemplate)) and template_node.group[1][0][0] == 1:
                     return False
 
-                if template_node.group[1][0] != act_node.get_nodes()[0].node.data.get_size():
+                if list(template_node.group[1][0]) != list(act_node.get_nodes()[0].node.data.get_size()):
                     return False
                 self.revert_group(act_node)
             return True
