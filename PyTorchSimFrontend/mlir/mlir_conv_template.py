@@ -275,7 +275,7 @@ class MLIRConvTemplate(MLIRTemplate):
             dram_var = "Y",
             dram_idx = Y_idx,
             dram_tile_desc = Y_tile_desc,
-            dim_aliasing = {"index0":"c0", "index1":"tile_n", "index2":"o_h", "index3":"tile_m"}
+            dim_aliasing = {"index0":"tile_m", "index1":"tile_n", "index2":"o_h", "index3":"o_w"}
         )
         kernel.exception_nodes["X"] = {"numel" : (I_W+2*PADDING_W)*(I_H+2*PADDING_H)*I_C*BATCH}
         code = self._template_from_string(conv_template).render(**kernel.render_options)

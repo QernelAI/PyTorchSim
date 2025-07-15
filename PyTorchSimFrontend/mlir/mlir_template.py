@@ -1030,8 +1030,6 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
             self.reduction_body_loop = mlir_common.LoopLevel(self.reduction_loop_idx, nr_outer_loop)
         else:
             tile_desc.vec_size=64
-            if tile_desc.get_numel_per_lane() < tile_desc.vec_size:
-                tile_desc.vec_size = tile_desc.get_numel_per_lane()
 
             if prologue:
                 self.prologue_compute_body_loop.size = tile_desc.get_numel_per_lane()
