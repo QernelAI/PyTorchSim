@@ -2,7 +2,7 @@ import copy
 import torch
 import torch._dynamo
 import torch.utils.cpp_extension
-from model import Transformer, TransformerBlock, ModelArgs, Attention, FeedForward, KVCache, precompute_freqs_cis, sample
+from model import Transformer, TransformerBlock, ModelArgs, Attention, FeedForward, KVCache, RMSNorm, precompute_freqs_cis, sample
 
 def test_result(name, out, cpu_out, rtol=1e-4, atol=1e-4):
     if torch.allclose(out.cpu(), cpu_out, rtol=rtol, atol=atol):
@@ -139,6 +139,25 @@ def test_concat(device, size1=(1, 8, 32, 64), size2=(1, 8, 1, 64), dim=2):
 
     test_result("ConcatTensors", res, out)
 
+def test_rmsnorm(device, seq=32):
+    dim = 512
+    eps = 1e-5
+    T = seq
+    rmsnorm = RMSNorm(dim=dim, eps=eps)
+    rmsnorm = rmsnorm.to(device=device)
+
+    x = torch.randn([1, T, dim], dtype=torch.float32)
+    cpu_x = copy.deepcopy(x)
+    x = x.to(device)
+
+    cpu_model = copy.deepcopy(rmsnorm).to("cpu")
+    opt_fn = torch.compile(dynamic=False)(rmsnorm)
+
+    res = opt_fn(x)
+    cpu_res = cpu_model(cpu_x)
+
+    test_result("RMSNorm", res, cpu_res)
+
 if __name__ == "__main__":
     import os
     import sys
@@ -147,7 +166,8 @@ if __name__ == "__main__":
     from Scheduler.scheduler import ExecutionEngine
     module = ExecutionEngine.setup_device()
     device = module.custom_device()
+    test_rmsnorm(device, seq=1)
+    test_concat(device, size1=(1, 8, 64, 64), size2=(1,8,1,64), dim=2)
     test_decode(device, 32, 3)
-    #test_concat(device, size1=(1, 8, 32, 64), size2=(1,8,1,64), dim=2)
     #test_attention(device)
     #test_ffn(device)

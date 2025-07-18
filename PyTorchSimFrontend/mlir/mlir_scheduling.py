@@ -1,5 +1,6 @@
 import os
 import math
+import sympy
 from functools import reduce
 import operator
 from sympy import symbols, sympify, Symbol
@@ -138,11 +139,12 @@ class MLIRScheduling(BaseScheduling):
             return True
         return False
 
-    def revert_group(self, act_nodes):
+    def revert_group(self, act_nodes, args=None, var_ranges=None):
         for act_node in act_nodes.get_nodes():
-            args, var_ranges = dependencies.index_vars_no_squeeze(
-                    act_node.node.data.get_size(), act_node.node.data.get_reduction_size(), prefix="q"
-            )
+            if args is None or var_ranges is None:
+                args, var_ranges = dependencies.index_vars_no_squeeze(
+                        act_node.node.data.get_size(), act_node.node.data.get_reduction_size(), prefix="q"
+                )
             body = LoopBody(
                 act_node.node.get_store_function(),
                 (args if act_node.node.get_reduction_type() else args[:1]),
@@ -167,10 +169,22 @@ class MLIRScheduling(BaseScheduling):
             nodes, key=lambda x: int(x.is_reduction())
         ).group
 
-        # There is no normal loop, then revert simplified group
+        # Note: We assume that ther is at least one loop in the nodes
+        # But, inductor simplifies the group, there could be no loop
+        # In that case, we add dummy loop(size=1) to the group
         if len(group) == 0:
             for idx, node in enumerate(nodes):
-                self.revert_group(node)
+                if len(node.node.data.get_size()) == 0:
+                    continue
+                if len(reduction_group) != 0:
+                    sym0, sym1 = sympy.Symbol("q0"), sympy.Symbol("q1")
+                    args = [[sym0] + [sympy.Number(0)] * (len(node.node.data.get_size())-1), [sym1]]
+                    var_ranges = {sym0: sympy.Number(1), sym1: reduction_group[0]}
+                else:
+                    sym0 = sympy.Symbol("q0")
+                    args = [[sym0] + [sympy.Number(0)] * (len(node.node.data.get_size())-1), []]
+                    var_ranges = {sym0: sympy.Number(1)}
+                self.revert_group(node, args, var_ranges)
             _, (group, reduction_group) = max(
                 nodes, key=lambda x: int(x.is_reduction())
             ).group

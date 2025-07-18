@@ -1,12 +1,7 @@
 # Owner(s): ["module: inductor"]
 import os
-import shutil
 import sys
-import time
-import contextlib
-import unittest
 import copy
-import numpy as np
 import matplotlib.pyplot as plt
 
 
