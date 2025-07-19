@@ -65,8 +65,6 @@ class MLIRScheduling(BaseScheduling):
                 return False
             if len(node1.read_writes.writes) != 1:
                 return False
-            if len(node1.users) != 1:
-                return False
             # We don't fuse this case...
             if (isinstance(target_node.template, MLIRBMMTemplate) or isinstance(target_node.template, MLIRGemmTemplate)) and base_template_node2[0].group[1][0][0] == 1:
                     return False
@@ -250,12 +248,19 @@ class MLIRScheduling(BaseScheduling):
             _, _, _, kernel.buffer_types = self.kernel_group.args.mlir_argdefs()
             for node in [template_node, *prologue_nodes, *epilogue_nodes]:
                 node.mark_run()
+            # Partial codgen template nodes
             partial_code = render()
+
+            # Swap load/store functions
+            kernel.load = kernel.load_epilogue
+            kernel.store = kernel.store_epilogue
+            kernel.store_reduction = kernel.store_reduction_epilogue
+            kernel.reduction = kernel.reduction_epilogue
+
+            # Codegen prologue nodes
             if prologue_nodes:
                 # Flush created varaibles, since template fusion doen't share variable
                 with kernel.prologue_buffer_group.as_local():
-                    kernel.load = kernel.load_epilogue
-                    kernel.store = kernel.store_prologue
                     _, (group, reduction_group) = max(
                         [prologue_nodes[-1]], key=lambda x: int(x.is_reduction())
                     ).group
@@ -292,16 +297,12 @@ class MLIRScheduling(BaseScheduling):
                         }
                         node.codegen((vars, reduction_vars))
 
+            # Codegen epilogue nodes
             tile_desc = kernel.set_tile_size(kernel.epilogue_info)
             kernel.kernel_group.set_tile_info(tile_desc)
             kernel.call_ranges = None
             if epilogue_nodes:
                 with kernel.epilogue_buffer_group.as_local():
-                    kernel.load = kernel.load_epilogue
-                    kernel.store = kernel.store_epilogue
-                    kernel.store_reduction = kernel.store_reduction_epilogue
-                    kernel.reduction = kernel.reduction_epilogue
-
                     _, (group, reduction_group) = max(
                         epilogue_nodes, key=lambda x: int(x.is_reduction())
                     ).group
@@ -315,6 +316,7 @@ class MLIRScheduling(BaseScheduling):
                 if isinstance(partial_code, str)
                 else partial_code.finalize()
             )
+
         # For consistency, white space could make wrong write_path
         buffer = IndentedBuffer()
         buffer.splice(src_code)

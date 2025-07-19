@@ -423,6 +423,7 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
                     compute_body.splice(self.compute)
                     compute_body.splice(self.stores)
                 body.splice(compute_body)
+            body.splice(self.dma_stores)
         return body
 
     def codegen_epilogue_body(self):
@@ -723,31 +724,6 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
         size = tile_m * ((tile_n + self.vector_lane - 1) // self.vector_lane)
         return max(size, 2) # vector load/store
 
-    def store_prologue(self, name: str, index: sympy.Expr, value, *args, **kwargs):
-        dtype = V.graph.get_dtype(name)
-        mlir_dtype = mlir_common.DTYPE_TO_MLIR[dtype]
-        tile_shape = self.kernel_group.tile_desc.get_mlir_shape(mlir_dtype)
-
-        # Compute vector unit size
-        vshape = self.kernel_group.tile_desc.get_mlir_vshape(mlir_dtype)
-        compute_vec_size = self.kernel_group.tile_desc.get_compute_vec_size()
-
-        sram_var = self.buffer_names[name]
-        zero_var = self.get_const_cse(0)
-
-        _, operand_type = self.var_info[value]
-        if mlir_dtype != operand_type:
-            value = ops.to_dtype(value, mlir_dtype, var_info=self.var_info)
-        compute_index_var = ",".join([f"%{zero_var}"] * (self.kernel_group.tile_desc.get_nr_dim()-1) + [f"%{self.compute_idx}"])
-        # Generate vector load instruction
-        if compute_vec_size > 1:
-            operation = "affine.vector_store"
-            line = f"{operation} %{value}, %{sram_var}[{compute_index_var}] : {tile_shape}, {vshape}"
-        else:
-            operation = "affine.store"
-            line = f"{operation} %{value}, %{sram_var}[{compute_index_var}] : {tile_shape}"
-        self.stores.writeline(line)
-
     def load_epilogue(self, name: str, index: sympy.Expr):
         index = self.rename_indexing(index)
         dram_var = self.kernel_group.args.input(name)
@@ -847,7 +823,7 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
         else:
             operation = "affine.store"
             line = f"{operation} %{value}, %{sram_var}[{compute_index_var}] : {tile_shape}"
-        self.stores.writeline(DeferredLine(name, line))
+        self.stores.writeline(line)
 
         # Generate DMA instruction
         attribute = f"{{dram_stride={dram_stride}, sram_stride={tile_stride}, padding=0}}"
