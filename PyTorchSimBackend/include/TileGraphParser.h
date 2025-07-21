@@ -175,17 +175,18 @@ class TileMemoryNode : public TileNode {
   std::string get_base_addr_name() { return _base_addr_name; }
   size_t get_precision() { return _element_size; }
   std::vector<size_t> get_tile_size() { return _tile_size; }
-  std::vector<int>& get_stride_list () { return _stride_list; }
+  std::vector<int>& get_tile_stride() { return _tile_stride; }
   std::vector<std::string>& get_tag_idx_list() { return _tag_idx_list; }
   std::vector<int>& get_tag_stride_list() { return _tag_stride_list; }
   std::vector<std::string>& get_loop_idx_list() { return _loop_idx_list; }
+  std::vector<int>& get_loop_stride_list () { return _loop_stride_list; }
   bool is_async_node() { return _is_async; }
   bool is_indirect() { return _is_indirect; }
   void print_node() override;
 
  private:
   std::vector<size_t> _tile_size;
-  std::vector<int> _stride_list;
+  std::vector<int> _tile_stride;
   size_t _element_size;
   bool _is_async;
   bool _is_indirect;
@@ -193,6 +194,7 @@ class TileMemoryNode : public TileNode {
   std::vector<std::string> _tag_idx_list;
   std::vector<int> _tag_stride_list;
   std::vector<std::string> _loop_idx_list;
+  std::vector<int> _loop_stride_list;
 };
 
 class TileMemoryWaitNode : public TileNode {

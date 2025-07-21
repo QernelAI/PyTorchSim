@@ -199,12 +199,12 @@ TileMemoryNode::TileMemoryNode(onnx::NodeProto& node) : TileNode(node) {
       _base_addr_name = attribute.s();
     } else if (attribute.name() == "torchsim_element_size") {
       _element_size = attribute.i();
-    } else if (attribute.name() == "torchsim_stride_list") {
-      for (int i = 0; i < attribute.ints_size(); i++)
-        _stride_list.push_back(attribute.ints(i));
     } else if (attribute.name() == "torchsim_tile_size") {
       for (int i = 0; i < attribute.ints_size(); i++)
         _tile_size.push_back(attribute.ints(i));
+    } else if (attribute.name() == "torchsim_tile_stride") {
+      for (int i = 0; i < attribute.ints_size(); i++)
+        _tile_stride.push_back(attribute.ints(i));
     } else if (attribute.name() == "torchsim_tag_idx_list") {
       for (int i = 0; i < attribute.strings_size(); i++)
         _tag_idx_list.push_back(attribute.strings(i));
@@ -214,6 +214,9 @@ TileMemoryNode::TileMemoryNode(onnx::NodeProto& node) : TileNode(node) {
     } else if (attribute.name() == "torchsim_loop_idx_list") {
       for (int i = 0; i < attribute.strings_size(); i++)
         _loop_idx_list.push_back(attribute.strings(i));
+    } else if (attribute.name() == "torchsim_loop_stride_list") {
+      for (int i = 0; i < attribute.ints_size(); i++)
+        _loop_stride_list.push_back(attribute.ints(i));
     } else if (attribute.name() == "torchsim_is_async") {
       _is_async = attribute.i();
     } else if (attribute.name() == "torchsim_indirect_mode") {
@@ -230,8 +233,9 @@ void TileMemoryNode::print_node() {
   std::string spaces(get_depth(), '\t');
   spdlog::debug("{} base_addr_name: {}", spaces, _base_addr_name);
   spdlog::debug("{} element_size: {}", spaces, _element_size);
-  spdlog::debug("{} stride_list: {} ", spaces, _stride_list);
+  spdlog::debug("{} loop_stride_list: {} ", spaces, _loop_stride_list);
   spdlog::debug("{} tile_size: {} ", spaces, _tile_size);
+  spdlog::debug("{} tile_stride: {} ", spaces, _tile_stride);
   spdlog::debug("{} tag_list: {}", spaces, fmt::join(_tag_idx_list, ", "));
   spdlog::debug("{} tag_stride_list: {}", spaces, fmt::join(_tag_stride_list, ", "));
   spdlog::debug("{} index_list: {}", spaces, fmt::join(_loop_idx_list, ", "));
@@ -342,30 +346,26 @@ std::vector<std::shared_ptr<Tile>> TileLoopNode::get_tiles_from_iter(TileGraphPa
   for (auto& tile_node: _body_node) {
     if (tile_node->get_type() == TileType::LOAD_NODE) {
       std::shared_ptr<TileMemoryNode> mem_node = std::static_pointer_cast<TileMemoryNode>(tile_node);
-      auto base_addr_name = mem_node->get_base_addr_name();
-      int base_addr_id = tog_parser->register_addr_name(base_addr_name);
-      std::vector<std::string>& tag_idx_list = mem_node->get_tag_idx_list();
-      std::vector<int>& tag_stride_list = mem_node->get_tag_stride_list();
-      std::vector<int> skip_idx_list;
-      std::vector<int> values;
-
-      /* Lookup given name's address */
-      addr_type base_addr = tog_parser->lookup(base_addr_name);
       std::vector<int> iter_list;
-      std::vector<int> tag_list;
-      std::vector<int> accum_tag_list;
-      std::vector<int> loop_size_list;
-      std::vector<uint32_t> outer_loop_idx;
-      std::vector<uint32_t> outer_loop_size;
       int nr_inner_loop = 0;
       auto& loop_idx_list = mem_node->get_loop_idx_list();
       for (auto loop_idx: loop_idx_list) {
-        auto iter_value = getLoopIndexValue(iter, loop_idx);
+        int iter_value = getLoopIndexValue(iter, loop_idx);
         iter_list.push_back(iter_value);
-        loop_size_list.push_back(tog_parser->get_loop_size(loop_idx));
         if (tog_parser->get_loop_type(loop_idx)==LoopType::INNER_LOOP)
           nr_inner_loop++;
       }
+
+      /* Base address setting */
+      std::string base_addr_name = mem_node->get_base_addr_name();
+      int base_addr_id = tog_parser->register_addr_name(base_addr_name);
+      addr_type base_addr = tog_parser->lookup(base_addr_name);
+      addr_type offset = std::inner_product(iter_list.begin(), iter_list.end(), mem_node->get_loop_stride_list().begin(), 0);
+
+      std::vector<int> tag_list;
+      std::vector<int> accum_tag_list;
+      std::vector<uint32_t> outer_loop_idx;
+      std::vector<uint32_t> outer_loop_size;
       /* Add accumulation loop info to accum_tag list */
       for (auto loop_idx = loop_idx_list.begin();
             loop_idx != loop_idx_list.end() - nr_inner_loop; ++loop_idx) {
@@ -387,7 +387,7 @@ std::vector<std::shared_ptr<Tile>> TileLoopNode::get_tiles_from_iter(TileGraphPa
       }
 
       uint32_t systolic_size = std::stoi(tog_parser->getMetaByName("systolic_size"));
-      for (auto loop_idx: tag_idx_list) {
+      for (auto loop_idx: mem_node->get_tag_idx_list()) {
         if (iter.find(loop_idx) == iter.end())
           tag_list.push_back(0);
         else {
@@ -406,25 +406,32 @@ std::vector<std::shared_ptr<Tile>> TileLoopNode::get_tiles_from_iter(TileGraphPa
         int stride_idx = calculateAddress(outer_loop_size, tog_parser->lookupNumaInfo(base_addr_name));
         numa_id = total_idx / stride_idx;
       }
+
       /* Check need to make this memory node */
+      std::vector<int>& tag_stride_list = mem_node->get_tag_stride_list();
       std::vector<int> key = tog_parser->calc_tag(accum_tag_list, tag_list, tag_stride_list);
       if (tog_parser->check_memory_tag(base_addr_name, key))
         continue;
       tog_parser->register_memory_tag(base_addr_name, key);
 
       printIndexMap("[TOGParser] Load Node " + mem_node->get_base_addr_name() + " Numa_id: " + std::to_string(numa_id), iter);
+      spdlog::trace("[TOGParser] Load Node {} key = [{}], accum = [{}], tag = [{}], stride = [{}]", mem_node->get_base_addr_name(),
+             fmt::join(key, ", "),
+             fmt::join(accum_tag_list, ", "),
+             fmt::join(tag_list, ", "),
+             fmt::join(tag_stride_list, ", "));
       std::shared_ptr<Instruction> inst = std::make_shared<Instruction>(
         Opcode::MOVIN, 0,
-        0, base_addr,
-        mem_node->get_tile_size(), mem_node->get_precision(), iter_list,
-        mem_node->get_stride_list(), tag_list, tag_stride_list, accum_tag_list, loop_size_list
+        0, base_addr+offset,
+        mem_node->get_tile_size(), mem_node->get_tile_stride(), mem_node->get_precision(),
+        tag_list, tag_stride_list, accum_tag_list
       );
       inst->set_addr_name(base_addr_name, base_addr_id);
       inst->prepare_tag_key();
       inst->set_nr_inner_loop(nr_inner_loop);
-      inst->adjust_dram_address();
       inst->set_is_async(mem_node->is_async_node());
       inst->set_numa_id(numa_id);
+
       if (mem_node->is_indirect()) {
         inst->set_indirect_index_path(tog_parser->get_indirect_path());
         tog_parser->inc_indirect_counter();
@@ -439,14 +446,7 @@ std::vector<std::shared_ptr<Tile>> TileLoopNode::get_tiles_from_iter(TileGraphPa
       tile_vec.back()->append_instuction(inst);
     } else if (tile_node->get_type() == TileType::STORE_NODE) {
       std::shared_ptr<TileMemoryNode> mem_node = std::static_pointer_cast<TileMemoryNode>(tile_node);
-      auto base_addr_name = mem_node->get_base_addr_name();
-      int base_addr_id = tog_parser->register_addr_name(base_addr_name);
-      /* Lookup given name's address */
-      addr_type base_addr = tog_parser->lookup(base_addr_name);
-      std::vector<int>& tag_stride_list = mem_node->get_tag_stride_list();
-      std::vector<int> accum_tag_list;
       std::vector<int> iter_list;
-      std::vector<int> loop_size_list;
       std::vector<uint32_t> outer_loop_idx;
       std::vector<uint32_t> outer_loop_size;
       int nr_inner_loop = 0;
@@ -454,7 +454,6 @@ std::vector<std::shared_ptr<Tile>> TileLoopNode::get_tiles_from_iter(TileGraphPa
       for (auto loop_idx: loop_idx_list) {
         auto iter_value = getLoopIndexValue(iter, loop_idx);
         iter_list.push_back(iter_value);
-        loop_size_list.push_back(tog_parser->get_loop_size(loop_idx));
         if (tog_parser->get_loop_type(loop_idx)==LoopType::INNER_LOOP)
           nr_inner_loop++;
         if (tog_parser->get_loop_type(loop_idx)==LoopType::PARALLEL_LOOP) {
@@ -464,6 +463,12 @@ std::vector<std::shared_ptr<Tile>> TileLoopNode::get_tiles_from_iter(TileGraphPa
           outer_loop_size.push_back(tog_parser->get_loop_size(loop_idx)/ step);
         }
       }
+
+      /* Lookup given name's address */
+      std::string base_addr_name = mem_node->get_base_addr_name();
+      int base_addr_id = tog_parser->register_addr_name(base_addr_name);
+      addr_type base_addr = tog_parser->lookup(base_addr_name);
+      addr_type offset = std::inner_product(iter_list.begin(), iter_list.end(), mem_node->get_loop_stride_list().begin(), 0);
 
       /* Calc numa id */
       int numa_id = 0;
@@ -477,14 +482,13 @@ std::vector<std::shared_ptr<Tile>> TileLoopNode::get_tiles_from_iter(TileGraphPa
       printIndexMap("[TOGParser] Store Node " + mem_node->get_base_addr_name() + " Numa_id: " + std::to_string(numa_id), iter);
       std::shared_ptr<Instruction> inst = std::make_shared<Instruction>(
         Opcode::MOVOUT, 0,
-        0, base_addr,
-        mem_node->get_tile_size(), mem_node->get_precision(), iter_list,
-        mem_node->get_stride_list(), std::vector<int>(1), tag_stride_list, accum_tag_list, loop_size_list
+        0, base_addr+offset,
+        mem_node->get_tile_size(), mem_node->get_tile_stride(), mem_node->get_precision(),
+        std::vector<int>(1), mem_node->get_tag_stride_list(), std::vector<int>()
       );
       inst->set_addr_name(base_addr_name, base_addr_id);
       inst->prepare_tag_key();
       inst->set_nr_inner_loop(nr_inner_loop);
-      inst->adjust_dram_address();
       inst->set_is_async(mem_node->is_async_node());
       inst->set_numa_id(numa_id);
       if (mem_node->is_indirect()) {
@@ -530,11 +534,16 @@ std::vector<std::shared_ptr<Tile>> TileLoopNode::get_tiles_from_iter(TileGraphPa
           new_tag_stride_list.push_back(i);
       }
 
+      spdlog::trace("[TOGParser] Wait Node {}, accum = [{}], tag = [{}], stride = [{}]", wait_node->get_base_addr_name(),
+             fmt::join(accum_tag_list, ", "),
+             fmt::join(tag_list, ", "),
+             fmt::join(new_tag_stride_list, ", "));
+
       std::shared_ptr<Instruction> inst = std::make_shared<Instruction>(
         Opcode::BAR, 0,
         0, base_addr,
-        std::vector<size_t>(), 0, iter_list,
-        iter_list, tag_list, new_tag_stride_list, accum_tag_list, std::vector<int>()
+        std::vector<size_t>(), std::vector<int>(), 0,
+        tag_list, new_tag_stride_list, accum_tag_list
       );
       inst->set_addr_name(base_addr_name, base_addr_id);
       inst->prepare_tag_key();
@@ -543,15 +552,14 @@ std::vector<std::shared_ptr<Tile>> TileLoopNode::get_tiles_from_iter(TileGraphPa
     } else if (tile_node->get_type() == TileType::COMPUTE_NODE) {
       printIndexMap("[TOGParser] Compute Node ", iter);
       std::shared_ptr<TileComputeNode> compute_node = std::static_pointer_cast<TileComputeNode>(tile_node);
-      std::vector<int> iter_list;
       std::vector<int> tag_list = {0};
       std::vector<int> tag_stride_list = {1};
       std::vector<int> accum_tag_list;
       std::shared_ptr<Instruction> inst = std::make_shared<Instruction>(
         Opcode::COMP, compute_node->get_cycle(),
         0, 0,
-        std::vector<size_t>(), 0, iter_list, iter_list,
-        tag_list, tag_stride_list, accum_tag_list, std::vector<int>()
+        std::vector<size_t>(), std::vector<int>(), 0,
+        tag_list, tag_stride_list, accum_tag_list
       );
       inst->set_overlapping_cycle(compute_node->get_overlapping_cycle());
       inst->set_compute_type(compute_node->get_compute_type());
@@ -620,72 +628,28 @@ std::vector<std::shared_ptr<Tile>> TileLoopNode::get_tiles_from_iter(TileGraphPa
     } else if (tile_node->get_type() == TileType::STONNE_NODE) {
       printIndexMap("[TOGParser] Stonne Node ", iter);
       std::shared_ptr<TileStonneNode> stonne_node = std::static_pointer_cast<TileStonneNode>(tile_node);
-      /* Lookup given name's address */
-      std::vector<int> iter_list;
-      std::vector<int> tag_list;
-      std::vector<int> tag_stride_list;
-      std::vector<int> accum_tag_list;
-
-      /* Put dummy computation instruction */
-      std::shared_ptr<Instruction> inst = std::make_shared<Instruction>(
-        Opcode::COMP, 0,
-        0, 0,
-        std::vector<size_t>(), 0, iter_list,
-        iter_list, tag_list, tag_stride_list, accum_tag_list, std::vector<int>()
-      );
+      std::shared_ptr<Instruction> inst = std::make_shared<Instruction>(Opcode::COMP);
       link_map[tile_node] = inst;
       tile_vec.back()->append_instuction(inst);
       tile_vec.back()->set_custom_data(stonne_node->getDesc());
       tile_vec.back()->set_stonne_tile(true);
     } else if (tile_node->get_type() == TileType::STONNE_TRACE_COMPUTE_NODE) {
       std::shared_ptr<TileStonneTraceComputeNode> stonne_node = std::static_pointer_cast<TileStonneTraceComputeNode>(tile_node);
-      /* Lookup given name's address */
-      std::vector<int> iter_list;
-      std::vector<int> tag_list;
-      std::vector<int> tag_stride_list;
-      std::vector<int> accum_tag_list;
-
-      std::shared_ptr<Instruction> inst = std::make_shared<Instruction>(
-        Opcode::COMP, stonne_node->get_cycle(),
-        0, 0,
-        std::vector<size_t>(), 0, iter_list,
-        iter_list, tag_list, tag_stride_list, accum_tag_list, std::vector<int>()
-      );
+      std::shared_ptr<Instruction> inst = std::make_shared<Instruction>(Opcode::COMP);
+      inst->set_compute_cycle(stonne_node->get_cycle());
       link_map[tile_node] = inst;
       tile_vec.back()->append_instuction(inst);
       tile_vec.back()->set_stonne_tile(true);
     } else if (tile_node->get_type() == TileType::STONNE_TRACE_LOAD_NODE) {
       std::shared_ptr<TileStonneTraceLoadNode> stonne_node = std::static_pointer_cast<TileStonneTraceLoadNode>(tile_node);
-      /* Lookup given name's address */
-      std::vector<int> iter_list;
-      std::vector<int> tag_list;
-      std::vector<int> tag_stride_list;
-      std::vector<int> accum_tag_list;
-
-      std::shared_ptr<Instruction> inst = std::make_shared<Instruction>(
-        Opcode::MOVIN, 0,
-        0, 0,
-        std::vector<size_t>(), 0, iter_list,
-        iter_list, tag_list, tag_stride_list, accum_tag_list, std::vector<int>()
-      );
+      std::shared_ptr<Instruction> inst = std::make_shared<Instruction>(Opcode::MOVIN);
       inst->set_trace_address(stonne_node->get_address());
       link_map[tile_node] = inst;
       tile_vec.back()->append_instuction(inst);
       tile_vec.back()->set_stonne_tile(true);
     } else if (tile_node->get_type() == TileType::STONNE_TRACE_STORE_NODE) {
       std::shared_ptr<TileStonneTraceStoreNode> stonne_node = std::static_pointer_cast<TileStonneTraceStoreNode>(tile_node);
-      /* Lookup given name's address */
-      std::vector<int> iter_list;
-      std::vector<int> tag_list;
-      std::vector<int> tag_stride_list;
-      std::vector<int> accum_tag_list;
-
-      std::shared_ptr<Instruction> inst = std::make_shared<Instruction>(
-        Opcode::MOVOUT, 0,
-        0, 0,
-        std::vector<size_t>(), 0, iter_list,
-        iter_list, tag_list, tag_stride_list, accum_tag_list, std::vector<int>()
-      );
+      std::shared_ptr<Instruction> inst = std::make_shared<Instruction>(Opcode::MOVOUT);
       inst->set_trace_address(stonne_node->get_address());
       link_map[tile_node] = inst;
       tile_vec.back()->append_instuction(inst);

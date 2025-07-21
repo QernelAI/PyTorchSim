@@ -91,12 +91,13 @@ class tog_generator:
         elif node_type == self.DMANodeKind:
             tile_info = {}
             tile_info["base_addr"] = dump_data["base_address"]
-            tile_info["stride_list"] = dump_data["stride_list"]
             tile_info["tile_size"] = dump_data["tile_size"]
+            tile_info["tile_stride"] = dump_data["tile_stride"]
             tile_info["element_size"] = dump_data["element_size"]
             tile_info["tag_idx_list"] = dump_data["tag_idx_list"]
             tile_info["tag_stride_list"] = dump_data["tag_stride_list"]
             tile_info["loop_idx_list"] = dump_data["loop_idx_list"]
+            tile_info["loop_stride_list"] = dump_data["loop_stride_list"]
             tile_info["is_async"] = dump_data["is_async"]
             tile_info["indirect_mode"] = dump_data["indirect_mode"]
             is_write = dump_data["is_write"]

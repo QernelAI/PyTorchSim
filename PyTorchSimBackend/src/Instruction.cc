@@ -11,23 +11,22 @@ std::string opcode_to_string(Opcode opcode) {
 }
 
 Instruction::Instruction(Opcode opcode, cycle_type compute_cycle, size_t num_parents,
-            addr_type dram_addr, std::vector<size_t> tile_size, size_t precision,
-            std::vector<int>& idx_list, std::vector<int>& stride_list,
+            addr_type dram_addr, std::vector<size_t> tile_size, std::vector<int> tile_stride, size_t precision,
             std::vector<int> tag_idx_list, std::vector<int> tag_stride_list,
-            std::vector<int> accum_tag_idx_list, std::vector<int> loop_size_list)
+            std::vector<int> accum_tag_idx_list)
   : opcode(opcode), compute_cycle(compute_cycle), ready_counter(num_parents), dram_addr(dram_addr),
-    tile_size(tile_size), _precision(precision), _idx_list(idx_list),
-    _stride_list(stride_list), _tag_idx_list(tag_idx_list), _tag_stride_list(tag_stride_list),
-    _accum_tag_idx_list(accum_tag_idx_list), _loop_size_list(loop_size_list) {
+    tile_size(tile_size), tile_stride(tile_stride), _precision(precision),
+    _tag_idx_list(tag_idx_list), _tag_stride_list(tag_stride_list),
+    _accum_tag_idx_list(accum_tag_idx_list) {
   assert(_tag_idx_list.size()==_tag_stride_list.size());
   _tile_numel = 1;
   for (auto dim : tile_size)
     _tile_numel *= dim;
+}
 
-  /* Supporting vector */
-  if (_stride_list.size() == 1) {
-    _stride_list.push_back(1);
-  }
+Instruction::Instruction(Opcode opcode)
+  : opcode(opcode) {
+  _tile_numel = 1;
 }
 
 void Instruction::finish_instruction() {
@@ -73,8 +72,8 @@ std::shared_ptr<std::set<addr_type>> Instruction::get_dram_address(addr_type dra
   while (tile_size.size() < 4)
     tile_size.insert(tile_size.begin(), 1);
 
-  while (_stride_list.size() < 4)
-    _stride_list.insert(_stride_list.begin(), 0);
+  while (tile_stride.size() < 4)
+    tile_stride.insert(tile_stride.begin(), 0);
   if (_is_indirect_mode) {
     spdlog::trace("[Indirect Access] Indirect mode, dump_path: {}", _indirect_index_path);
     load_indirect_index(_indirect_index_path, indirect_index, tile_size);
@@ -85,10 +84,10 @@ std::shared_ptr<std::set<addr_type>> Instruction::get_dram_address(addr_type dra
     for (int dim1=0; dim1<tile_size.at(1); dim1++) {
       for (int dim2=0; dim2<tile_size.at(2); dim2++) {
         for (int dim3=0; dim3<tile_size.at(3); dim3++) {
-          addr_type address = dim0*_stride_list.at(_stride_list.size() - 4) + \
-                              dim1*_stride_list.at(_stride_list.size() - 3) + \
-                              dim2*_stride_list.at(_stride_list.size() - 2) + \
-                              dim3*_stride_list.at(_stride_list.size() - 1);
+          addr_type address = dim0*tile_stride.at(tile_stride.size() - 4) + \
+                              dim1*tile_stride.at(tile_stride.size() - 3) + \
+                              dim2*tile_stride.at(tile_stride.size() - 2) + \
+                              dim3*tile_stride.at(tile_stride.size() - 1);
           address = dram_addr + address * _precision;
           if (indirect_index != NULL) {
             uint64_t index_val = indirect_index[index_count++];

@@ -22,9 +22,10 @@ std::string opcode_to_string(Opcode opcode);
 class Instruction : public std::enable_shared_from_this<Instruction> {
  public:
   Instruction(Opcode opcode, cycle_type compute_cycle, size_t num_parents, addr_type dram_addr,
-              std::vector<size_t> tile_size, size_t precision, std::vector<int> &idx_list,
-              std::vector<int> &stride_list,  std::vector<int> tag_idx_list, std::vector<int> tag_stride_list,
-              std::vector<int> accum_tag_idx_list, std::vector<int> loop_size_list);
+              std::vector<size_t> tile_size, std::vector<int> tile_stride, size_t precision,
+              std::vector<int> tag_idx_list, std::vector<int> tag_stride_list,
+              std::vector<int> accum_tag_idx_list);
+  Instruction(Opcode opcode);
   void finish_instruction();
   void add_child(std::shared_ptr<Instruction> child);
   bool check_ready() { return ready_counter == 0; }
@@ -60,10 +61,6 @@ class Instruction : public std::enable_shared_from_this<Instruction> {
   bool load_indirect_index(const std::string& path, uint64_t*& indirect_index, const std::vector<uint64_t>& tile_size);
   void set_trace_address(std::vector<addr_type>& trace_address) { _trace_address = trace_address; }
   size_t get_free_sram_size() { return _free_sram_size; }
-  void adjust_dram_address() {
-    int offset = std::inner_product(_idx_list.begin(), _idx_list.end(), _stride_list.begin(), 0);
-    dram_addr += offset * _precision;
-  }
   addr_type get_base_dram_address() { return dram_addr; }
   void set_free_sram_size(size_t sram_size) { _free_sram_size=sram_size; }
   void* get_owner() { return _owner; }
@@ -73,7 +70,6 @@ class Instruction : public std::enable_shared_from_this<Instruction> {
   int get_compute_type() { return _compute_type; }
   void set_numa_id(int numa_id) { _numa_id = numa_id; }
   uint32_t get_numa_id() { return _numa_id; }
-  std::vector<int>& get_idx_list() { return _idx_list; }
   std::vector<int>& get_tag_idx_list() { return _tag_idx_list; }
   std::vector<int>& get_tag_stride_list() { return _tag_stride_list; }
   std::vector<int>& get_tag_id() { return _tag_key; }
@@ -103,6 +99,7 @@ class Instruction : public std::enable_shared_from_this<Instruction> {
   size_t ready_counter;
   std::set<std::shared_ptr<Instruction>> child_inst;
   std::vector<size_t> tile_size;
+  std::vector<int> tile_stride;
   size_t _tile_numel;
   size_t _nr_waiting_request=0;
   size_t _precision=0;
@@ -110,13 +107,10 @@ class Instruction : public std::enable_shared_from_this<Instruction> {
   addr_type dram_addr;
   uint32_t _numa_id = 0; // For DMA instruction
   int _compute_type = 0;
-  std::vector<int> _idx_list;
-  std::vector<int> _stride_list;
   std::vector<int> _tag_idx_list;
   std::vector<int> _tag_stride_list;
   std::vector<int> _tag_key;
   std::vector<int> _accum_tag_idx_list;
-  std::vector<int> _loop_size_list;
   std::vector<addr_type> _trace_address;
   std::string _addr_name;
   int _addr_id;

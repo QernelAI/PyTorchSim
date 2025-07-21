@@ -66,12 +66,13 @@ class memory_node(node):
         super().__init__(node_id)
         self.inst = inst_list
         self.torchsim_base_addr = tile_info["base_addr"]
-        self.torchsim_stride_list = tile_info["stride_list"]
         self.torchsim_tile_size = tile_info["tile_size"]
+        self.torchsim_tile_stride = tile_info["tile_stride"]
         self.torchsim_element_size = tile_info["element_size"]
         self.torchsim_tag_idx_list = tile_info["tag_idx_list"]
         self.torchsim_tag_stride_list = tile_info["tag_stride_list"]
         self.torchsim_loop_idx_list = tile_info["loop_idx_list"]
+        self.torchsim_loop_stride_list = tile_info["loop_stride_list"]
         self.torchsim_is_async = tile_info["is_async"]
         self.torchsim_indirect_mode = tile_info["indirect_mode"]
 
