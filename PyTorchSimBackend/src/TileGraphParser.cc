@@ -375,6 +375,10 @@ std::vector<std::shared_ptr<Tile>> TileLoopNode::get_tiles_from_iter(TileGraphPa
           accum_tag_list.push_back(iter_value);
         }
       }
+      /* Default accum tag */
+      if (accum_tag_list.empty()) {
+        accum_tag_list.push_back(0);
+      }
 
       for (auto loop_idx = loop_idx_list.begin();
             loop_idx != loop_idx_list.end(); ++loop_idx) {
@@ -526,6 +530,10 @@ std::vector<std::shared_ptr<Tile>> TileLoopNode::get_tiles_from_iter(TileGraphPa
           auto iter_value = getLoopIndexValue(iter, loop_idx) / tag_divider_list.at(i);
           tag_list.push_back(iter_value);
         }
+      }
+      /* Default accum tag */
+      if (accum_tag_list.empty()) {
+        accum_tag_list.push_back(0);
       }
 
       /* Skip accum stride */
