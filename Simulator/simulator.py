@@ -74,7 +74,7 @@ class FunctionalSimulator():
 
         return array_size, file_path
 
-    def run_spike(self, args, arg_attributes, runtime_path, binary, vectorlane_size=4, spad_info=None, cleanup=False):
+    def run_spike(self, args, arg_attributes, runtime_path, binary, vectorlane_size=4, spad_info=None, cleanup=False, silent_mode=False):
         load_path = runtime_path
         dump_path = runtime_path
 
@@ -101,8 +101,8 @@ class FunctionalSimulator():
         os.makedirs(os.path.join(runtime_path, "indirect_access"), exist_ok=True)
         os.makedirs(os.path.join(runtime_path, "dma_access"), exist_ok=True)
         run = f'spike --isa rv64gcv --varch=vlen:256,elen:64 {vectorlane_option} {spad_option} {kernel_address} {base_path} /workspace/riscv-pk/build/pk {target_binary} {file_path_str}'
-
-        print("[SpikeSimulator] cmd> ", run)
+        if not silent_mode:
+            print("[SpikeSimulator] cmd> ", run)
         run_cmd = shlex.split(run)
         try:
             subprocess.check_call(run_cmd)
@@ -146,7 +146,7 @@ class CycleSimulator():
     def __init__(self) -> None:
         pass
 
-    def compile_and_simulate(self, target_binary, array_size, vectorlane_size):
+    def compile_and_simulate(self, target_binary, array_size, vectorlane_size, silent_mode=False):
         def show_progress():
             i = 0
             while not finished:
@@ -160,7 +160,7 @@ class CycleSimulator():
         gem5_cmd = [extension_config.CONFIG_GEM5_PATH, "-r", "--stdout-file=sto.log", "-d", dir_path, extension_config.CONFIG_GEM5_SCRIPT_PATH, "-c", target_binary, "--vlane", str(vectorlane_size)]
         try:
             # Create progress thread
-            is_dryrun = int(os.environ.get('BACKENDSIM_DRYRUN', default=False))
+            is_dryrun = int(os.environ.get('BACKENDSIM_DRYRUN', default=False)) or silent_mode
             if not is_dryrun:
                 print("[Gem5Simulator] cmd> ", " ".join(gem5_cmd))
                 finished = False
@@ -202,7 +202,7 @@ class BackendSimulator():
         cmd = f"{bin} --config {config}"
         return cmd
 
-    def simulation(self, model_path, attribute_path=""):
+    def simulation(self, model_path, attribute_path="", silent_mode=False):
         def show_progress():
             i = 0
             while not finished:
@@ -216,21 +216,25 @@ class BackendSimulator():
             cmd += f" --log_level {extension_config.CONFIG_BACKENDSIM_DEBUG_LEVEL}"
         if attribute_path:
             cmd = f"{cmd} --attributes_list {attribute_path}"
-        print("[BackendSimulator] cmd> ", cmd)
+        if not silent_mode:
+            print("[BackendSimulator] cmd> ", cmd)
 
         # Create progress thread
-        finished = False
-        progress_thread = threading.Thread(target=show_progress)
-        progress_thread.start()
+        if not silent_mode:
+            finished = False
+            progress_thread = threading.Thread(target=show_progress)
+            progress_thread.start()
         try:
             result = subprocess.check_output(shlex.split(cmd))
-            finished = True
-            progress_thread.join()
+            if not silent_mode:
+                finished = True
+                progress_thread.join()
         except subprocess.CalledProcessError as e:
-            finished = True
-            progress_thread.join()
-            print("[BackendSimulator] Command failed with exit code", e.returncode)
-            print("[BackendSimulator] Error output:", e.output)
+            if not silent_mode:
+                finished = True
+                progress_thread.join()
+                print("[BackendSimulator] Command failed with exit code", e.returncode)
+                print("[BackendSimulator] Error output:", e.output)
             assert 0
         result_path = extension_config.CONFIG_BACKEND_RESULT_PATH_KEY
         if result_path is None:
@@ -242,7 +246,7 @@ class BackendSimulator():
         result_path = os.path.join(result_path, file_name)
         with open(result_path, "w") as f:
             f.write(result.decode())
-            print(f'[BackendSimulator] Simulation of "{model_path}" is stored to "{result_path}"')
+        print(f'[BackendSimulator] Simulation of "{model_path}" is stored to "{result_path}"')
         return result_path
 
     def interactive_simulation(self):

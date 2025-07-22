@@ -50,7 +50,7 @@ class MLIRBenchmarkRequest():
             self.source_code, vectorlane_size=self.extra_args["vector_lane"],
             loop_size=None, spad_info=self.extra_args["spad_info"],
             vlen=self.extra_args["vlen"], arg_attributes=self.extra_args["arg_attributes"],
-            origins="Unknown")
+            origins="Unknown", silent_mode=True)
 
         args = [
             tensor

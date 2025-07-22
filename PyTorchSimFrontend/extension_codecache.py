@@ -159,7 +159,7 @@ class MLIRCodeCache:
              cycle_wrapper_name="cycle_wrapper",
              cycle_binary_name="cycle_bin",
              arg_attributes=[], vectorlane_size=16,
-             spad_info=None, origins=None, **kwargs):
+             spad_info=None, origins=None, silent_mode=False, **kwargs):
         vlen = kwargs['vlen']
         vlenb = vlen // 8
         write_path = get_write_path(source_code)
@@ -239,7 +239,7 @@ class MLIRCodeCache:
 
             # Run cyclesim
             cyclesim = CycleSimulator()
-            cycle_list = cyclesim.compile_and_simulate(os.path.join(write_path, cycle_binary_name), " ".join(array_size), vectorlane_size)
+            cycle_list = cyclesim.compile_and_simulate(os.path.join(write_path, cycle_binary_name), " ".join(array_size), vectorlane_size, silent_mode=silent_mode)
 
             # Create TOG
             w_offset, x_offset = vectorlane_size, vectorlane_size
@@ -335,13 +335,14 @@ class CustomAsyncCompile(AsyncCompile):
         self.cycle_wrapper_name = "cycle_wrapper"
         self.cycle_binary_name = "cycle_binary"
 
-    def mlir(self, source_code, arg_attributes=[], vectorlane_size=16, tile_size=[], spad_info=None, origins=None, **kwargs):
+    def mlir(self, source_code, arg_attributes=[], vectorlane_size=16, tile_size=[], spad_info=None, origins=None, silent_mode=False, **kwargs):
         def task():
             key = MLIRCodeCache.load(source_code,
                                           valdiation_wrapper_name=self.validation_binary_name,
                                           validation_binary_name=self.validation_binary_name,
                                           arg_attributes=arg_attributes, vectorlane_size=vectorlane_size,
-                                          tile_size=tile_size, spad_info=spad_info, origins=origins, **kwargs)
+                                          tile_size=tile_size, spad_info=spad_info, origins=origins,
+                                          silent_mode=silent_mode, **kwargs)
             return key
         future = self.submit(task)
         if "loop_size" in kwargs:
@@ -363,7 +364,7 @@ class CustomAsyncCompile(AsyncCompile):
                 funcsim.run_spike(args, arg_attributes,
                                   runtime_path, self.validation_binary_name,
                                   vectorlane_size=vectorlane_size, spad_info=spad_info,
-                                  cleanup=extension_config.CONFIG_CLEANUP_DUMP_ARGS)
+                                  cleanup=extension_config.CONFIG_CLEANUP_DUMP_ARGS, silent_mode=silent_mode)
             if extension_config.CONFIG_BACKENDSIM_SPIKE_ONLY:
                 return
 
@@ -373,7 +374,7 @@ class CustomAsyncCompile(AsyncCompile):
             backsim = BackendSimulator(backend_path, extension_config.CONFIG_TORCHSIM_BACKEND_CONFIG)
             backsim.vectorlane_size = vectorlane_size
             attribute_path = backsim.create_attribute_file(attribute_path, args, loop_size=loop_size)
-            result_path = backsim.simulation(onnx_path, attribute_path)
+            result_path = backsim.simulation(onnx_path, attribute_path, silent_mode=silent_mode)
             result = BackendSimulator.get_result_from_file(result_path)
             return result
 
