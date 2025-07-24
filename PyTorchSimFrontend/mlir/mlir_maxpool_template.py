@@ -8,26 +8,21 @@ from torch._inductor.ir import IRNode
 from torch._inductor.ir import ReinterpretView
 from torch._inductor.codecache import write_atomic
 import PyTorchSimFrontend.extension_codecache as extension_codecache
+from PyTorchSimFrontend.mlir import mlir_common
+import sympy
 
 # This template only represents the DMA operations
-TEMPLATE = r"""#map0 = affine_map<(d0, d1) -> (d0 * {{ W }} + d1)>
-memref.global @X_spad : memref<{{ in_tile }}x{{ in_tile }}xf32, 1>
-memref.global @Y_spad : memref<{{ out_tile }}x{{ out_tile }}xf32, 1>
+TEMPLATE = r"""
+{{kernel.def_global_vars()}}
 
-func.func @{{ KERNEL_NAME }} {{kernel.def_kernel(inputs=[X], outputs=[Y], names_str="X, Y")}} {
-  %c_mvin = arith.constant 2 : index
-  %c_mvout = arith.constant 3 : index
-  %axis = arith.constant 1 : index
-  %vstride = arith.constant 1 : index
-  %X_buffer = memref.get_global @X_spad : memref<{{ in_tile }}x{{ in_tile }}xf32, 1>
-  %Y_buffer = memref.get_global @Y_spad : memref<{{ out_tile }}x{{ out_tile }}xf32, 1>
-  %tag = memref.alloc() : memref<1xi32>
-  %c0 = arith.constant 0 : index
-  affine.for %i = 0 to {{ BCH }} step {{ out_tile }} {
-    affine.for %j = 0 to {{ W }} step {{ out_tile }} {
-      %index0 = affine.apply #map0(%i, %j)
-      memref.dma_start %X[%index0], %X_buffer[%c0, %c0], %c_mvin, %tag[%c0], %axis, %vstride : memref<{{ IN }}xf32>, memref<{{ in_tile }}x{{ in_tile }}xf32, 1>, memref<1xi32> {dram_stride=[{{W}}, 1]}
-      memref.dma_start %Y_buffer[%c0, %c0], %Y[%index0], %c_mvout, %tag[%c0], %axis, %vstride : memref<{{ out_tile }}x{{ out_tile }}xf32, 1>, memref<{{ OUT }}xf32>, memref<1xi32> {dram_stride=[{{W}}, 1]}
+func.func @{{ KERNEL_NAME }} {{kernel.def_kernel(inputs=[X], outputs=[Y], names_str="X, Y", input_reorder=input_reorder)}} {
+  {{ kernel.def_sram_buffer("X", X_tile_desc, indent_size=2) }}
+  {{ kernel.def_sram_buffer("Y", Y_tile_desc, indent_size=2) }}
+  {{- kernel.def_local_vars(indent_size=2) }}
+  affine.for %index0 = 0 to {{ BCH }} step {{ out_tile }} {
+    affine.for %index1 = 0 to {{ W }} step {{ out_tile }} {
+      {{ kernel.def_dma_op("MVIN", "X", X_idx, X_tile_desc, indent_size=6) }}
+      {{ kernel.def_dma_op("MVOUT", "Y", Y_idx, Y_tile_desc, indent_size=6) }}
     } { outer_loop=true }
   } { outer_loop=true }
   return
@@ -35,8 +30,8 @@ func.func @{{ KERNEL_NAME }} {{kernel.def_kernel(inputs=[X], outputs=[Y], names_
 """
 
 class MLIRMaxPoolTemplate(MLIRTemplate):
-    def __init__(self, input_nodes, layout, kernel_size, stride, padding, dilation, ceil_mode):
-        super().__init__("kernel", input_nodes, layout)
+    def __init__(self, input_nodes, layout, kernel_size, stride, padding, dilation, ceil_mode, input_reorder=None):
+        super().__init__("kernel", input_nodes, layout, input_reorder)
         self.kernel_size = kernel_size
         self.stride = stride
         self.padding = padding
@@ -63,26 +58,46 @@ class MLIRMaxPoolTemplate(MLIRTemplate):
         BCH = B * C * H
         kernel.loop_size = None
 
+        # Prepare tile descriptors
+        vlane_stride = 1 # Used dummy value
+        vlane_split_axis = 1
+        X_tile_size = [in_tile, in_tile]
+        X_tile_stride = [1, in_tile]
+        X_tile_desc = mlir_common.MLIRMultiDimTile(X_tile_size, kernel.vector_lane, vlane_split_axis, vlane_stride)
+        X_tile_desc.set_tile_size_stride(X_tile_size, X_tile_stride)
+        X_tile_desc.set_name("X_buffer")
+        X_idx = [sympy.Symbol("index0"), sympy.Symbol("index1")*W] # To keep index arguemnt order, we used index_list
+
+        Y_tile_size = [out_tile, out_tile]
+        Y_tile_stride = [1, out_tile]
+        Y_tile_desc = mlir_common.MLIRMultiDimTile(X_tile_size, kernel.vector_lane, vlane_split_axis, vlane_stride)
+        Y_tile_desc.set_tile_size_stride(Y_tile_size, Y_tile_stride)
+        Y_tile_desc.set_name("W_buffer")
+        Y_idx = [sympy.Symbol("index0"), sympy.Symbol("index1")*W]
+
         kernel.render_options = dict(
             KERNEL_NAME=self.name,
             kernel=kernel,
-            IN=X.get_numel(),
-            OUT=Y.get_numel(),
             X=X,
             Y=Y,
             BCH=BCH,
             W=W,
-            in_tile=in_tile,
             out_tile=out_tile,
-            DATA_STYPE="f32",
+            X_idx = X_idx,
+            Y_idx = Y_idx,
+            X_tile_desc = X_tile_desc,
+            Y_tile_desc = Y_tile_desc,
+            input_reorder = self.input_reorder
         )
         kernel.epilogue_info = dict(
             output_node = self.output_node.name,
             sram_var = "Y_buffer",
             dram_var = "Y",
+            dram_tile_desc = Y_tile_desc,
         )
+        kernel.exception_nodes["Y"] = {"numel" : Y.get_numel()}
         code = self._template_from_string(TEMPLATE).render(**kernel.render_options)
-        kernel.add_loop_info([kernel.render_options["IN"]], [kernel.vector_lane, kernel.vector_lane])
+        kernel.add_loop_info([X.get_numel()], [kernel.vector_lane, kernel.vector_lane])
         return code
 
     def codegen_header(self, code, extra_headers):
