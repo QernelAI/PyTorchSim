@@ -40,7 +40,7 @@ class MLIRScheduling(BaseScheduling):
         if not (isinstance(node1, (SchedulerNode, FusedSchedulerNode)) and isinstance(node2, (SchedulerNode, FusedSchedulerNode))):
             return False
 
-        if len(base_template_node1) == 1 and len(base_template_node2) == 0 and extension_config.CONFIG_FUSION_REDUCTION:
+        if len(base_template_node1) == 1 and len(base_template_node2) == 0 and extension_config.CONFIG_FUSION_REDUCTION_EPILOGUE:
             from PyTorchSimFrontend.mlir.mlir_gemm_template import MLIRGemmTemplate
             from PyTorchSimFrontend.mlir.mlir_bmm_template import MLIRBMMTemplate
             if (isinstance(base_template_node1[0].node.template, MLIRGemmTemplate) or isinstance(base_template_node1[0].node.template, MLIRBMMTemplate)) and node2.is_reduction():
@@ -95,7 +95,7 @@ class MLIRScheduling(BaseScheduling):
         _, (vars2, reduce2) = node2.group
 
         # Reduction is currently not supported
-        if node1.is_reduction() and node2.is_reduction() and not node1.is_template() and not node2.is_template():
+        if node1.is_reduction() and node2.is_reduction() and not node1.is_template() and not node2.is_template() and extension_config.CONFIG_FUSION_REDUCTION_REDUCTION:
             return vars1 == vars2 and reduce1 == reduce2 and node1.inverse_users == node2.inverse_users
         if node1.is_reduction() or node2.is_reduction():
             return False

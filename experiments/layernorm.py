@@ -39,6 +39,7 @@ if __name__ == "__main__":
     result_path = os.path.join(base_dir, args.dump_path, config_prefix, f"LayerNorm_{size_str}_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}")
     # setting environment variables
     os.environ['TORCHSIM_DUMP_PATH'] = result_path
+    os.environ['TORCHSIM_FUSION_REDUCTION_REDUCTION'] = "0"
     # only timing simulation
     os.environ['TORCHSIM_VALIDATION_MODE'] = "0"
     if 'BACKENDSIM_SPIKE_ONLY' in os.environ:

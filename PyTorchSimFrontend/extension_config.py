@@ -68,7 +68,8 @@ CONFIG_SUBTILE_N = int(os.environ.get('TORCHSIM_SUBTILE_N', default=CONFIG_VECTO
 CONFIG_SUBTILE_K = int(os.environ.get('TORCHSIM_SUBTILE_K', default=CONFIG_VECTOR_LANE))
 
 # Advanced fusion options
-CONFIG_FUSION_REDUCTION = int(os.environ.get('TORCHSIM_FUSION_REDUCTION', default=True))
+CONFIG_FUSION_REDUCTION_EPILOGUE = int(os.environ.get('TORCHSIM_FUSION_REDUCTION_EPILOGUE', default=True))
+CONFIG_FUSION_REDUCTION_REDUCTION = int(os.environ.get('TORCHSIM_FUSION_REDUCTION_REDUCTION', default=True))
 CONFIG_FUSION_PROLOGUE = int(os.environ.get('TORCHSIM_FUSION_PROLOGUE', default=True))
 
 # SRAM Buffer allocation plan
