@@ -15,7 +15,7 @@ from PyTorchSimFrontend.mlir.mlir_conv_mt_template import MLIRConvMultiTileTempl
 from PyTorchSimFrontend.mlir.mlir_conv_sb_template import MLIRConvSingleBatchTemplate
 from PyTorchSimFrontend.mlir.mlir_conv_sbs_template import MLIRConvSingleBatchStridedTemplate
 from PyTorchSimFrontend.mlir.mlir_maxpool_template import MLIRMaxPoolTemplate
-from PyTorchSimFrontend.extension_config import CONFIG_VECTOR_LANE
+from PyTorchSimFrontend.extension_config import CONFIG_VECTOR_LANE, CONFIG_USE_TIMING_POOLING
 
 aten = torch.ops.aten
 aten_spmm = MLIRExternKernelChoice(torch.sparse.mm, "custom_op::sparse_addmm")
@@ -180,4 +180,5 @@ lowerings.update({getattr(aten.addmm, overload): tuned_addmm for overload in ate
 lowerings.update({getattr(aten.convolution, overload): convolution for overload in aten.convolution.overloads()})
 lowerings.update({getattr(aten.bmm, overload): tuned_bmm for overload in aten.bmm.overloads()})
 lowerings.update({getattr(aten._sparse_addmm, overload): sparse_addmm for overload in aten._sparse_addmm.overloads()})
-#lowerings.update({getattr(aten.max_pool2d_with_indices, overload): custom_maxpool for overload in aten.max_pool2d_with_indices.overloads()}) # FIXME: maxpool should be implemented as a template
+if CONFIG_USE_TIMING_POOLING:
+    lowerings.update({getattr(aten.max_pool2d_with_indices, overload): custom_maxpool for overload in aten.max_pool2d_with_indices.overloads()}) # FIXME: maxpool should be implemented as a template

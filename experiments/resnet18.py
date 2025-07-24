@@ -29,7 +29,7 @@ if __name__ == "__main__":
     import os
     import sys
     base_dir = os.environ.get('TORCHSIM_DIR', default='/workspace/PyTorchSim')
-    config = os.environ.get('TORCHSIM_CONFIG', default=f'{base_dir}/PyTorchSimBackend/configs/systolic_ws_128x128_c2_simple_noc_tpuv4.json')
+    config = os.environ.get('TORCHSIM_CONFIG', default=f'{base_dir}/PyTorchSimBackend/configs/systolic_ws_128x128_c1_simple_noc_tpuv3.json')
     config_prefix = config.split('/')[-1].split('.')[0][9:] # extract config name from config path
     sys.path.append(base_dir)
     args = argparse.ArgumentParser()
@@ -40,6 +40,7 @@ if __name__ == "__main__":
     result_path = os.path.join(base_dir, args.dump_path, config_prefix, f"resnet18_{batch}_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}")
     # setting environment variables
     os.environ['TORCHSIM_DUMP_PATH'] = result_path
+    os.environ['TORCHSIM_USE_TIMING_POOLING'] = "1"
     # only timing simulation
     os.environ['TORCHSIM_VALIDATION_MODE'] = "0"
     if 'BACKENDSIM_SPIKE_ONLY' in os.environ:
