@@ -194,7 +194,7 @@ class MLIRConvSingleBatchStridedTemplate(MLIRTemplate):
         # Prepare tile descriptors
         vlane_stride = 1
         vlane_split_axis = 1
-        X_tile_size = [TILE_I_H, TILE_K_H, TILE_M, TILE_K]
+        X_tile_size = [TILE_I_H, TILE_K_W, TILE_M, TILE_K]
         X_tile_stride = [TILE_K_W*TILE_M*TILE_K, TILE_M*TILE_K, 1, TILE_M]
         X_tile_desc = mlir_common.MLIRMultiDimTile(X_tile_size, kernel.vector_lane, 3, vlane_stride)
         X_tile_desc.set_tile_size_stride(X_tile_size, X_tile_stride)
