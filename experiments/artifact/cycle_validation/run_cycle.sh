@@ -17,6 +17,10 @@ done
 
 # Conv
 for sz in \
+  "1 56 56 64 64 3 1 1" \
+  "1 28 28 128 128 3 1 1" \
+  "1 14 14 256 256 3 1 1" \
+  "1 7 7 512 512 3 1 1" \
   "64 56 56 64 64 3 1 1" \
   "64 28 28 128 128 3 1 1" \
   "64 14 14 256 256 3 1 1" \
@@ -78,4 +82,4 @@ for model in "base" "large" "xlarge"; do
 done
 
 # Cycle Summary
-python3 $TORCHSIM_DIR/experiments/artifact/summary_cycle.py
+python3 $TORCHSIM_DIR/experiments/artifact/cycle_validation/summary_cycle.py | tee "$TORCHSIM_DIR/experiments/artifact/cycle_validation/summary_cycle.out"
