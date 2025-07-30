@@ -86,7 +86,7 @@ if __name__ == "__main__":
         if file.endswith(".log"):
             full_path = os.path.join(LOG_DIR, file)
             name = file[:-4]
-            with open(full_path) as f:
+            with open(full_path, errors="ignore") as f:
                 for line in f:
                     match = re.search(r"Total execution cycle:\s*([0-9]+)", line)
                     if match:

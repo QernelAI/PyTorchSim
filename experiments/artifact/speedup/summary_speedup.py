@@ -103,7 +103,7 @@ if __name__ == "__main__":
                 name = name +"sn"
             else:
                 raise ValueError(f"Unsupported file name format: {file}")
-            with open(full_path) as f:
+            with open(full_path, errors="ignore") as f:
                 for line in f:
                     match = re.search(r"Average simulation time\s*=\s*([0-9]+(?:\.[0-9]+)?)", line)
                     if match:
