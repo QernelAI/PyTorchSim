@@ -961,7 +961,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         index = self.apply_cse.generate(buffer, f"affine.apply #{map_var}({args})[{','.join(indirect_args)}] {comments}")
         return index
 
-    def parse_index_list(self, expr_list:list, buffer=None) -> common.CSEVariable:
+    def parse_index_list(self, expr_list:list, buffer=None, offset=sympy.Number(0)) -> common.CSEVariable:
         if buffer is None:
             buffer = self.applys
         zero_var = self.get_const_cse(0)
@@ -970,8 +970,8 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
 
         if len(expr_list) == 1 and expr_list[0].is_number:
             # Constant case
-            return self.get_const_cse(int(expr_list[0]))
-        elif len(expr_list) == 1 and expr_list[0].is_symbol:
+            return self.get_const_cse(int(expr_list[0] + offset))
+        elif len(expr_list) == 1 and expr_list[0].is_symbol and int(offset) == 0:
             # Identity case
             return expr_list[0]
 
@@ -993,7 +993,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
                 indices.append(str(new_arg))
 
         # Extract index var
-        expr_str = str(sum(new_expr_list))
+        expr_str = str(sum(new_expr_list) + offset)
         args = ", ".join(map(str, dim_list))
         map_var = self.map_cse.generate(self.global_vars, f"affine_map<({args})[] -> ({expr_str})>")
         args = ", ".join([f"%{i}" for i in indices])
@@ -1254,13 +1254,10 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
     def indirect_indexing(self, index_var, size, check=True):
         return str(index_var)
 
-    def _index_expr(self, tile_size, renamed_expression, index, base_vector_index):
-        tile_desc = self.kernel_group.tile_desc
+    def _index_expr(self, tile_desc, renamed_expression, index, base_vector_index):
+        tile_size = tile_desc.get_tile_size_per_lane()
         compute_vec_size = tile_desc.get_compute_vec_size()
-
-        strides = [1] * len(tile_size)
-        for i in range(len(tile_size) - 2, -1, -1):
-            strides[i] = strides[i + 1] * tile_size[i + 1]
+        strides = tile_desc.get_tile_stride_per_lane()
 
         # Create vector index
         compute_vec = self.cse.generate(self.compute, f"vector.broadcast %{self.compute_idx} : index to vector<{compute_vec_size}xindex>")
@@ -1278,7 +1275,25 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
             self.register_var_info(mod_vec, [compute_vec_size, "index"])
             dim = ops.modular(ops.div(vector_index, div_vec), mod_vec)
             if idx == tile_desc.vlane_split_axis: # Need to add vector lane offset
-                offset = tile_desc.vlane_stride * strides[idx]
+                offset = tile_desc.vlane_stride #* strides[idx]
+                outer_sz = tile_size[idx] // tile_desc.vlane_stride
+
+                nr_vector_lane = self.get_const_cse(self.vector_lane, "index")
+                nr_vector_lane_vec = self.const_cse.generate(self.const_buffer, f"vector.broadcast %{nr_vector_lane} : index to vector<{compute_vec_size}xindex>")
+                self.register_var_info(nr_vector_lane_vec, [compute_vec_size, "index"])
+
+                vlane_stride_coeff = self.get_const_cse(tile_desc.vlane_stride, "index")
+                vlane_outer_coeff = self.get_const_cse(outer_sz, "index")
+                vlane_stride_vec = self.const_cse.generate(self.const_buffer, f"vector.broadcast %{vlane_stride_coeff} : index to vector<{compute_vec_size}xindex>")
+                vlane_outer_vec = self.const_cse.generate(self.const_buffer, f"vector.broadcast %{vlane_outer_coeff} : index to vector<{compute_vec_size}xindex>")
+                self.register_var_info(vlane_stride_vec, [compute_vec_size, "index"])
+                self.register_var_info(vlane_outer_vec, [compute_vec_size, "index"])
+                stride_dim = ops.modular(dim, vlane_stride_vec)
+                outer_dim = ops.modular(ops.div(dim, vlane_stride_vec), vlane_outer_vec)
+
+                dim = ops.add(stride_dim, ops.mul(outer_dim, nr_vector_lane_vec))
+
+                # Prepare vlane offset (vidx)
                 vlane_coeff = self.get_const_cse(0, "i64")
                 vlane_vec_size = 4
                 vlane_vec = self.const_cse.generate(self.const_buffer, f"vector.broadcast %{vlane_coeff} : i64 to vector<{vlane_vec_size}xi64>")
@@ -1286,6 +1301,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
                 self.register_var_info(vlane_offset, [vlane_vec_size, "i64"])
                 vlane_offset = ops.index_cast(vlane_offset, "index")
                 self.register_var_info(vlane_offset, [vlane_vec_size, "index"])
+
                 dim = ops.add(dim, vlane_offset)
             dim_list.append(dim)
 
@@ -1296,6 +1312,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
             self.register_var_info(index_vec, [compute_vec_size, "index"])
             offset = ops.add(index_vec, dim_list[i])
             dim_list[i] = offset
+
         arg_lists = []
         for arg in renamed_expression.args:
             if isinstance(arg, sympy.Integer):
@@ -1330,23 +1347,37 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         return accum
 
     def index_expr(self, index, dtype):
-        tile_desc = self.kernel_group.tile_desc
-        tile_size = tile_desc.get_tile_size_per_lane()
-        mlir_dtype = mlir_common.DTYPE_TO_MLIR[dtype]
-        str_tile_size = [str(dim) for dim in tile_size]
+        base_tile_desc = self.kernel_group.tile_desc
+        if len(self.ranges) != self.reduction_depth:
+            # FIXME. This is a temporary solution to get tile stride of the reduction case
+            tile_desc = mlir_common.MLIRMultiDimTile(
+                base_tile_desc.get_tile_size(),
+                base_tile_desc.vector_lane,
+                base_tile_desc.vlane_split_axis,
+                base_tile_desc.vlane_stride,
+                base_tile_desc.get_compute_vec_size(),
+            )
+            axis_order = list(range(len(tile_desc.get_tile_size())))
+            axis_order = axis_order[1:] + axis_order[:1]  # Move the first axis to the end
+            tile_desc.set_tile_size(tile_desc.get_tile_size(), axis_order)
+        else:
+            tile_desc = base_tile_desc
         compute_vec_size = tile_desc.get_compute_vec_size()
-        tile_shape = f"memref<{compute_vec_size}xi64, 1>"
-        vshape = f"vector<{compute_vec_size}xi64>"
+
+
+        tile_shape = f"memref<{compute_vec_size*self.vector_lane}xindex, 1>"
+        vshape = f"vector<{compute_vec_size}xindex>"
 
         # Create base_vector index var
         c_type = "uint64_t"
         new_name = f"index_expr_{compute_vec_size}"
         if new_name not in self.global_vars_dict:
-            self.header.writeline(f"{c_type} {new_name}_spad[{compute_vec_size}] __attribute__ ((section(\".spad\")));")
+            self.header.writeline(f"{c_type} {new_name}_spad[{compute_vec_size*self.vector_lane}] __attribute__ ((section(\".spad\")));")
             self.gem5_header.writeline(f"{c_type} {new_name}_spad[{compute_vec_size}] __attribute__((aligned(64)));")
             self.global_vars.writeline(f"memref.global @{new_name}_spad : {tile_shape}")
             self.global_vars_dict[new_name] = dict()
         sram_var = self.spad_cse.generate(self.spad_buffer, f"memref.get_global @{new_name}_spad : {tile_shape}")
+
         # Initialize base vector
         if not self.base_vector_initialized:
             init_iter = "iter"
@@ -1354,20 +1385,17 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
             self.spad_buffer.writeline(parallel_map)
             with self.spad_buffer.indent():
                 self.spad_buffer.writeline(f"%init_vec = vector.broadcast %{init_iter} : index to vector<2xindex>")
-                self.spad_buffer.writeline(f"%init_cvt_vec = arith.index_cast %init_vec : vector<2xindex> to vector<2xi64>")
-                self.spad_buffer.writeline(f"affine.vector_store %init_cvt_vec, %{sram_var}[%{init_iter}] : {tile_shape}, vector<2xi64>")
+                self.spad_buffer.writeline(f"affine.vector_store %init_vec, %{sram_var}[%{init_iter}] : {tile_shape}, vector<2xindex>")
             self.spad_buffer.writeline("}")
             self.base_vector_initialized = True
 
         line = f"affine.vector_load %{sram_var}[0] : {tile_shape}, {vshape}"
-        out = self.cse.generate(self.compute, line)
-        self.register_var_info(out, [compute_vec_size, "i64"])
-        base_vector_index = ops.index_cast(out, "index")
+        base_vector_index = self.cse.generate(self.compute, line)
         self.register_var_info(base_vector_index, [compute_vec_size, "index"])
 
         renamed_symbols = {symbol: "d"+str(symbol)[5:] for symbol in index.free_symbols}
         renamed_expression = index.subs(renamed_symbols)
-        result = self._index_expr(tile_size, renamed_expression, index, base_vector_index)
+        result = self._index_expr(tile_desc, renamed_expression, index, base_vector_index)
         return result
 
     def codegen_global_init(self):

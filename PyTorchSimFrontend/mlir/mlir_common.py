@@ -193,6 +193,9 @@ class MLIRMultiDimTile():
         self.implicit_dim_size = None
         self.nr_rdim = 0
 
+        # Dram offset
+        self.offset = sympy.Integer(0)
+
     def set_name(self, name: str):
         self.name = name
 
@@ -246,6 +249,20 @@ class MLIRMultiDimTile():
 
     def get_tile_stride(self):
         return self._tile_stride
+
+    def get_tile_stride_per_lane(self):
+        tile_stride = list(self.get_tile_stride())  # original strides
+        tile_size = list(self.get_tile_size())      # original tile size
+        split_axis = self.vlane_split_axis
+
+        tile_size_per_lane = self.get_tile_size_per_lane()
+        coeff = tile_size[split_axis]//tile_size_per_lane[split_axis]
+
+        # Propagate stride according to per-lane tile size
+        for i in range(len(tile_stride)):
+            if tile_stride[i] > tile_stride[split_axis]:
+                tile_stride[i] = tile_stride[i] // coeff
+        return tile_stride
 
     def get_tile_size_per_lane(self):
         tile_size_per_lane = list(self._tile_size)

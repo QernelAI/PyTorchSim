@@ -64,7 +64,7 @@ func.func @{{ KERNEL_NAME }}{{kernel.def_conv_kernel(inputs=[X, W, BIAS], output
       affine.for %tile_m = 0 to {{ O_W }} step {{ TILE_M }} {
         // Initialize output
         {%- if BIAS %}
-        {{ kernel.def_dma_op("MVIN", "Bias", Bias_idx, Y_tile_desc, subtile_size=[1, SUB_TILE_N, TILE_O_H, SUB_TILE_M], indent_size=8) }}
+        {{ kernel.def_dma_op("MVIN", "Bias", Bias_idx, Bias_tile_desc, subtile_size=[1, SUB_TILE_N, TILE_O_H, SUB_TILE_M], indent_size=8) }}
         {%- else %}
         affine.vector_store %v0, %output_buffer[%c0, %c0, %c0, %c0] : {{ Y_tile_desc.get_mlir_shape(DATA_STYPE) }}, vector<{{ kernel.get_spad_size_per_lane(TILE_O_H * TILE_M, TILE_N) }}xf32>
         {%- endif %}
@@ -219,6 +219,11 @@ class MLIRConvSingleBatchStridedTemplate(MLIRTemplate):
 
         # Extract Bias info
         Bias_idx = [Number(0), Symbol("tile_n"), Number(0), Number(0)]
+        Bias_tile_desc = mlir_common.MLIRMultiDimTile(Y_tile_size, kernel.vector_lane, vlane_split_axis, vlane_stride)
+        Bias_tile_desc.set_tile_size_stride(Y_tile_size, Y_tile_stride)
+        Bias_tile_desc.set_name("output_buffer")
+        if Bias is not None:
+          Bias_tile_desc.offset = Bias.get_layout().offset
 
         kernel.render_options = dict(
             KERNEL_NAME=self.name,
@@ -257,6 +262,7 @@ class MLIRConvSingleBatchStridedTemplate(MLIRTemplate):
             X_tile_desc = X_tile_desc,
             W_tile_desc = W_tile_desc,
             Y_tile_desc = Y_tile_desc,
+            Bias_tile_desc = Bias_tile_desc,
             X_idx = X_idx,
             W_idx = W_idx,
             Bias_idx = Bias_idx,

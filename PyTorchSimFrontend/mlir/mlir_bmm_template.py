@@ -173,9 +173,9 @@ class MLIRBMMTemplate(MLIRTemplate):
 
         W_tensor =  empty_strided(W.layout.size, W.layout.stride)
         X_tensor =  empty_strided(X.layout.size, X.layout.stride)
-        if len(W_tensor.size()) > 3:
+        if len(W_tensor.size()) > 3 or len(W_tensor.size()) == 2:
           W_tensor = W_tensor.view([-1, W_tensor.shape[-2], W_tensor.shape[-1]])
-        if len(X_tensor.size()) > 3:
+        if len(X_tensor.size()) > 3 or len(X_tensor.size()) == 2:
           X_tensor = X_tensor.view([-1, X_tensor.shape[-2], X_tensor.shape[-1]])
         B, M, N, K = X_tensor.size()[0], X_tensor.size()[1], W_tensor.size()[2], X_tensor.size()[2]
 
@@ -217,6 +217,7 @@ class MLIRBMMTemplate(MLIRTemplate):
         X_tile_desc = mlir_common.MLIRMultiDimTile(X_tile_size, kernel.vector_lane, vlane_split_axis, vlane_stride)
         X_tile_desc.set_tile_size_stride(X_tile_size, X_tile_stride)
         X_tile_desc.set_name("X_buffer")
+        X_tile_desc.offset = X.get_layout().offset
         X_stride = X_tensor.stride()
         X_idx = [loop_dim[0]*X_stride[0], loop_dim[1]*X_stride[1], loop_dim[3]*X_stride[2]] # To keep index arguemnt order, we used index_list
 
@@ -225,6 +226,7 @@ class MLIRBMMTemplate(MLIRTemplate):
         W_tile_desc = mlir_common.MLIRMultiDimTile(X_tile_size, kernel.vector_lane, vlane_split_axis, vlane_stride)
         W_tile_desc.set_tile_size_stride(W_tile_size, W_tile_stride)
         W_tile_desc.set_name("W_buffer")
+        W_tile_desc.offset = W.get_layout().offset
         W_stride = W_tensor.stride()
         W_idx = [loop_dim[0]*W_stride[0], loop_dim[3]*W_stride[1], loop_dim[2]*W_stride[2]]
 
@@ -241,8 +243,12 @@ class MLIRBMMTemplate(MLIRTemplate):
           Y_idx = [loop_dim[0]*Y_stride[0], loop_dim[2]*Y_stride[2], loop_dim[1]*Y_stride[1]]
 
         # Extract Bias info
+        Bias_tile_desc = mlir_common.MLIRMultiDimTile(Y_tile_size, kernel.vector_lane, vlane_split_axis, vlane_stride)
+        Bias_tile_desc.set_tile_size_stride(Y_tile_size, Y_tile_stride)
+        Bias_tile_desc.set_name("Y_buffer")
         if Bias is not None:
           Bias_stride = Bias.get_layout().stride
+          Bias_tile_desc.offset = Bias.get_layout().offset
           if nr_rdim == 0:
             Bias_idx = [loop_dim[0]*Bias_stride[0], loop_dim[1]*Bias_stride[1], loop_dim[2]*Bias_stride[2]]
           else:

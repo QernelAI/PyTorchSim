@@ -663,7 +663,7 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
         # Prepare code block
         local_code = IndentedBuffer()
         with V.set_kernel_handler(self):
-            index_var = self.parse_index_list(index_list, local_code)
+            index_var = self.parse_index_list(index_list, local_code, offset=tile_desc.offset)
             node_layout = self.named_nodes[dram_var].get_layout()
             if dram_var in self.exception_nodes:
                 numel = self.exception_nodes[dram_var]["numel"]

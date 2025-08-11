@@ -35,7 +35,7 @@ func.func @{{ KERNEL_NAME }}{{kernel.def_kernel(inputs=[X, W, Bias], outputs=[Y]
   affine.for %index0 = 0 to {{ M }} step {{ TILE_M }} {
     affine.for %index1 = 0 to {{ N }} step {{ TILE_N }} {
       {%- if Bias %}
-      {{ kernel.def_dma_op("MVIN", "Bias", Bias_idx, Y_tile_desc, subtile_size=[SUB_TILE_M, SUB_TILE_N], indent_size=6) }}
+      {{ kernel.def_dma_op("MVIN", "Bias", Bias_idx, Bias_tile_desc, subtile_size=[SUB_TILE_M, SUB_TILE_N], indent_size=6) }}
       {%- else %}
       affine.vector_store %v0, %Y_buffer[0, 0] : {{ Y_tile_desc.get_mlir_shape(DATA_STYPE) }}, vector<{{ kernel.get_spad_size_per_lane(TILE_M, TILE_N) }}xf32>
       {%- endif %}
@@ -87,7 +87,7 @@ func.func @{{ KERNEL_NAME }}{{kernel.def_kernel(inputs=[X, W, Bias], outputs=[Y]
     affine.for %index0 = 0 to {{ M }} step {{ TILE_M }} {
       %Y_bufferT = memref.reinterpret_cast %Y_buffer to offset: [0], sizes: [{{ TILE_M }}, {{ TILE_N }}], strides: [{{ TILE_N }}, 1] : {{ Y_tile_desc.get_mlir_shape(DATA_STYPE) }} to memref<{{ TILE_M }}x{{ TILE_N }}xf32, 1>
       {%- if Bias %}
-      {{ kernel.def_dma_op("MVIN", "Bias", Bias_idx, Y_tile_desc, subtile_size=[SUB_TILE_M, SUB_TILE_N], indent_size=6) }}
+      {{ kernel.def_dma_op("MVIN", "Bias", Bias_idx, Bias_tile_desc, subtile_size=[SUB_TILE_M, SUB_TILE_N], indent_size=6) }}
       {%- else %}
       affine.vector_store %v0, %Y_buffer[0, 0] : memref<{{ TILE_N }}x{{ TILE_M }}xf32, 1>, vector<{{ kernel.get_spad_size_per_lane(TILE_M, TILE_N) }}xf32>
       {%- endif %}
@@ -164,6 +164,7 @@ class MLIRGemmTemplate(MLIRTemplate):
         X_tile_desc = mlir_common.MLIRMultiDimTile(X_tile_size, kernel.vector_lane, vlane_split_axis, vlane_stride)
         X_tile_desc.set_tile_size_stride(X_tile_size, X_tile_stride)
         X_tile_desc.set_name("X_buffer")
+        X_tile_desc.offset = X.get_layout().offset
         X_stride = X.get_layout().stride
         X_idx = [sympy.Symbol("index0") * X_stride[0], sympy.Symbol("index2") * X_stride[1]] # To keep index arguemnt order, we used index_list
 
@@ -172,6 +173,7 @@ class MLIRGemmTemplate(MLIRTemplate):
         W_tile_desc = mlir_common.MLIRMultiDimTile(X_tile_size, kernel.vector_lane, vlane_split_axis, vlane_stride)
         W_tile_desc.set_tile_size_stride(W_tile_size, W_tile_stride)
         W_tile_desc.set_name("W_buffer")
+        W_tile_desc.offset = W.get_layout().offset
         W_stride = W.get_layout().stride
         W_idx = [sympy.Symbol("index2") * W_stride[0], sympy.Symbol("index1") * W_stride[1]]
 
@@ -189,8 +191,12 @@ class MLIRGemmTemplate(MLIRTemplate):
 
         # Extract Bias info
         Bias = None if len(self.input_nodes) == 2 else self.input_nodes[2]
+        Bias_tile_desc = mlir_common.MLIRMultiDimTile(Y_tile_size, kernel.vector_lane, vlane_split_axis, vlane_stride)
+        Bias_tile_desc.set_tile_size_stride(Y_tile_size, Y_tile_stride)
+        Bias_tile_desc.set_name("Y_buffer")
         if Bias is not None:
           Bias_stride = Bias.get_layout().stride
+          Bias_tile_desc.offset = Bias.get_layout().offset
           if nr_rdim == 0:
             Bias_idx = [sympy.Symbol("index0") * Bias_stride[0], sympy.Symbol("index1") * Bias_stride[1]]
           else:
@@ -217,6 +223,7 @@ class MLIRGemmTemplate(MLIRTemplate):
             X_tile_desc = X_tile_desc,
             W_tile_desc = W_tile_desc,
             Y_tile_desc = Y_tile_desc,
+            Bias_tile_desc = Bias_tile_desc,
             epilogue_nodes = epilogue_nodes,
             prologue_nodes = prologue_nodes,
             input_reorder = self.input_reorder

@@ -3,7 +3,7 @@ import torch._dynamo
 import torch.utils.cpp_extension
 import argparse
 from torchvision import models
-from torchvision.models.vision_transformer import _vision_transformer
+from torchvision.models.vision_transformer import _vision_transformer, EncoderBlock
 
 def test_result(name, out, cpu_out, rtol=1e-4, atol=1e-4):
     if torch.allclose(out.cpu(), cpu_out, rtol=rtol, atol=atol):
@@ -33,9 +33,9 @@ def init_vit_weights(m):
 
     elif isinstance(m, torch.nn.LayerNorm):
         if m.weight is not None:
-            torch.nn.init.ones_(m.weight)
+            torch.nn.init.normal_(m.weight)
         if m.bias is not None:
-            torch.nn.init.zeros_(m.bias)
+            torch.nn.init.normal_(m.bias)
 
     elif isinstance(m, torch.nn.MultiheadAttention):
         # QKV projection
@@ -109,6 +109,84 @@ def test_multihead_attention(device, batch=1, seq_len=32, hidden_dim=768, num_he
     print("Max diff > ", torch.max(torch.abs(out_device.cpu() - out_cpu)))
     print("MultiheadAttention Simulation Done")
 
+def test_encoder_block(device, batch=1, seq_len=16, hidden_dim=768, num_heads=12, mlp_dim=3072, dropout=0.1, attention_dropout=0.1):
+    with torch.no_grad():
+        block = EncoderBlock(
+            num_heads=num_heads,
+            hidden_dim=hidden_dim,
+            mlp_dim=mlp_dim,
+            dropout=dropout,
+            attention_dropout=attention_dropout,
+        ).eval()
+
+        input_tensor = torch.randn(batch, seq_len, hidden_dim)
+
+        x_device = input_tensor.to(device=device)
+        x_cpu = input_tensor.cpu()
+
+        block.to(device)
+        opt_block = torch.compile(dynamic=False)(block)
+        out_device = opt_block(x_device)
+
+        cpu_block = block.cpu()
+        out_cpu = cpu_block(x_cpu)
+
+    test_result("EncoderBlock", out_device, out_cpu)
+    print("Max diff >", torch.max(torch.abs(out_device.cpu() - out_cpu)))
+    print("EncoderBlock Simulation Done")
+
+class EncoderWrapper(torch.nn.Module):
+    def __init__(self, encoder_block: torch.nn.Module, hidden_dim=768):
+        super().__init__()
+        self.encoder = encoder_block
+        self.class_token = torch.nn.Parameter(torch.ones(1, 1, hidden_dim)*99)
+        self.ln = torch.nn.LayerNorm(hidden_dim, eps=1e-6)
+
+    def forward(self, x):
+        n = x.shape[0]
+        batch_class_token = self.class_token.expand(n, 1, -1)
+        x = torch.cat([batch_class_token, x], dim=1)
+        #return self.ln(x)
+        return self.encoder(x)
+        #return torch.var_mean(x, dim=-1) #self.encoder(x)
+
+def test_encoder_block_with_class_token(
+    device,
+    batch=1,
+    seq_len=16,
+    hidden_dim=768,
+    num_heads=12,
+    mlp_dim=3072,
+    dropout=0.1,
+    attention_dropout=0.1,
+):
+    with torch.no_grad():
+        block = EncoderBlock(
+            num_heads=num_heads,
+            hidden_dim=hidden_dim,
+            mlp_dim=mlp_dim,
+            dropout=dropout,
+            attention_dropout=attention_dropout,
+        ).eval()
+        block.apply(init_vit_weights)
+
+        wrapper = EncoderWrapper(block).eval()
+
+        #input_tensor = torch.arange(seq_len).view(1, seq_len, 1).expand(batch, seq_len, hidden_dim).contiguous()
+        input_tensor = torch.randn(batch, seq_len, hidden_dim)
+
+        x_device = input_tensor.to(device)
+        wrapper.to(device)
+
+        opt_wrapper = torch.compile(wrapper, dynamic=False)
+        out_device = opt_wrapper(x_device)
+        wrapper_cpu = wrapper.cpu()
+        out_cpu = wrapper_cpu(input_tensor.cpu())
+
+    test_result("EncoderBlock with class token", out_device, out_cpu)
+    print("Max diff >", torch.max(torch.abs(out_device.cpu() - out_cpu)))
+    print("EncoderBlock with class token Simulation Done")
+
 if __name__ == "__main__":
     import os
     import sys
@@ -127,13 +205,15 @@ if __name__ == "__main__":
     from Scheduler.scheduler import ExecutionEngine
     module = ExecutionEngine.setup_device()
     device = module.custom_device()
-    test_multihead_attention(device)
-    #test_vit(
-    #    device,
-    #    batch=args.batch,
-    #    shape=shape,
-    #    num_layers=args.num_layers,
-    #    num_heads=args.num_heads,
-    #    hidden_dim=args.hidden_dim,
-    #    mlp_dim=args.mlp_dim
-    #)
+    #test_multihead_attention(device)
+    #test_encoder_block(device, seq_len=197)
+    #test_encoder_block_with_class_token(device, seq_len=196)
+    test_vit(
+        device,
+        batch=args.batch,
+        shape=shape,
+        num_layers=args.num_layers,
+        num_heads=args.num_heads,
+        hidden_dim=args.hidden_dim,
+        mlp_dim=args.mlp_dim
+    )

@@ -277,15 +277,15 @@ class MLIRScheduling(BaseScheduling):
                     vars, reduction_vars = kernel.set_ranges(group, reduction_group)
                     for node in prologue_nodes:
                         # Reuse created spad
-                        read_list = sorted(list(node.read_writes.reads))
+                        read_list = sorted([i.name for i in node.read_writes.reads])
                         candidate_found = False
                         # Why? There is a case that memdep.get_size() != data.get_size()
                         buf_dict = {}
                         buf_dict.update({val.name : val for val in V.graph.buffers})
                         buf_dict.update(V.graph.graph_inputs)
                         for candidate_read in read_list:
-                            if candidate_read.name in buf_dict and reduce(operator.mul, buf_dict[candidate_read.name].get_size(), 1) == node.node.get_numel():
-                                prologue_input_arg = candidate_read.name
+                            if candidate_read in buf_dict and reduce(operator.mul, buf_dict[candidate_read].get_size(), 1) == node.node.get_numel():
+                                prologue_input_arg = candidate_read
                                 candidate_found = True
                                 break
                         assert(candidate_found)
