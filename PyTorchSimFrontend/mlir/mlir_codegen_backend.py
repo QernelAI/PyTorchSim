@@ -433,7 +433,7 @@ class ExtensionOverrides(common.OpOverrides):
             val = ops.constant(0, op_type[1])
             var_info[val][0] = 4
             operand = ops.broadcast(operand, val)
-            val = ops.exp(operand)
+            val = ops.erf(operand)
             result = ops.extractelement(val, 0)
             return result, var_info[result]
         op_type = var_info[operand]
@@ -452,7 +452,7 @@ class ExtensionOverrides(common.OpOverrides):
             val = ops.constant(0, op_type[1])
             var_info[val][0] = 4
             operand = ops.broadcast(operand, val)
-            val = ops.exp(operand)
+            val = ops.tanh(operand)
             result = ops.extractelement(val, 0)
             return result, var_info[result]
         op_type = var_info[operand]
@@ -465,6 +465,54 @@ class ExtensionOverrides(common.OpOverrides):
             var_info[operand] = dtype
         shape = f"vector<{tile_size}x{dtype}>" if tile_size > 1 else dtype
         return f'math.tanh %{operand} : {shape}', [tile_size, dtype]
+
+    @staticmethod
+    def sin(operand, *args, var_info=None, **kwargs):
+        op_type = var_info[operand]
+
+        # Check scalar
+        op_type = var_info[operand]
+        if op_type[0] == 1:
+            val = ops.constant(0, op_type[1])
+            var_info[val][0] = 4
+            operand = ops.broadcast(operand, val)
+            val = ops.sin(operand)
+            result = ops.extractelement(val, 0)
+            return result, var_info[result]
+        op_type = var_info[operand]
+        tile_size = op_type[0]
+        dtype = op_type[1]
+
+        # Type check & auto cast
+        if dtype[0] != "f":
+            operand, dtype = ops.to_dtype(operand, "f32", var_info=var_info)
+            var_info[operand] = dtype
+        shape = f"vector<{tile_size}x{dtype}>" if tile_size > 1 else dtype
+        return f'math.sin %{operand} : {shape}', [tile_size, dtype]
+
+    @staticmethod
+    def cos(operand, *args, var_info=None, **kwargs):
+        op_type = var_info[operand]
+
+        # Check scalar
+        op_type = var_info[operand]
+        if op_type[0] == 1:
+            val = ops.constant(0, op_type[1])
+            var_info[val][0] = 4
+            operand = ops.broadcast(operand, val)
+            val = ops.cos(operand)
+            result = ops.extractelement(val, 0)
+            return result, var_info[result]
+        op_type = var_info[operand]
+        tile_size = op_type[0]
+        dtype = op_type[1]
+
+        # Type check & auto cast
+        if dtype[0] != "f":
+            operand, dtype = ops.to_dtype(operand, "f32", var_info=var_info)
+            var_info[operand] = dtype
+        shape = f"vector<{tile_size}x{dtype}>" if tile_size > 1 else dtype
+        return f'math.cos %{operand} : {shape}', [tile_size, dtype]
 
     @staticmethod
     def sqrt(operand, *args, var_info=None, **kwargs):

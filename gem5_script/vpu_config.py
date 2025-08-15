@@ -15,9 +15,11 @@ class SparseAccelerator(MinorFU):
 
 class SpecialFunctionUnit(MinorFU):
     opClasses = minorMakeOpClassSet([
-        "CustomMatMulvexp",
-        "CustomMatMulverf",
-        "CustomMatMulvtanh",
+        "CustomVexp",
+        "CustomVerf",
+        "CustomVtanh",
+        "CustomVsin",
+        "CustomVcos",
         ])
     opLat = 10
 
