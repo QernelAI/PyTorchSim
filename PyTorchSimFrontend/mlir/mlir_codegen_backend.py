@@ -115,7 +115,7 @@ class ExtensionWrapperCodegen(wrapper.WrapperCodeGen):
             def sram_plan_prefix(buffer_name, buffer):
                 if CONFIG_SRAM_BUFFER_PLAN and (buffer_name not in CONFIG_SRAM_BUFFER_PLAN):
                     return
-                buffer_size = buffer.element_size() * buffer.untyped_storage().size()
+                buffer_size = buffer.untyped_storage().size()
                 start = buffer.data_ptr()
                 end = start + buffer_size
                 # print(f'Alloc {{buffer_name}}(0x{{start:x}} ~ 0x{{end:x}})')
@@ -124,7 +124,7 @@ class ExtensionWrapperCodegen(wrapper.WrapperCodeGen):
             def sram_plan_postfix(buffer_name, buffer):
                 if CONFIG_SRAM_BUFFER_PLAN and (buffer_name not in CONFIG_SRAM_BUFFER_PLAN):
                     return
-                buffer_size = buffer.element_size() * buffer.untyped_storage().size()
+                buffer_size = buffer.untyped_storage().size()
                 start = buffer.data_ptr()
                 end = start + buffer_size
                 # print(f'Dealloc {{buffer_name}}(0x{{start:x}} ~ 0x{{end:x}})')
