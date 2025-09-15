@@ -299,7 +299,7 @@ class MLIRGemmTemplate(MLIRTemplate):
             TILE_K = tile_info["TILE_K"]
         else: # case 2: use gemm_combination_mapping
             min_tile = (n_extra_node + n_prologue_node) == 0
-            TILE_M, TILE_N, TILE_K = kernel.gemm_combination_mapping(M, N, K, max(len(n_extra_read)-2, 0), n_prologue_node, min_tile=min_tile)
+            TILE_M, TILE_N, TILE_K = kernel.gemm_combination_mapping(M, N, K, max(len(n_extra_read)-2, 0), n_prologue_node, min_tile=True)
         # case 3: use manual tile size
         if extension_config.CONFIG_MANUAL_TILE_SIZE:
             TILE_M = extension_config.CONFIG_TILE_M
