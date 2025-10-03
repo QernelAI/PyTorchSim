@@ -17,8 +17,7 @@ from torch._inductor.utils import (
     sympy_product
 )
 from torch.utils._sympy.functions import ModularIndexing, FloorDiv
-import PyTorchSimFrontend.extension_codecache as extension_codecache
-
+from PyTorchSimFrontend import extension_codecache
 from PyTorchSimFrontend import extension_config
 from . import mlir_common
 from .mlir_common import LoopLevel, LoopNest
@@ -1608,9 +1607,9 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         self.kernel_group.tile_desc.prev_tail_threshold = prev_tail_threshold
         return choices
 
-    def autotune(self, nodes, kernel_name):
+    def autotune(self, *args):
         def get_cycle(choice):
-            bench_runner, src_code, kernel_group = choice
+            bench_runner = choice[0]
             for n_try in range(extension_config.CONFIG_MAX_AUTOTUNE_TRY): # TODO: make simple
                 try:
                     # bench_runner = self.run_bench(nodes, kernel_name, src_code)
@@ -1619,7 +1618,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
                 except (extension_codecache.SpadOverflowError, RuntimeError) as e:
                     return float("inf")
             return float("inf") # Exceeded maximum number of autotuning attempts
-        choices = self.make_choices(nodes, kernel_name)
+        choices = self.make_choices(*args)
 
         if len(choices) == 0: # can't autotune
             return None
@@ -1635,14 +1634,11 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
     def codegen_nodes(self, nodes, kernel_name):
         src_code = super().codegen_nodes(nodes, kernel_name)
         self._prepare_simulator_headers(src_code)
-        if not extension_config.CONFIG_AUTOTUNE or extension_config.CONFIG_BACKENDSIM_SPIKE_ONLY:
-            return src_code
-        else:
+        if extension_config.CONFIG_AUTOTUNE and extension_config.CONFIG_BACKENDSIM_SPIKE_ONLY:
             optimal_src_code = self.autotune(nodes, kernel_name)
-            if optimal_src_code:
+            if optimal_src_code is not None:
                 return optimal_src_code
-            else:
-                return src_code
+        return src_code
 
     def _prepare_simulator_headers(self, src_code):
         write_path = extension_codecache.get_write_path(src_code)

@@ -4,8 +4,11 @@ import sympy
 from functools import reduce
 import operator
 from sympy import symbols, sympify, Symbol
+from collections import OrderedDict
+from concurrent.futures import ThreadPoolExecutor
 from PyTorchSimFrontend import extension_config
 from PyTorchSimFrontend.mlir.mlir_codegen_backend import MLIRKernel
+from PyTorchSimFrontend.mlir.mlir_autotune import MLIRBenchmarkRequest
 
 from torch._inductor import config
 from torch._inductor.scheduler import BaseScheduling, FusedSchedulerNode, SchedulerNode, BaseSchedulerNode
@@ -259,85 +262,6 @@ class MLIRScheduling(BaseScheduling):
             wrapper.define_kernel(kernel_name, codecache_def.getvalue(), cuda=False)
         return kernel_name
 
-    def codegen_template_code(self, kernel, render, template_node, prologue_nodes, epilogue_nodes):
-        with kernel:
-            _, _, _, kernel.buffer_types = self.kernel_group.args.mlir_argdefs()
-            for node in [template_node, *prologue_nodes, *epilogue_nodes]:
-                node.mark_run()
-            # Partial codgen template nodes
-            partial_code = render()
-
-            # Swap load/store functions
-            kernel.load = kernel.load_epilogue
-            kernel.store = kernel.store_epilogue
-            kernel.store_reduction = kernel.store_reduction_epilogue
-            kernel.reduction = kernel.reduction_epilogue
-
-            # Codegen prologue nodes
-            if prologue_nodes:
-                # Flush created varaibles, since template fusion doen't share variable
-                with kernel.prologue_buffer_group.as_local():
-                    _, (group, reduction_group) = max(
-                        [prologue_nodes[-1]], key=lambda x: int(x.is_reduction())
-                    ).group
-                    prologue_tile_desc = kernel.set_tile_size(kernel.prologue_info, prologue=True)
-                    kernel.kernel_group.set_tile_info(prologue_tile_desc)
-                    vars, reduction_vars = kernel.set_ranges(group, reduction_group)
-                    for node in prologue_nodes:
-                        # Reuse created spad
-                        read_list = sorted([i.name for i in node.read_writes.reads])
-                        candidate_found = False
-                        # Why? There is a case that memdep.get_size() != data.get_size()
-                        buf_dict = {}
-                        buf_dict.update({val.name : val for val in V.graph.buffers})
-                        buf_dict.update(V.graph.graph_inputs)
-                        for candidate_read in read_list:
-                            if candidate_read in buf_dict and reduce(operator.mul, buf_dict[candidate_read].get_size(), 1) == node.node.get_numel():
-                                prologue_input_arg = candidate_read
-                                candidate_found = True
-                                break
-                        assert(candidate_found)
-                        assert(len(node.read_writes.writes)==1)
-                        prologue_output_arg = list(node.read_writes.writes)[0].name
-                        template_buf = self.kernel_group.args.input_buffers[prologue_output_arg]
-                        target_buf = f"{template_buf}_buffer" # FIXME. How to pass spad buffer name?
-
-                        # To skip the dma code gen
-                        kernel.buffer_names[prologue_input_arg] = target_buf
-                        kernel.buffer_names[prologue_output_arg] = target_buf
-
-                        # Edge delete
-                        kernel.kernel_group.args.input_buffers = {
-                            (arg if buf != template_buf else prologue_input_arg): buf
-                            for arg, buf in kernel.kernel_group.args.input_buffers.items()
-                        }
-                        node.codegen((vars, reduction_vars))
-
-            # Codegen epilogue nodes
-            tile_desc = kernel.set_tile_size(kernel.epilogue_info)
-            kernel.kernel_group.set_tile_info(tile_desc)
-            kernel.call_ranges = None
-            if epilogue_nodes:
-                with kernel.epilogue_buffer_group.as_local():
-                    _, (group, reduction_group) = max(
-                        epilogue_nodes, key=lambda x: int(x.is_reduction())
-                    ).group
-                    vars, reduction_vars = kernel.set_ranges(group, reduction_group)
-                    for node in epilogue_nodes:
-                        node.codegen((vars, reduction_vars))
-
-        with V.set_kernel_handler(kernel):
-            src_code = (
-                partial_code
-                if isinstance(partial_code, str)
-                else partial_code.finalize()
-            )
-
-        # For consistency, white space could make wrong write_path
-        buffer = IndentedBuffer()
-        buffer.splice(src_code)
-        return buffer.getvalue()
-
     def codegen_template(self, template_node, epilogue_nodes):
         # Handle prologue pattern
         prologue_nodes = []
@@ -350,24 +274,13 @@ class MLIRScheduling(BaseScheduling):
                     epilogue_nodes = epilogue_nodes[i+1:]
                     break
 
-        _, (numel, rnumel) = template_node.group
+        # Generate template code
         template_buffer = template_node.node
         kernel, render, codegen_header = template_buffer.make_kernel_render(template_buffer, prologue_nodes=prologue_nodes, epilogue_nodes=epilogue_nodes, kernel_group=self.kernel_group)
         _, _, _, kernel.buffer_types = self.kernel_group.args.mlir_argdefs()
-
-        src_code = self.codegen_template_code(kernel, render, template_node, prologue_nodes, epilogue_nodes)
-        wrapper = V.graph.wrapper_code
-
-        if src_code in wrapper.src_to_kernel: # [CONV] check inner function is already defined
-            kernel_name = wrapper.src_to_kernel[src_code]
-            kernel, render, codegen_header = template_buffer.make_kernel_render(template_buffer, prologue_nodes=prologue_nodes, epilogue_nodes=epilogue_nodes, kernel_name=kernel_name) # update kernel name
-            src_code = self.codegen_template_code(kernel, render, template_node, prologue_nodes, epilogue_nodes)
+        src_code = kernel.codegen_nodes(render, codegen_header, template_node, prologue_nodes, epilogue_nodes)
 
         with V.set_kernel_handler(kernel):
-            spad_end_symbol = f"int spad_end[0] __attribute__ ((section(\".spad\")));\n"
-            spad_section_end_symbol = f"int spad_section_end[0] __attribute__ ((section(\".spad\"), aligned({kernel.spad_info['spad_size']*kernel.vector_lane})));"
-            codegen_header(src_code, (kernel.header.getvalue()+spad_end_symbol+spad_section_end_symbol, kernel.gem5_header.getvalue()))
-            kernel.meta_kernel()
             kernel_name = self.define_kernel(src_code, kernel.kernel_name, kernel.vector_lane, kernel.spad_info,
                                              kernel.loop_size, origins={str(i) for i in template_node.node.origins})
             self.define_function(kernel)

@@ -342,7 +342,7 @@ class MLIRConvMultiTileTemplate(MLIRTemplate):
     def codegen_header(self, code, extra_headers):
         write_path = extension_codecache.get_write_path(code)
         if not os.path.exists(write_path):
-            os.makedirs(write_path)
+            os.makedirs(write_path, exist_ok=True)
         spike_write_path = os.path.join(write_path, "global_var.h")
         gem5_write_path = os.path.join(write_path, "gem5_global_var.h")
         if not os.path.exists(spike_write_path):

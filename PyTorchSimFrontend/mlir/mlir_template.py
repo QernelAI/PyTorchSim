@@ -6,6 +6,8 @@ import os
 import contextlib
 import math
 import sympy
+from functools import reduce
+import operator
 from collections import OrderedDict
 
 from typing import List, Optional
@@ -25,7 +27,7 @@ from PyTorchSimFrontend.mlir.mlir_codegen_backend import MLIRKernel, reduction_i
 from PyTorchSimFrontend.mlir.mlir_scheduling import SchedulerNode
 from torch._inductor.codegen import common
 
-from PyTorchSimFrontend.extension_config import CONFIG_TORCHSIM_DIR
+from PyTorchSimFrontend.extension_config import CONFIG_TORCHSIM_DIR, CONFIG_AUTOTUNE_TEMPLATE, CONFIG_AUTOTUNE, CONFIG_BACKENDSIM_SPIKE_ONLY
 from . import mlir_common
 
 class IndentedBufferGroup:
@@ -93,7 +95,8 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
                  kernel_group = None,
                  outer_func_name=None,
                  outer_func_render=None,
-                 kernel_arg_attributes=None) -> None:
+                 kernel_arg_attributes=None,
+                 reason=None) -> None:
         super().__init__(kernel_group if kernel_group is not None else mlir_common.MLIRWrapperKenrelGroup())
         self.kernel_name = kernel_name
         self.input_nodes = input_nodes
@@ -125,6 +128,16 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
         self.reduction_mean = []
         # Dim info
         self.dim_aliasing = {}
+        self.autotune_idx = 0
+        self.reason = reason
+
+    def reset(self, reason):
+        self.__init__(
+            self.kernel_name, self.input_nodes,
+            self.call_size, self.kernel_group,
+            self.outer_func_name, self.outer_func_render,
+            self.kernel_arg_attributes, reason
+        )
 
     def add_loop_info(self, mat_size, tile_size):
         for idx, (loop_size, stride) in enumerate(zip(mat_size, tile_size)):
@@ -185,7 +198,8 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
 
         return inner_I, inner_J, inner_K
 
-    def gemm_combination_mapping(self, M, N, K, n_extra_node=0, n_prologue_node=0, pad_k=True, min_tile=False):
+    def gemm_combination_mapping(self, M, N, K, n_extra_node=0, n_prologue_node=0, pad_k=True, min_tile=False, is_conv=False):
+        tile_candidates = []
         spad_size_per_lane = self.spad_info["spad_size"]
         spad_size = spad_size_per_lane * self.vector_lane
         max_spad_size = spad_size // 2 # double buffer
@@ -249,6 +263,11 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
                         max_used_spad_size = used_spad_size
                         maximize_i_j = tile_M * tile_N
                         mapping = (tile_M, tile_N, tile_K)
+                    if check_spad_size:
+                        tile_candidates.append((used_spad_size, (tile_M, tile_N, tile_K)))
+        if CONFIG_AUTOTUNE_TEMPLATE and not is_conv:
+            tile_candidates = sorted(tile_candidates, key=lambda x: x[0], reverse=True)
+            mapping = tile_candidates[self.autotune_idx][1] if self.autotune_idx < len(tile_candidates) else mapping
         return mapping
 
     def search_mapping_space(self, mapping, idx, increment, stride, dilation, n_extra_node=0):
@@ -288,13 +307,14 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
         return mapping
 
     def conv_combination_mapping(self, M, N, K, K_H, K_W, O_H, O_W, stride, dilation, n_extra_node=0):
+        tile_candidates = []
         spad_size_per_lane = self.spad_info["spad_size"]
         spad_size = spad_size_per_lane * self.vector_lane
         max_spad_size = spad_size // 2 # double buffer
         max_spad_per_lane = spad_size_per_lane // 2 # double buffer
 
         max_used_spad_size = 0
-        M, N, K = self.gemm_combination_mapping(M, N, K, n_extra_node=n_extra_node, pad_k=False)
+        M, N, K = self.gemm_combination_mapping(M, N, K, n_extra_node=n_extra_node, pad_k=False, is_conv=True)
         max_k_h_w = 1 # maximize kernel size
         max_o_h_w = 1 # maximize output size
         K = min(K, self.vector_lane)
@@ -312,27 +332,34 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
                         input_size_per_lane = self.get_spad_size_per_lane(i_w * i_h * M, K)
                         output_size_per_lane = self.get_spad_size_per_lane(o_w * o_h * M  * (1 + n_extra_node), N)
                         used_spad_size_per_lane = (weight_size_per_lane + input_size_per_lane + output_size_per_lane) * self.precision
-                        if used_spad_size < max_spad_size and max_used_spad_size < used_spad_size and used_spad_size_per_lane < max_spad_per_lane and max_k_h_w <= k_h * k_w and max_o_h_w <= o_h * o_w:
-                            max_used_spad_size = used_spad_size
-                            max_k_h_w = k_h * k_w
-                            max_o_h_w = o_h * o_w
-                            mapping = (k_h, k_w, o_h, o_w, M, N, K)
+                        check_spad_size = (used_spad_size < max_spad_size and used_spad_size_per_lane < max_spad_per_lane)
+                        if check_spad_size:
+                            tile_candidates.append((used_spad_size, (k_h, k_w, o_h, o_w, M, N, K)))
+                            if max_used_spad_size < used_spad_size and max_k_h_w <= k_h * k_w and max_o_h_w <= o_h * o_w:
+                                max_used_spad_size = used_spad_size
+                                max_k_h_w = k_h * k_w
+                                max_o_h_w = o_h * o_w
+                                mapping = (k_h, k_w, o_h, o_w, M, N, K)
         if max_used_spad_size == 0:
             raise RuntimeError("Cannot find a valid mapping")
 
         # FIXME: this should be implemented with auto-tuning
         mapping = self.pseudo_auto_tune(mapping, stride, dilation, O_H, O_W, n_extra_node=n_extra_node)
+        if CONFIG_AUTOTUNE_TEMPLATE:
+            tile_candidates = sorted(tile_candidates, key=lambda x: x[0], reverse=True)
+            mapping = tile_candidates[self.autotune_idx][1] if self.autotune_idx < len(tile_candidates) else mapping
 
         return mapping
 
     def conv_multi_tile_mapping(self, M, N, K, K_H, K_W, O_H, O_W, stride, dilation, n_extra_node=0):
+        tile_candidates = []
         spad_size_per_lane = self.spad_info["spad_size"]
         spad_size = spad_size_per_lane * self.vector_lane
         max_spad_size = spad_size // 2
         max_spad_per_lane = spad_size_per_lane // 2
 
         max_used_spad_size = 0
-        M, N, K = self.gemm_combination_mapping(M, N, K * K_W, n_extra_node=n_extra_node, pad_k=False)
+        M, N, K = self.gemm_combination_mapping(M, N, K * K_W, n_extra_node=n_extra_node, pad_k=False, is_conv=True)
         max_k_h_w = K_W
         for o_h in sympy.divisors(O_H):
             for o_w in sympy.divisors(O_W):
@@ -347,22 +374,29 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
                     input_size_per_lane = self.get_spad_size_per_lane(i_w * i_h * M, K)
                     output_size_per_lane = self.get_spad_size_per_lane(o_w * o_h * M  * (1 + n_extra_node), N)
                     used_spad_size_per_lane = (weight_size_per_lane + input_size_per_lane + output_size_per_lane) * self.precision
-                    if used_spad_size < max_spad_size and max_used_spad_size < used_spad_size and used_spad_size_per_lane < max_spad_per_lane and max_k_h_w <= k_h:
-                        max_used_spad_size = used_spad_size
-                        max_k_h_w = k_h
-                        mapping = (k_h, K_W, o_h, o_w, M, N, K)
+                    check_spad_size = (used_spad_size < max_spad_size and used_spad_size_per_lane < max_spad_per_lane)
+                    if check_spad_size:
+                        tile_candidates.append((used_spad_size, (k_h, K_W, o_h, o_w, M, N, K)))
+                        if max_used_spad_size < used_spad_size and max_k_h_w <= k_h:
+                            max_used_spad_size = used_spad_size
+                            max_k_h_w = k_h
+                            mapping = (k_h, K_W, o_h, o_w, M, N, K)
         if max_used_spad_size == 0:
             raise RuntimeError("Cannot find a valid mapping")
+        if CONFIG_AUTOTUNE_TEMPLATE:
+            tile_candidates = sorted(tile_candidates, key=lambda x: x[0], reverse=True)
+            mapping = tile_candidates[self.autotune_idx][1] if self.autotune_idx < len(tile_candidates) else mapping
         return mapping
 
     def conv_single_batch_mapping(self, M, N, K, K_H, K_W, O_H, O_W, stride, dilation, n_extra_node=0):
+        tile_candidates = []
         spad_size_per_lane = self.spad_info["spad_size"]
         spad_size = spad_size_per_lane * self.vector_lane
         max_spad_size = spad_size // 2
         max_spad_per_lane = spad_size_per_lane // 2
 
         max_used_spad_size = 0
-        M, N, K = self.gemm_combination_mapping(O_W, N, K, n_extra_node=n_extra_node, pad_k=False)
+        M, N, K = self.gemm_combination_mapping(O_W, N, K, n_extra_node=n_extra_node, pad_k=False, is_conv=True)
         max_k_h_w = 1
         for o_h in sympy.divisors(O_H):
             for k_h in sympy.divisors(K_H):
@@ -377,12 +411,18 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
                     input_size_per_lane = self.get_spad_size_per_lane(i_w * i_h * k_w, K)
                     output_size_per_lane = self.get_spad_size_per_lane(M * o_h  * (1 + n_extra_node), N)
                     used_spad_size_per_lane = (weight_size_per_lane + input_size_per_lane + output_size_per_lane) * self.precision
-                    if used_spad_size < max_spad_size and max_used_spad_size < used_spad_size and used_spad_size_per_lane < max_spad_per_lane and max_k_h_w <= k_h * k_w:
-                        max_used_spad_size = used_spad_size
-                        max_k_h_w = k_h * k_w
-                        mapping = (k_h, k_w, o_h, M, M, N, K)
+                    check_spad_size = (used_spad_size < max_spad_size and used_spad_size_per_lane < max_spad_per_lane)
+                    if check_spad_size:
+                        tile_candidates.append((used_spad_size, (k_h, k_w, o_h, M, M, N, K)))
+                        if max_used_spad_size < used_spad_size and max_k_h_w <= k_h * k_w:
+                            max_used_spad_size = used_spad_size
+                            max_k_h_w = k_h * k_w
+                            mapping = (k_h, k_w, o_h, M, M, N, K)
         if max_used_spad_size == 0:
             raise RuntimeError("Cannot find a valid mapping")
+        if CONFIG_AUTOTUNE_TEMPLATE:
+            tile_candidates = sorted(tile_candidates, key=lambda x: x[0], reverse=True)
+            mapping = tile_candidates[self.autotune_idx][1] if self.autotune_idx < len(tile_candidates) else mapping
         return mapping
 
     def meta_kernel(self):
@@ -406,6 +446,112 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
         wrapper.generate_kernel_call(
             kernel_name if self.outer_func_name is None else self.outer_func_name + f"_{len(call_args)}",
             call_args, cuda=False)
+
+    def codegen_template_code(self, render, template_node, prologue_nodes, epilogue_nodes):
+        with self as kernel:
+            _, _, _, kernel.buffer_types = self.kernel_group.args.mlir_argdefs()
+            for node in [template_node, *prologue_nodes, *epilogue_nodes]:
+                node.mark_run()
+
+            # Partial codgen template nodes
+            partial_code = render()
+
+            # Swap load/store functions
+            kernel.load = kernel.load_epilogue
+            kernel.store = kernel.store_epilogue
+            kernel.store_reduction = kernel.store_reduction_epilogue
+            kernel.reduction = kernel.reduction_epilogue
+
+            # Codegen prologue nodes
+            if prologue_nodes:
+                # Flush created varaibles, since template fusion doen't share variable
+                with kernel.prologue_buffer_group.as_local():
+                    _, (group, reduction_group) = max(
+                        [prologue_nodes[-1]], key=lambda x: int(x.is_reduction())
+                    ).group
+                    prologue_tile_desc = kernel.set_tile_size(kernel.prologue_info, prologue=True)
+                    kernel.kernel_group.set_tile_info(prologue_tile_desc)
+                    vars, reduction_vars = kernel.set_ranges(group, reduction_group)
+                    for node in prologue_nodes:
+                        # Reuse created spad
+                        read_list = sorted([i.name for i in node.read_writes.reads])
+                        candidate_found = False
+                        # Why? There is a case that memdep.get_size() != data.get_size()
+                        buf_dict = {}
+                        buf_dict.update({val.name : val for val in V.graph.buffers})
+                        buf_dict.update(V.graph.graph_inputs)
+                        for candidate_read in read_list:
+                            if candidate_read in buf_dict and reduce(operator.mul, buf_dict[candidate_read].get_size(), 1) == node.node.get_numel():
+                                prologue_input_arg = candidate_read
+                                candidate_found = True
+                                break
+                        assert(candidate_found)
+                        assert(len(node.read_writes.writes)==1)
+                        prologue_output_arg = list(node.read_writes.writes)[0].name
+                        template_buf = self.kernel_group.args.input_buffers[prologue_output_arg]
+                        target_buf = f"{template_buf}_buffer" # FIXME. How to pass spad buffer name?
+
+                        # To skip the dma code gen
+                        kernel.buffer_names[prologue_input_arg] = target_buf
+                        kernel.buffer_names[prologue_output_arg] = target_buf
+
+                        # Edge delete
+                        kernel.kernel_group.args.input_buffers = {
+                            (arg if buf != template_buf else prologue_input_arg): buf
+                            for arg, buf in kernel.kernel_group.args.input_buffers.items()
+                        }
+                        node.codegen((vars, reduction_vars))
+
+            # Codegen epilogue nodes
+            tile_desc = kernel.set_tile_size(kernel.epilogue_info)
+            kernel.kernel_group.set_tile_info(tile_desc)
+            kernel.call_ranges = None
+            if epilogue_nodes:
+                with kernel.epilogue_buffer_group.as_local():
+                    _, (group, reduction_group) = max(
+                        epilogue_nodes, key=lambda x: int(x.is_reduction())
+                    ).group
+                    vars, reduction_vars = kernel.set_ranges(group, reduction_group)
+                    for node in epilogue_nodes:
+                        node.codegen((vars, reduction_vars))
+
+        with V.set_kernel_handler(kernel):
+            src_code = (
+                partial_code
+                if isinstance(partial_code, str)
+                else partial_code.finalize()
+            )
+
+        # For consistency, white space could make wrong write_path
+        buffer = IndentedBuffer()
+        buffer.splice(src_code)
+        return buffer.getvalue()
+
+    def make_choices(self, render, template_node, prologue_nodes, epilogue_nodes):
+        choices = []
+        for i in range(3):
+            self.autotune_idx = i
+            self.reset(reason=None)
+            src_code = self.codegen_template_code(render, template_node, prologue_nodes, epilogue_nodes)
+            bench_runner = self.run_bench([template_node], self.kernel_name, src_code)
+            choices.append((bench_runner, src_code, self.kernel_group))
+        return choices
+
+    def codegen_nodes(self, render, codegen_header, template_node, prologue_nodes, epilogue_nodes):
+        src_code = self.codegen_template_code(render, template_node, prologue_nodes, epilogue_nodes)
+
+        if False:# CONFIG_AUTOTUNE_TEMPLATE and not CONFIG_BACKENDSIM_SPIKE_ONLY:
+            src_code = self.autotune(render, template_node, prologue_nodes, epilogue_nodes)
+
+        with V.set_kernel_handler(self):
+            self._prepare_simulator_headers(src_code, codegen_header)
+            self.meta_kernel()
+        return src_code
+
+    def _prepare_simulator_headers(self, src_code, codegen_header):
+        spad_end_symbol = f"int spad_end[0] __attribute__ ((section(\".spad\")));\n"
+        spad_section_end_symbol = f"int spad_section_end[0] __attribute__ ((section(\".spad\"), aligned({self.spad_info['spad_size']*self.vector_lane})));"
+        codegen_header(src_code, (self.header.getvalue()+spad_end_symbol+spad_section_end_symbol, self.gem5_header.getvalue()))
 
     def codegen_prologue_body(self):
         body = IndentedBuffer()
