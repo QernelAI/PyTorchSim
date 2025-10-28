@@ -1,11 +1,11 @@
 # PyTorchSim: A Comprehensive, Fast, and Accurate NPU Simulation Framework
 [![Docker Image CI](https://github.com/PSAL-POSTECH/PyTorchSim/actions/workflows/docker-image.yml/badge.svg)](https://github.com/PSAL-POSTECH/PyTorchSim/actions/workflows/docker-image.yml)
 
-PyTorchSim is a comprehensive, high-speed, cycle-accurate NPU simulation framework
-- We define a RISC-V-based NPU architecture and implement PyTorch compiler backend to run inference & training for PyTorch models
-- Achieved high speed and accuracy with our novel Tile-Level Simulation (TLS) with compiler-generated Tile-Operation Graph (TOG), exploiting deterministic tile compute latency
-- A generic and extensible NPU architecture based on RISC-V vector extension
-- The functional simulator supports code correctness validation and data-dependent timing simulation
+PyTorchSim is a comprehensive, high-speed, cycle-accurate NPU simulation framework.
+- We define a RISC-V-based NPU architecture and implement PyTorch compiler backend to run inference & training for PyTorch models.
+- Achieved high speed and accuracy with our novel Tile-Level Simulation (TLS) with compiler-generated Tile-Operation Graph (TOG), exploiting deterministic tile compute latency.
+- A generic and extensible NPU architecture based on RISC-V vector extension.
+- The functional simulator supports code correctness validation and data-dependent timing simulation.
 
 
 For more details, please refer to our [paper](https://doi.org/10.1145/3725843.3756045)!
@@ -92,7 +92,7 @@ The `tests` directory contains several AI workloads examples.
 ```bash
 python tests/test_matmul.py 
 ```
-The result is stored to `TORCHSIM_DUMP_PATH`/`hash`/backendsim_result/. The log file contains detailed core, memory, and interconnect stats.
+The result is stored to `TORCHSIM_DUMP_PATH/hash/backendsim_result/`. The log file contains detailed core, memory, and interconnect stats.
 
 ### Run Your Own Model on PyTorchSim
 You can run your own PyTorch model on PyTorchSim by setting up a custom NPU device.  
@@ -180,39 +180,41 @@ Load generator supports multi-tenancy experiments. You can simply run `tests/tes
 python tests/test_scheduler.py
 ```
 Below is an example code of multi-tenancy
-`target_model1` and `target_model2` is your own PyTorch model.
-You can set the request arrival time and request queue index. Request queue is used for scheduling and you can set the number of queue to each core in [TOGSim configuration](#togsim-configuration)
+`target_model0` and `target_model1` is your own PyTorch model.
+You can set the request arrival time and request queue index. Request queue is used for scheduling and you can set the number of queue to each core in [TOGSim configuration](#togsim-configuration).
+`poisson_request_generator` generates arrival time of requests in a Poisson distribution with `lamda` and `max_time`.
 ```python
 # Init scheduler
 scheduler = Scheduler(num_request_queue=2, engine_select=Scheduler.FIFO_ENGINE, backend_config=config)
 # Register compiled model
-opt_model1 = torch.compile(target_model1.to(device=scheduler.execution_engine.module.custom_device(), memory_format=torch.channels_last))
-opt_model2 = torch.compile(target_model2.to(device=scheduler.execution_engine.module.custom_device()))
-SchedulerDNNModel.register_model("resnet18", opt_model1)
-SchedulerDNNModel.register_model("bert", opt_model2)
+opt_model0 = torch.compile(target_model0.to(device=scheduler.execution_engine.module.custom_device(), memory_format=torch.channels_last))
+opt_model1 = torch.compile(target_model1.to(device=scheduler.execution_engine.module.custom_device()))
+SchedulerDNNModel.register_model("model0", opt_model0)
+SchedulerDNNModel.register_model("model1", opt_model1)
 
-# Init input data
-model_input1 = torch.randn(1, 3, 224, 224)
-model_input2 = torch.randn(128, 768)
+# Load Generation
+model0_lambda = 5.0
+model1_lambda = 3.0
+max_time = 1000.0 # [s]
 
-# Init request
-new_request1 = Request("resnet18", [model_input1], [], request_queue_idx=0)
-new_request2 = Request("bert", [model_input2], [], request_queue_idx=1)
-new_request3 = Request("resnet18", [model_input1], [], request_queue_idx=0)
-new_request4 = Request("bert", [model_input2], [], request_queue_idx=1)
-
-# Add request to scheduler
-scheduler.add_request(new_request1, request_time=0)
-scheduler.add_request(new_request2, request_time=0)
-scheduler.add_request(new_request3, request_time=0)
-scheduler.add_request(new_request4, request_time=0)
+# Generate Possion distribution requests for model0
+for model0_request_time in poisson_request_generator(model0_lambda, total_time=max_time):
+    x = torch.randn(1, 3, 224, 224)
+    new_request = Request("model0", [x], [], request_queue_idx=0)
+    scheduler.add_request(new_request, request_time=model0_request_time)
+    
+# Generate Possion distribution requests for model1
+for model1_request_time in poisson_request_generator(model1_lambda, total_time=max_time):
+    x = torch.randn(128, 768)
+    new_request = Request("model1", [x], [], request_queue_idx=0)
+    scheduler.add_request(new_request, request_time=model1_request_time)
 
 # Run scheduler
 while not scheduler.is_finished():
     scheduler.schedule()
 ```
 ## Compiler Optimizations
-PyTorchSim compiler supports fusions
+PyTorchSim compiler supports several fusion optimizations:
 - GEMM prologue fusion
 - GEMM epilogue fusion
 - GEMM reduction fusion
@@ -223,7 +225,7 @@ Depending on tensor shape, use different convolution template
 - Multi-channel optimization
 
 ## Mapping
-PyTorchSim provids three mapping strategies
+PyTorchSim provides three mapping strategies.
 ### Heuristic-based mapping
 We adopt and modified heuristic-based mapping of [GEMMINI](https://github.com/ucb-bar/gemmini) by default, which maximizes the utilization of scratchpad memory.
 ### Auto-tuning
@@ -265,7 +267,7 @@ export TORCHSIM_TILE_N=512
 export TORCHSIM_TILE_K=512
 ```
 ## Compiler Configuration
-`PyTorchSimFrontend/extension_config.py` contains target hardware configuration to compile
+`PyTorchSimFrontend/extension_config.py` contains target hardware configuration to compile.
 
 You can configure these options using environment variables.
 ```bash
@@ -346,11 +348,10 @@ If you use PyTorchSim for your research, please cite the following paper.
 @INPROCEEDINGS{yang2025pytorchsim,
   author={Yang, Wonhyuk and Shin, Yunseon and Woo, Okkyun and Park, Geonwoo and Ham, Hyungkyu and Kang, Jeehoon and Park, Jongse and Kim, Gwangsun},
   title={PyTorchSim: A Comprehensive, Fast, and Accurate NPU Simulation Framework},
-  booktitle={2025 58th IEEE/ACM International Symposium on Microarchitecture (MICRO)}, 
-  volume={},
-  number={},
-  pages={},
+  booktitle={Proceedings of the 58th IEEE/ACM International Symposium on Microarchitecture},
+  pages={1363–1380},
   year={2025},
-  doi={10.1145/3725843.3756045}
+  doi={10.1145/3725843.3756045},
+  series={MICRO '25}
 }
 ```
