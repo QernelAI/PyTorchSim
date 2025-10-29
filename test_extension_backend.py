@@ -22,8 +22,8 @@ from tests.Fusion.test_matmul_scalar import test_matmul_scalar
 from tests.Fusion.test_matmul_activation import test_matmul_activation
 
 if __name__ == "__main__":
-    from Scheduler.scheduler import PyTorchSimExecutionEngine
-    module = PyTorchSimExecutionEngine.setup_device()
+    from Scheduler.scheduler import PyTorchSimRunner
+    module = PyTorchSimRunner.setup_device()
     device = module.custom_device()
     #test_vectoradd(device, (47, 10))
     #test_vector_scalar_add(device, (10, 10))

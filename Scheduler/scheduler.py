@@ -140,7 +140,7 @@ class SchedulerDNNModel:
     def register_model(model_name : str, compiled_model):
         SchedulerDNNModel.MODEL_MAP[model_name] = compiled_model
 
-class PyTorchSimExecutionEngine:
+class PyTorchSimRunner:
     PARTITION_BUSY = 0
     PARTITION_IDLE = 1
     SELECT_NOTHING = 2
@@ -262,7 +262,7 @@ class PyTorchSimExecutionEngine:
         self.partition_state[partion_idx] = self.PARTITION_BUSY
         return self.backend_simulator.launch(onnx_path, attribute_path, current_cycle, partion_idx)
 
-class FIFOExecutionEngine(PyTorchSimExecutionEngine):
+class FIFORunner(PyTorchSimRunner):
     def __init__(self, backend_simulator: BackendSimulator, num_partion=1) -> None:
         super().__init__(backend_simulator, num_partion)
 
@@ -297,7 +297,7 @@ class FIFOExecutionEngine(PyTorchSimExecutionEngine):
         # No proper kernel now
         return self.SELECT_NOTHING
 
-class RRExecutionEngine(PyTorchSimExecutionEngine):
+class RoundRobinRunner(PyTorchSimRunner):
     def __init__(self, backend_simulator: BackendSimulator, num_partion=1) -> None:
         super().__init__(backend_simulator, num_partion)
         self.next_pointer = None
@@ -360,9 +360,9 @@ class Scheduler:
         self.backend_simulator = BackendSimulator(backend_path, backend_config)
         self.backend_simulator.interactive_simulation()
         if engine_select == Scheduler.FIFO_ENGINE:
-            self.execution_engine = FIFOExecutionEngine(self.backend_simulator, self.num_request_queue)
+            self.execution_engine = FIFORunner(self.backend_simulator, self.num_request_queue)
         elif engine_select == Scheduler.RR_ENGINE:
-            self.execution_engine = RRExecutionEngine(self.backend_simulator, self.num_request_queue)
+            self.execution_engine = RoundRobinRunner(self.backend_simulator, self.num_request_queue)
         else:
             print(f"Not supporetd engine type {engine_select}")
             exit(1)
@@ -480,7 +480,7 @@ class Scheduler:
         def execute_cycle():
             launch_ret_info = []
             for i in range(self.execution_engine.num_partion):
-                if self.execution_engine.partition_state[i] == PyTorchSimExecutionEngine.PARTITION_IDLE:
+                if self.execution_engine.partition_state[i] == PyTorchSimRunner.PARTITION_IDLE:
                     ret = self.execution_engine.launch_kernel(self.current_cycle, i)
                     launch_ret_info.append(ret)
 
@@ -495,7 +495,7 @@ class Scheduler:
 
             for core_idx in result_list:
                 # Kernel is finished. So set idle state
-                self.execution_engine.partition_state[core_idx] = PyTorchSimExecutionEngine.PARTITION_IDLE
+                self.execution_engine.partition_state[core_idx] = PyTorchSimRunner.PARTITION_IDLE
 
             return result_list
 

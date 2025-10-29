@@ -37,8 +37,8 @@ if __name__ == "__main__":
     import sys
     sys.path.append(os.environ.get('TORCHSIM_DIR', default='/workspace/PyTorchSim'))
 
-    from Scheduler.scheduler import PyTorchSimExecutionEngine
-    module = PyTorchSimExecutionEngine.setup_device()
+    from Scheduler.scheduler import PyTorchSimRunner
+    module = PyTorchSimRunner.setup_device()
     device = module.custom_device()
     test_BatchNorm(device)
     test_BatchNorm(device, size=(1,64, 32, 32))

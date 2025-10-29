@@ -61,8 +61,8 @@ if __name__ == "__main__":
     import sys
     sys.path.append(os.environ.get('TORCHSIM_DIR', default='/workspace/PyTorchSim'))
 
-    from Scheduler.scheduler import PyTorchSimExecutionEngine
-    module = PyTorchSimExecutionEngine.setup_device()
+    from Scheduler.scheduler import PyTorchSimRunner
+    module = PyTorchSimRunner.setup_device()
     device = module.custom_device()
     test_Transpose3D_1(device, [62, 34, 44])
     test_Transpose3D_1(device, [62, 134, 144])

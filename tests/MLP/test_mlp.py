@@ -281,9 +281,9 @@ def train_mlp_mnist(device):
     return
 
 if __name__ == "__main__":
-    from Scheduler.scheduler import PyTorchSimExecutionEngine
+    from Scheduler.scheduler import PyTorchSimRunner
     torch.set_printoptions(threshold=float('inf'), linewidth=600)
-    module = PyTorchSimExecutionEngine.setup_device()
+    module = PyTorchSimRunner.setup_device()
     device = module.custom_device()
 
     test_mlp(device)

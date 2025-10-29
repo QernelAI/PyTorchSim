@@ -54,7 +54,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     sys.path.append(os.environ.get('TORCHSIM_DIR', default='/root/workspace/PyTorchSim'))
  
-    from Scheduler.scheduler import PyTorchSimExecutionEngine
-    module = PyTorchSimExecutionEngine.setup_device()
+    from Scheduler.scheduler import PyTorchSimRunner
+    module = PyTorchSimRunner.setup_device()
     device = module.custom_device()
     test_sparse_mm(device, args.sz, args.sz, args.sz, args.sparsity)

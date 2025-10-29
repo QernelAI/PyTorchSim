@@ -96,8 +96,8 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    from Scheduler.scheduler import PyTorchSimExecutionEngine
-    module = PyTorchSimExecutionEngine.setup_device()
+    from Scheduler.scheduler import PyTorchSimRunner
+    module = PyTorchSimRunner.setup_device()
     device = module.custom_device()
 
     #test_dec_inf(device, sparsity=args.sparsity, block=args.block)
