@@ -48,7 +48,7 @@ if __name__ == "__main__":
     if 'BACKENDSIM_SPIKE_ONLY' in os.environ:
         del os.environ['BACKENDSIM_SPIKE_ONLY']
 
-    from Scheduler.scheduler import ExecutionEngine
-    module = ExecutionEngine.setup_device()
+    from Scheduler.scheduler import PyTorchSimRunner
+    module = PyTorchSimRunner.setup_device()
     device = module.custom_device()
     run_matmul(size[0], size[1], size[2], config)

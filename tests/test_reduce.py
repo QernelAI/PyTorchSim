@@ -47,8 +47,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
     shape = tuple(map(int, args.shape.strip('()').split(',')))
 
-    from Scheduler.scheduler import ExecutionEngine
-    module = ExecutionEngine.setup_device()
+    from Scheduler.scheduler import PyTorchSimRunner
+    module = PyTorchSimRunner.setup_device()
     device = module.custom_device()
     test_reduce_sum(device, (29, 47), 1, keepdim=True)
     test_reduce_sum(device, (17, 68), 0, keepdim=True)
