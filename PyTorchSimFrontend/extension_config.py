@@ -18,9 +18,6 @@ CONFIG_VLEN = 256 # 256bits / 32bits = 8 [elements]
 # Tile size config
 CONFIG_TORCHSIM_DIR = os.environ.get('TORCHSIM_DIR', default='/workspace/PyTorchSim')
 
-# DUMP PATH
-CONFIG_BACKEND_RESULT_PATH_KEY = os.getenv("BACKEND_RESULT_PATH_KEY")
-
 CONFIG_TORCHSIM_DUMP_PATH = os.environ.get('TORCHSIM_DUMP_PATH',
                         default = f"{tempfile.gettempdir()}/torchinductor")
 CONFIG_TORCHSIM_DUMP_FILE = int(os.environ.get('TORCHSIM_DUMP_FILE', default=True))

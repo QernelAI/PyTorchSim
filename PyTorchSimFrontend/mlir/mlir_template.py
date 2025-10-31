@@ -685,8 +685,8 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
             sram_var = tile_desc.get_name()
             tile_shape = tile_desc.get_mlir_shape(mlir_dtype)
             tile_stride = tile_desc.get_tile_stride()
-            vlane_split_axis = tile_desc.vlane_split_axis
-            vlane_stride = tile_desc.vlane_stride
+            vlane_split_axis = tile_desc.vmap.vlane_split_axis
+            vlane_stride = tile_desc.vmap.vlane_stride
 
             zero_cse = self.get_const_cse(0, "index")
             sram_index_var = ", ".join([f"%{str(zero_cse)}"]*tile_desc.get_nr_dim())
@@ -734,8 +734,8 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
         # Want to use tile_desc from epilogue_info
         index_var = self.parse_indices(index)
         dram_stride = [index.coeff(sympy.Symbol(val)) for val in self.dim_aliasing.values()]
-        vlane_split_axis = self.kernel_group.tile_desc.vlane_split_axis
-        vlane_stride = self.kernel_group.tile_desc.vlane_stride
+        vlane_split_axis = self.kernel_group.tile_desc.vmap.vlane_split_axis
+        vlane_stride = self.kernel_group.tile_desc.vmap.vlane_stride
         tile_shape = self.kernel_group.tile_desc.get_mlir_shape(mlir_dtype)
         tile_stride = self.kernel_group.tile_desc.get_tile_stride()
 
@@ -793,8 +793,8 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
 
         index_var = self.parse_indices(index)
         dram_stride = [index.coeff(sympy.Symbol(val)) for val in self.dim_aliasing.values()]
-        vlane_split_axis = self.kernel_group.tile_desc.vlane_split_axis
-        vlane_stride = self.kernel_group.tile_desc.vlane_stride
+        vlane_split_axis = self.kernel_group.tile_desc.vmap.vlane_split_axis
+        vlane_stride = self.kernel_group.tile_desc.vmap.vlane_stride
         tile_shape = self.kernel_group.tile_desc.get_mlir_shape(mlir_dtype)
         tile_stride = self.kernel_group.tile_desc.get_tile_stride()
 
@@ -859,8 +859,8 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
         vec_size = self.compute_body_loop.step
         type_name = mlir_common.DTYPE_TO_MLIR[dtype]
         new_tile_size = self.kernel_group.tile_desc.get_tile_size()[:-1] + [vec_size]
-        new_vlane_split_axis = self.kernel_group.tile_desc.vlane_split_axis
-        new_vlane_stride = self.kernel_group.tile_desc.vlane_stride
+        new_vlane_split_axis = self.kernel_group.tile_desc.vmap.vlane_split_axis
+        new_vlane_stride = self.kernel_group.tile_desc.vmap.vlane_stride
         local_tile_desc = mlir_common.MLIRMultiDimTile(new_tile_size, self.vector_lane, new_vlane_split_axis, new_vlane_stride, vec_size)
 
         tile_shape = local_tile_desc.get_mlir_shape(type_name)
@@ -906,8 +906,8 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
 
         index_var = self.parse_indices(index, self.reductions_suffix, comments="// Store reduction")
         dram_stride = [index.coeff(sympy.Symbol(val)) for val in self.dim_aliasing.values()][:-1] # Assume that there is only one reduction axis
-        vlane_split_axis = self.kernel_group.tile_desc.vlane_split_axis
-        vlane_stride = self.kernel_group.tile_desc.vlane_stride
+        vlane_split_axis = self.kernel_group.tile_desc.vmap.vlane_split_axis
+        vlane_stride = self.kernel_group.tile_desc.vmap.vlane_stride
 
         # Create final buffer descriptor
         nr_outer_loop = self.reduction_nr_outer_loop

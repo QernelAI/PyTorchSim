@@ -109,7 +109,8 @@ class FunctionalSimulator():
             stderr_setting = subprocess.DEVNULL if silent_mode else None
             subprocess.check_call(run_cmd, stdout=stdout_setting, stderr=stderr_setting)
         except subprocess.CalledProcessError as e:
-            print("[SpikeSimulator] Command failed with exit code", e.returncode)
+            if not silent_mode:
+                print("[SpikeSimulator] Command failed with exit code", e.returncode)
             error_msg = ""
             if e.returncode == 200:
                 error_msg = "INVALID_SPAD_ACCESS"
@@ -174,11 +175,11 @@ class CycleSimulator():
             else:
                 output = subprocess.check_output(gem5_cmd, stderr=subprocess.DEVNULL)
         except subprocess.CalledProcessError as e:
-            print("[Gem5Simulator] Command failed with exit code", e.returncode)
-            print("[Gem5Simulator] Error output:", e.output)
-            finished = True
-            progress_thread.join()
-            assert(0)
+            print(f"[Gem5Simulator] Gem5 simulation failed with error: \"{e.output.decode()}\"")
+            if not is_dryrun:
+                finished = True
+                progress_thread.join()
+            raise RuntimeError(f"GEM5 Simulation Failed: \"{e.output.decode()}\"")
 
         with open(f"{dir_path}/stats.txt", "r") as stat_file:
             raw_list = stat_file.readlines()
@@ -238,11 +239,8 @@ class BackendSimulator():
                 print("[BackendSimulator] Command failed with exit code", e.returncode)
                 print("[BackendSimulator] Error output:", e.output)
             assert 0
-        result_path = extension_config.CONFIG_BACKEND_RESULT_PATH_KEY
-        if result_path is None:
-            result_path = os.path.join(os.path.dirname(model_path), "backendsim_result")
-
         # Save result to result_path
+        result_path = os.path.join(os.path.dirname(model_path), "backendsim_result")
         os.makedirs(result_path, exist_ok=True)
         file_name = str(len(os.listdir(result_path)))
         result_path = os.path.join(result_path, file_name)
@@ -352,6 +350,8 @@ class BackendSimulator():
 
         with open(attribute_path, "w") as f:
             json.dump(json_content, f, indent=4)
+            f.flush()
+            os.fsync(f.fileno()) # There could be a race condition.
         return attribute_path
 
     def load_json(self, config_path):
@@ -449,6 +449,6 @@ class BackendSimulator():
         return core_metrics, dram_channel_bw, avg_dram_bw, simulation_time, total_cycle
 
 if __name__ == "__main__":
-    sim = BackendSimulator("/workspace/PyTorchSim/PyTorchSimBackend", "/workspace/PyTorchSim/PyTorchSimBackend/configs/systolic_ws_128x128_c4_simple_noc_tpuv4.json")
+    sim = BackendSimulator("/workspace/PyTorchSim/PyTorchSimBackend", "/workspace/PyTorchSim/PyTorchSimBackend/configs/systolic_ws_128x128_c2_simple_noc_tpuv3_partition.json")
     sim.interactive_simulation()
     sim.until(4000)
