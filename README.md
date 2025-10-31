@@ -85,7 +85,7 @@ To download the latest Docker image and set up the environment, use the followin
 
 ```bash
 # Run the Docker container
-docker run -it --ipc=host --name torchsim -w /workspace/PyTorchSim ghcr.io/psal-postech/torchsim-ci:latest bash
+docker run -it --ipc=host --name torchsim -w /workspace/PyTorchSim ghcr.io/psal-postech/torchsim-ci:v1.0.0 bash
 ```
 ### Run Examples
 The `tests` directory contains several AI workloads examples.
