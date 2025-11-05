@@ -29,7 +29,7 @@ from PyTorchSimFrontend.mlir.mlir_codegen_backend import MLIRKernel, reduction_i
 from PyTorchSimFrontend.mlir.mlir_scheduling import SchedulerNode
 from torch._inductor.codegen import common
 
-from PyTorchSimFrontend.extension_config import CONFIG_TORCHSIM_DIR, CONFIG_AUTOTUNE_TEMPLATE, CONFIG_AUTOTUNE, CONFIG_BACKENDSIM_SPIKE_ONLY
+from PyTorchSimFrontend.extension_config import CONFIG_TORCHSIM_DIR, CONFIG_AUTOTUNE_TEMPLATE_TOPK
 from . import mlir_common
 
 class IndentedBufferGroup:
@@ -130,7 +130,6 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
         self.reduction_mean = []
         # Dim info
         self.dim_aliasing = {}
-        self.autotune_idx = 0
         self.reason = reason
 
     def reset(self, reason):
@@ -267,46 +266,10 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
                         mapping = (tile_M, tile_N, tile_K)
                     if check_spad_size:
                         tile_candidates.append((used_spad_size, (tile_M, tile_N, tile_K)))
-        if CONFIG_AUTOTUNE_TEMPLATE and not is_conv:
-            tile_candidates = sorted(tile_candidates, key=lambda x: x[0], reverse=True)
-            mapping = tile_candidates[self.autotune_idx][1] if self.autotune_idx < len(tile_candidates) else mapping
-        return mapping
 
-    def search_mapping_space(self, mapping, idx, increment, stride, dilation, n_extra_node=0):
-        if idx == 0 or idx == 1 or idx == 4 or idx == 5 or idx == 6:
-            raise NotImplementedError("Only O_H and O_W are supported for search_mapping_space")
-        spad_size_per_lane = self.spad_info["spad_size"]
-        spad_size = spad_size_per_lane * self.vector_lane
-        max_spad_size = spad_size // 2 # double buffer
-        max_spad_per_lane = spad_size_per_lane // 2 # double buffer
-
-        mapping = list(mapping)
-        mapping[idx] += increment
-        k_h, k_w, o_h, o_w, M, N, K = mapping
-        i_h = 1 + (o_h - 1) * stride[0] + (k_h - 1) * dilation[0]
-        i_w = 1 + (o_w - 1) * stride[1] + (k_w - 1) * dilation[1]
-        weight_size = k_w * k_h * K * N
-        input_size = i_w * i_h * M * K
-        output_size = o_w * o_h * M * N
-        used_spad_size = (weight_size + input_size + output_size * (1 + n_extra_node)) * self.precision
-        weight_size_per_lane = self.get_spad_size_per_lane(k_w * k_h * K, N)
-        input_size_per_lane = self.get_spad_size_per_lane(i_w * i_h * M, K)
-        output_size_per_lane = self.get_spad_size_per_lane(o_w * o_h * M  * (1 + n_extra_node), N)
-        used_spad_size_per_lane = (weight_size_per_lane + input_size_per_lane + output_size_per_lane) * self.precision
-        if used_spad_size < max_spad_size and used_spad_size_per_lane < max_spad_per_lane:
-            mapping = (k_h, k_w, o_h, o_w, M, N, K)
-        else:
-            mapping[idx] -= increment
-
-        return mapping
-
-    def pseudo_auto_tune(self, mapping, stride, dilation, O_H, O_W, n_extra_node=0):
-        # pseudo auto-tune
-        if mapping[2] == 1 and not (O_H == 1):
-            mapping = self.search_mapping_space(mapping, 2, 1, stride, dilation, n_extra_node=n_extra_node)
-        if mapping[3] == 1 and not (O_W == 1):
-            mapping = self.search_mapping_space(mapping, 3, 1, stride, dilation, n_extra_node=n_extra_node)
-        return mapping
+        tile_candidates = sorted(tile_candidates, key=lambda x: x[0], reverse=True)
+        tile_candidates = [v for _, v in tile_candidates]
+        return tile_candidates
 
     def conv_combination_mapping(self, M, N, K, K_H, K_W, O_H, O_W, stride, dilation, n_extra_node=0):
         tile_candidates = []
@@ -316,7 +279,7 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
         max_spad_per_lane = spad_size_per_lane // 2 # double buffer
 
         max_used_spad_size = 0
-        M, N, K = self.gemm_combination_mapping(M, N, K, n_extra_node=n_extra_node, pad_k=False, is_conv=True)
+        M, N, K = self.gemm_combination_mapping(M, N, K, n_extra_node=n_extra_node, pad_k=False, is_conv=True)[0]
         max_k_h_w = 1 # maximize kernel size
         max_o_h_w = 1 # maximize output size
         K = min(K, self.vector_lane)
@@ -345,13 +308,9 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
         if max_used_spad_size == 0:
             raise RuntimeError("Cannot find a valid mapping")
 
-        # FIXME: this should be implemented with auto-tuning
-        mapping = self.pseudo_auto_tune(mapping, stride, dilation, O_H, O_W, n_extra_node=n_extra_node)
-        if CONFIG_AUTOTUNE_TEMPLATE:
-            tile_candidates = sorted(tile_candidates, key=lambda x: x[0], reverse=True)
-            mapping = tile_candidates[self.autotune_idx][1] if self.autotune_idx < len(tile_candidates) else mapping
-
-        return mapping
+        tile_candidates = sorted(tile_candidates, key=lambda x: x[0], reverse=True)
+        tile_candidates = [v for _, v in tile_candidates]
+        return tile_candidates
 
     def conv_multi_tile_mapping(self, M, N, K, K_H, K_W, O_H, O_W, stride, dilation, n_extra_node=0):
         tile_candidates = []
@@ -361,7 +320,7 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
         max_spad_per_lane = spad_size_per_lane // 2
 
         max_used_spad_size = 0
-        M, N, K = self.gemm_combination_mapping(M, N, K * K_W, n_extra_node=n_extra_node, pad_k=False, is_conv=True)
+        M, N, K = self.gemm_combination_mapping(M, N, K * K_W, n_extra_node=n_extra_node, pad_k=False, is_conv=True)[0]
         max_k_h_w = K_W
         for o_h in sympy.divisors(O_H):
             for o_w in sympy.divisors(O_W):
@@ -385,10 +344,9 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
                             mapping = (k_h, K_W, o_h, o_w, M, N, K)
         if max_used_spad_size == 0:
             raise RuntimeError("Cannot find a valid mapping")
-        if CONFIG_AUTOTUNE_TEMPLATE:
-            tile_candidates = sorted(tile_candidates, key=lambda x: x[0], reverse=True)
-            mapping = tile_candidates[self.autotune_idx][1] if self.autotune_idx < len(tile_candidates) else mapping
-        return mapping
+        tile_candidates = sorted(tile_candidates, key=lambda x: x[0], reverse=True)
+        tile_candidates = [v for _, v in tile_candidates]
+        return tile_candidates
 
     def conv_single_batch_mapping(self, M, N, K, K_H, K_W, O_H, O_W, stride, dilation, n_extra_node=0):
         tile_candidates = []
@@ -398,7 +356,7 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
         max_spad_per_lane = spad_size_per_lane // 2
 
         max_used_spad_size = 0
-        M, N, K = self.gemm_combination_mapping(O_W, N, K, n_extra_node=n_extra_node, pad_k=False, is_conv=True)
+        M, N, K = self.gemm_combination_mapping(O_W, N, K, n_extra_node=n_extra_node, pad_k=False, is_conv=True)[0]
         max_k_h_w = 1
         for o_h in sympy.divisors(O_H):
             for k_h in sympy.divisors(K_H):
@@ -422,10 +380,9 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
                             mapping = (k_h, k_w, o_h, M, M, N, K)
         if max_used_spad_size == 0:
             raise RuntimeError("Cannot find a valid mapping")
-        if CONFIG_AUTOTUNE_TEMPLATE:
-            tile_candidates = sorted(tile_candidates, key=lambda x: x[0], reverse=True)
-            mapping = tile_candidates[self.autotune_idx][1] if self.autotune_idx < len(tile_candidates) else mapping
-        return mapping
+        tile_candidates = sorted(tile_candidates, key=lambda x: x[0], reverse=True)
+        tile_candidates = [v for _, v in tile_candidates]
+        return tile_candidates
 
     def meta_kernel(self):
         wrapper = V.graph.wrapper_code
@@ -534,11 +491,19 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
     def make_choices(self, tile_candidates, render, template_node, prologue_nodes, epilogue_nodes):
         choices = []
         for tile_info in tile_candidates:
+            print(f"[Auto-tune] Trying tile size: {list(tile_info)}")
             src_code = self.codegen_template_code(render, template_node, prologue_nodes, epilogue_nodes, tile_info)
             bench_runner = self.run_bench([template_node], self.kernel_name, src_code)
-            choices.append((bench_runner, src_code, self.kernel_group))
+            choices.append((bench_runner, src_code, tile_info))
             self.reset(reason=None)
         return choices
+
+    def _log_autotune_result(self, best_choice, best_cycle):
+        tile_size = best_choice[2]
+        print(
+            f"[Auto-tune] Optimal tile size: {list(tile_size)}, "
+            f"cycles: {best_cycle}"
+        )
 
     def codegen_nodes(self, tile_candidates, render, template_node, prologue_nodes, epilogue_nodes):
         src_code = self.autotune(tile_candidates, render, template_node, prologue_nodes, epilogue_nodes)
@@ -1264,7 +1229,7 @@ class MLIRTemplate(KernelTemplate):
                 template=self,
                 kwargs=kwargs
             )
-            tile_candidates = self.get_tile_candidates(**kwargs)
+            tile_candidates = self.get_tile_candidates(**kwargs)[:CONFIG_AUTOTUNE_TEMPLATE_TOPK]
             return kernel, tile_candidates, render
 
         return MLIRTemplateCaller(

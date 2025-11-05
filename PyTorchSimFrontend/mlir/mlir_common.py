@@ -408,6 +408,7 @@ class TileAdjustMixin():
         self.vmap.vlane_split_axis = best_vlane_split_axis
 
     def pad_vlane_tile(self):
+        # FIXME. this doesn't follow tile constraints...
         vlane_split_axis, vlane_stride, vector_lane = self.vmap.vlane_split_axis, self.vmap.vlane_stride, self.vmap.vector_lane
         used_vlane = min(math.ceil(self._tile_size[vlane_split_axis] / vlane_stride), vector_lane)
         padded_size = used_vlane * vlane_stride
@@ -790,7 +791,9 @@ class BaseMLIRKernel(common.Kernel, BaseMLIRHardwareInfo):
                 "vector_lane" : self.vector_lane,
                 "spad_info": self.spad_info,
                 "vlen" : self.vlen,
-                "arg_attributes" : arg_attributes
+                "arg_attributes" : arg_attributes,
+                "validate" : extension_config.CONFIG_TORCHSIM_VALIDATION_MODE,
+                "autotune" : True,
             },
             source_code=src_code,
         )

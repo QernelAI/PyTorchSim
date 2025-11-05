@@ -299,7 +299,7 @@ class CustomAsyncCompile(AsyncCompile):
                 # Dump arguments and meta data
                 dump_metadata(args, arg_attributes, result_path)
                 runtime_path = FunctionalSimulator.get_runtime_dump_path(result_path)
-                if extension_config.CONFIG_TORCHSIM_VALIDATION_MODE or validate:
+                if not autotune and (extension_config.CONFIG_TORCHSIM_VALIDATION_MODE or validate):
                     funcsim = FunctionalSimulator(result_path, key)
                     funcsim.run_spike(args, arg_attributes,
                                     runtime_path, self.validation_binary_name,

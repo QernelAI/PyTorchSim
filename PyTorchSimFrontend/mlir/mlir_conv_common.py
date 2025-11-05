@@ -75,7 +75,7 @@ class MLIRConvCommonTemplate(MLIRTemplate):
                **kwargs):
         # Extract input arguments info
         X, W, Y, Bias, n_extra_node, BATCH, I_C, I_H, I_W, O_C, K_H, K_W, O_H, O_W, PADDING_H, PADDING_W, STRIDE_H, STRIDE_W = self.extract_info(kernel, template_buffer_node, epilogue_nodes)
-        return [self.select_tile(kernel, n_extra_node, BATCH, I_C, O_C, K_H, K_W, O_H, O_W)]
+        return self.select_tile(kernel, n_extra_node, BATCH, I_C, O_C, K_H, K_W, O_H, O_W)
 
     def outer_func_render(self, kernel_name, input_args):
         X, W = self.input_nodes[0], self.input_nodes[1]

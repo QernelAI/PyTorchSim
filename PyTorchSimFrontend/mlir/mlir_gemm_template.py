@@ -116,7 +116,7 @@ class MLIRGemmTemplate(MLIRTemplate):
                **kwargs):
         X, W, Y, M, N, K, n_epilogue_node, n_prologue_node, n_extra_read = self.extract_info(template_buffer_node, epilogue_nodes, prologue_nodes)
         if tile_info is None:
-            TILE_M, TILE_N, TILE_K, SUB_TILE_M, SUB_TILE_N, SUB_TILE_K = self.select_tile(kernel, M, N, K, n_epilogue_node, n_extra_read, n_prologue_node)
+            TILE_M, TILE_N, TILE_K, SUB_TILE_M, SUB_TILE_N, SUB_TILE_K = self.select_tile(kernel, M, N, K, n_epilogue_node, n_extra_read, n_prologue_node)[0]
         else:
             TILE_M, TILE_N, TILE_K, SUB_TILE_M, SUB_TILE_N, SUB_TILE_K = tile_info
 
@@ -269,8 +269,7 @@ class MLIRGemmTemplate(MLIRTemplate):
                prologue_nodes: Optional[List[IRNode]] = None,
                **kwargs):
         X, W, Y, M, N, K, n_epilogue_node, n_prologue_node, n_extra_read = self.extract_info(template_buffer_node, epilogue_nodes, prologue_nodes)
-        TILE_M, TILE_N, TILE_K, SUB_TILE_M, SUB_TILE_N, SUB_TILE_K = self.select_tile(kernel, M, N, K, n_epilogue_node, n_extra_read, n_prologue_node)
-        return [[TILE_M, TILE_N, TILE_K, SUB_TILE_M, SUB_TILE_N, SUB_TILE_K]]
+        return self.select_tile(kernel, M, N, K, n_epilogue_node, n_extra_read, n_prologue_node)
 
     def extract_info(self, template_buffer_node, epilogue_nodes, prologue_nodes):
         if template_buffer_node is not None:
@@ -313,38 +312,44 @@ class MLIRGemmTemplate(MLIRTemplate):
             TILE_M = extension_config.CONFIG_TILE_M
             TILE_N = extension_config.CONFIG_TILE_N
             TILE_K = extension_config.CONFIG_TILE_K
+            tile_candidates = [[TILE_M, TILE_N, TILE_K]]
         elif gemm_shape in data:
             # case 2: cached tile size
             tile_info = data[gemm_shape]
             TILE_M = tile_info["TILE_M"]
             TILE_N = tile_info["TILE_N"]
             TILE_K = tile_info["TILE_K"]
+            tile_candidates = [[TILE_M, TILE_N, TILE_K]]
         else:
             # case 3: use gemm_combination_mapping
             min_tile = (n_extra_node + n_prologue_node) == 0
-            TILE_M, TILE_N, TILE_K = kernel.gemm_combination_mapping(M, N, K, max(n_extra_read-2, 0), n_prologue_node, min_tile=True)
+            tile_candidates = kernel.gemm_combination_mapping(M, N, K, max(n_extra_read-2, 0), n_prologue_node, min_tile=True)
 
         # Edge case
         if (M == 0) or (N == 0) or (K == 0):
             TILE_M, TILE_N, TILE_K = 1, 1, 1
+            tile_candidates = [[TILE_M, TILE_N, TILE_K]]
 
-        # Calculate Sub Tile Size for fine-grained DMA
-        if extension_config.CONFIG_SUBTILE:
-            # Case 1: adjust selective fine-grained DMA (SFG-DMA)
-            SUB_TILE_M = TILE_M if (TILE_M < kernel.vector_lane or n_prologue_node) else kernel.vector_lane
-            if (TILE_M == M and TILE_N == N and TILE_N <= 512):
-                SUB_TILE_N = TILE_N if TILE_N < kernel.vector_lane else kernel.vector_lane
-            else: # Avoid Row Conflict of weights
+        full_tile_candidates = []
+        for idx, (TILE_M, TILE_N, TILE_K) in enumerate(tile_candidates):
+            # Calculate Sub Tile Size for fine-grained DMA
+            if extension_config.CONFIG_SUBTILE:
+                # Case 1: adjust selective fine-grained DMA (SFG-DMA)
+                SUB_TILE_M = TILE_M if (TILE_M < kernel.vector_lane or n_prologue_node) else kernel.vector_lane
+                if (TILE_M == M and TILE_N == N and TILE_N <= 512):
+                    SUB_TILE_N = TILE_N if TILE_N < kernel.vector_lane else kernel.vector_lane
+                else: # Avoid Row Conflict of weights
+                    SUB_TILE_N = TILE_N
+                SUB_TILE_K = TILE_K
+                # Case 2: use manual sub tile size (FG-DMA)
+                if extension_config.CONFIG_MANUAL_SUBTILE_SIZE:
+                    SUB_TILE_M = extension_config.CONFIG_SUBTILE_M
+                    SUB_TILE_N = extension_config.CONFIG_SUBTILE_N
+                    SUB_TILE_K = extension_config.CONFIG_SUBTILE_K
+            # Case 3: None Subtile
+            else:
+                SUB_TILE_M = TILE_M
                 SUB_TILE_N = TILE_N
-            SUB_TILE_K = TILE_K
-            # Case 2: use manual sub tile size (FG-DMA)
-            if extension_config.CONFIG_MANUAL_SUBTILE_SIZE:
-                SUB_TILE_M = extension_config.CONFIG_SUBTILE_M
-                SUB_TILE_N = extension_config.CONFIG_SUBTILE_N
-                SUB_TILE_K = extension_config.CONFIG_SUBTILE_K
-        # Case 3: None Subtile
-        else:
-            SUB_TILE_M = TILE_M
-            SUB_TILE_N = TILE_N
-            SUB_TILE_K = TILE_K
-        return TILE_M,TILE_N,TILE_K, SUB_TILE_M,SUB_TILE_N,SUB_TILE_K
+                SUB_TILE_K = TILE_K
+            full_tile_candidates.append([TILE_M,TILE_N,TILE_K, SUB_TILE_M,SUB_TILE_N,SUB_TILE_K])
+        return full_tile_candidates
