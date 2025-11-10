@@ -338,7 +338,8 @@ To generate speedup results
 ```
 
 ## Contributing
-We welcome any contributions and issue reports. Contribution guideline will be posted.
+We welcome any contributions and issue reports.
+Please refer to the [Contributing Guide](https://github.com/PSAL-POSTECH/PyTorchSim?tab=contributing-ov-file) for details.
 
 ## Citation
 If you use PyTorchSim for your research, please cite the following paper.
