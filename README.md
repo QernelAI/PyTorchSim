@@ -31,6 +31,7 @@ PyTorchSim **supports**:
 - [Multi-tenancy](#multi-tenancy)
 - [Compiler optimizations](#compiler-optimizations)
 - [Mapping](#mapping)
+- [L2 Cache](#l2-cache) (persistent cache)
 
 ## Model Zoo
 | Model | Source | Status | Note |
@@ -298,6 +299,25 @@ export TORCHSIM_TILE_M=512
 export TORCHSIM_TILE_N=512
 export TORCHSIM_TILE_K=512
 ```
+## L2 Cache
+It supports L2 cache as persistent cache. User can provide software-managed allocation/eviction strategy for tensors with persistent cache.
+
+Common Memory (CMEM) is a new feature introduced in the latest TPUs (newer than TPUv3). Multiple cores share this memory, which provides high bandwidth. Reusable tensors are stored and loaded from CMEM to avoid off-chip traffic. Our L2 cache can work like as CMEM
+
+To allocate a tensor in L2 cache, set the environment variable as shown below. The `tpuv4` directory provides example plans for L2 cache obtained from TPUv4 profiling.
+```bash
+export SRAM_BUFFER_PLAN_PATH=tpuv4/gemm_plan.py
+```
+The L2 cache strategy file is composed as follows:
+```
+plan = {
+    "arg0_1"
+}
+```
+In this example, only one input tensor is registered in L2 cache. You can refer to the tensor name from the wrapper code. After running the code, you can find the wrapper codegen path in the [result](#result) section.
+
+Last but not least, you must set `l2d_type` and `l2d_config` in the [TOGSim config](#togsim-configuration) to use L2 cache. The `l2d_config` follows the same configuration method as [AccelSim](https://github.com/accel-sim/accel-sim-framework).
+
 ## Compiler Configuration
 `PyTorchSimFrontend/extension_config.py` contains target hardware configuration to compile.
 
@@ -331,6 +351,9 @@ export TORCHSIM_USE_TIMING_POOLING=0 # use lightweight pooling for timing
   "dram_latency" : 10,               // DRAM latency (cycle)
   "dram_nbl" : 2,                    // DRAM burst length size
   "dram_config_path" : "../configs/ramulator2_configs/HBM2_TPUv3.yaml", // Ramulator2 config file path
+
+  "l2d_type" : "datacache",
+  "l2d_config" : "S:64:128:512,32,L:B:m:W:L,A:192:4,32:0,32",
 
   "icnt_type" : "simple",            // Interconnect type (ex. booksim, simple)
   "icnt_latency" : 7,                // Interconnect latency (cycle)
