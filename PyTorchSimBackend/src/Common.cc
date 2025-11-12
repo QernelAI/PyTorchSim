@@ -116,7 +116,7 @@ SimulationConfig initialize_config(json config) {
 
   parsed_config.scheduler_type = config["scheduler"];
   if (config.contains("num_partition"))
-    parsed_config.num_patition = config["num_partition"];
+    parsed_config.num_partition = config["num_partition"];
   if (config.contains("partition")) {
     for (int i=0; i<parsed_config.num_cores; i++) {
       std::string core_partition = "core_" + std::to_string(i);

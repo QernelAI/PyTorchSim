@@ -409,7 +409,7 @@ class BackendSimulator():
                 break
 
         if simulation_finished_idx == -1:
-            print("[BackendSimulator] Treid to parsing wrong formated output file!")
+            print("[BackendSimulator] Tried to parsing wrong formated output file!")
             return core_metrics, dram_channel_bw, avg_dram_bw, simulation_time
 
         total_stat_lines = lines[simulation_finished_idx:]
