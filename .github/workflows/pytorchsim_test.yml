@@ -682,4 +682,11 @@ jobs:
             -e TORCHSIM_DUMP_PATH=/dump \
             -e TORCHSIM_VECTOR_LANE="${{ inputs.vector_lane }}" \
             -e TORCHSIM_SPAD_SIZE="${{ inputs.spad_size }}" \
-            ${{ inputs.image_name }} PyTorchSim/experiments/artifact/cycle_validation/run_cycle.sh
+            ${{ inputs.image_name }} PyTorchSim/experiments/artifact/cycle_validation/run_cycle.sh && cp /workspace/PyTorchSim/experiments/artifact/cycle_validation/summary_cycle.out /dump/summary_cycle.out
+
+      - name: Upload Accuracy Report Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: accuracy-report
+          path: /tmp/torchsim-ci/${GITHUB_SHA}/summary_cycle.out
+          if-no-files-found: error
