@@ -29,7 +29,7 @@ from PyTorchSimFrontend.mlir.mlir_codegen_backend import MLIRKernel, reduction_i
 from PyTorchSimFrontend.mlir.mlir_scheduling import SchedulerNode
 from torch._inductor.codegen import common
 
-from PyTorchSimFrontend.extension_config import CONFIG_TORCHSIM_DIR, CONFIG_AUTOTUNE_TEMPLATE_TOPK
+from PyTorchSimFrontend.extension_config import CONFIG_TORCHSIM_DIR, CONFIG_AUTOTUNE_TEMPLATE_TOPK, CONFIG_AUTOTUNE_TEMPLATE
 from . import mlir_common
 
 class IndentedBufferGroup:
@@ -494,7 +494,7 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
             print(f"[Auto-tune] Trying tile size: {list(tile_info)}")
             src_code = self.codegen_template_code(render, template_node, prologue_nodes, epilogue_nodes, tile_info)
             bench_runner = self.run_bench([template_node], self.kernel_name, src_code)
-            choices.append((bench_runner, src_code, tile_info))
+            choices.append((bench_runner, src_code, tile_info, self.loop_size))
             self.reset(reason=None)
         return choices
 
@@ -506,7 +506,12 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
         )
 
     def codegen_nodes(self, tile_candidates, render, template_node, prologue_nodes, epilogue_nodes):
-        src_code = self.autotune(tile_candidates, render, template_node, prologue_nodes, epilogue_nodes)
+        if CONFIG_AUTOTUNE_TEMPLATE and len(tile_candidates):
+            src_code, loop_size = self.autotune(tile_candidates, render, template_node, prologue_nodes, epilogue_nodes)
+            self.loop_size = loop_size
+        else:
+            tile_info = tile_candidates[0] if tile_candidates else None
+            src_code = self.codegen_template_code(render, template_node, prologue_nodes, epilogue_nodes, tile_info)
 
         with V.set_kernel_handler(self):
             self.meta_kernel()

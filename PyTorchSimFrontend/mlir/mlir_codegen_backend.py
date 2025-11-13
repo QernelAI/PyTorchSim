@@ -1627,15 +1627,15 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         choices = self.make_choices(*args)
 
         if len(choices) == 0: # can't autotune
-            return None
+            return [None, None]
         with ThreadPoolExecutor(max_workers=8) as executor:
             results = list(executor.map(get_cycle, choices))
         max_idx = results.index(min(results))
         if min(results) == float("inf"):
             raise RuntimeError("Failed to find optimal tile size...")
         self._log_autotune_result(choices[max_idx], results[max_idx])
-        optimal_src_code = choices[max_idx][1]
-        return optimal_src_code
+        optimal_src_code, loop_size = choices[max_idx][1], choices[max_idx][-1]
+        return optimal_src_code, loop_size
 
     def _log_autotune_result(self, best_choice, best_cycle):
         print(
@@ -1648,7 +1648,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
         src_code = super().codegen_nodes(nodes, kernel_name)
         self._prepare_simulator_headers(src_code)
         if extension_config.CONFIG_AUTOTUNE and not extension_config.CONFIG_BACKENDSIM_SPIKE_ONLY:
-            optimal_src_code = self.autotune(nodes, kernel_name)
+            optimal_src_code = self.autotune(nodes, kernel_name)[0]
             if optimal_src_code is not None:
                 return optimal_src_code
         return src_code
