@@ -688,6 +688,7 @@ jobs:
             ${{ inputs.image_name }} bash -c \
             "cd /workspace && PyTorchSim/experiments/artifact/cycle_validation/run_cycle.sh && \
             cp PyTorchSim/experiments/artifact/cycle_validation/summary_cycle.out /dump/summary_cycle.out"
+          ls /tmp/torchsim-ci/${GITHUB_SHA}
 
       - name: Upload Accuracy Report Artifact
         uses: actions/upload-artifact@v4
