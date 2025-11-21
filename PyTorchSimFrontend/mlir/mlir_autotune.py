@@ -2,7 +2,6 @@ import functools
 import torch
 import os
 import dataclasses
-from torch._inductor.autotune_process import BenchmarkRequest
 from torch._inductor.autotune_process import TensorMeta
 from torch._inductor.codecache import get_hash, write
 from PyTorchSimFrontend import extension_config
@@ -11,12 +10,9 @@ from Simulator.simulator import BackendSimulator
 from typing import (
     Any,
     Callable,
-    Dict,
     Iterable,
     List,
     Optional,
-    Sequence,
-    TYPE_CHECKING,
     Union,
 )
 

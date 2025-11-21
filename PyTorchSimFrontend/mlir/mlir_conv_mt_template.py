@@ -5,7 +5,6 @@ from PyTorchSimFrontend.mlir.mlir_conv_common import MLIRConvCommonTemplate
 from PyTorchSimFrontend.mlir.mlir_template import MLIRTemplateKernel
 from torch._inductor.ir import IRNode
 from PyTorchSimFrontend.mlir import mlir_common
-from PyTorchSimFrontend import extension_config
 
 CONV_TEMPLATE = r"""
 // Multi Channel Tile Conv2D kernel

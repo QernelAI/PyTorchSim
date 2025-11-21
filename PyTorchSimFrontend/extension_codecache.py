@@ -27,21 +27,6 @@ def dump_metadata(args, arg_attributes, path):
             file.write(f'{arg_name}=({arg_attribute[0]}, {arg.dtype}, {arg.shape})\n')
     return
 
-def parse_stack_sizes(file_path):
-    meta_path = file_path.split(".")[0]+".meta"
-    cmd = ["riscv64-unknown-elf-objcopy", "--dump-section", f".stack_sizes={meta_path}", file_path, "/dev/null"]
-    subprocess.run(cmd, check=True)
-
-    with open(meta_path, 'rb') as f:
-        stack_sizes_data = list(f.read())
-    if len(stack_sizes_data) <= 17:
-        raise ValueError("Invalid .stack_sizes section size")
-
-    stack_size_bytes = stack_sizes_data[8:-9]
-    stack_size = int.from_bytes(stack_size_bytes, byteorder='little')
-    return stack_size
-
-
 def llvm_compile_command(input, output):
     opt_output = f"{input[:-3]}_opt.ll"
     return [re.sub(r"[ \n]+", " ",

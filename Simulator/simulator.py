@@ -12,7 +12,7 @@ from pathlib import Path
 import torch
 import numpy as np
 
-from PyTorchSimFrontend.llvm.llvm_common import LLVMKernelArgs
+from PyTorchSimFrontend.mlir.mlir_common import MLIRKernelArgs
 from PyTorchSimFrontend import extension_config
 
 TORCH_TO_NUMPY = {
@@ -64,10 +64,10 @@ class FunctionalSimulator():
         for (arg_name, arg_attribute), arg in zip(arg_attributes, args):
             size = arg_attribute[2] if arg_attribute[1] != torch.bool else (arg_attribute[2] + 7) // 8
             array_size.append(size)
-            if LLVMKernelArgs.is_llvm_arg_in(arg_attribute[0]):
+            if MLIRKernelArgs.is_mlir_arg_in(arg_attribute[0]):
                 index = self.write_arg(arg, load_path, arg_name)
                 file_path.append(os.path.join(load_path, arg_name, f'{index}.raw'))
-            elif LLVMKernelArgs.is_llvm_arg_out(arg_attribute[0]):
+            elif MLIRKernelArgs.is_mlir_arg_out(arg_attribute[0]):
                 path = os.path.join(dump_path, arg_name)
                 os.makedirs(path, exist_ok=True)
                 file_path.append(os.path.join(path, f'{self.get_biggest_filename(path)}.raw'))
@@ -121,7 +121,7 @@ class FunctionalSimulator():
             raise RuntimeError(f"{error_msg}")
 
         for (arg_name, arg_attribute), arg, path in zip(arg_attributes, args, file_path):
-            if LLVMKernelArgs.is_llvm_arg_out(arg_attribute[0]):
+            if MLIRKernelArgs.is_mlir_arg_out(arg_attribute[0]):
                 self.load_tensor(arg, arg_name, arg_attribute, path)
 
         if cleanup:

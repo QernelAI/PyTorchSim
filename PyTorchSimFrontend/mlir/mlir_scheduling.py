@@ -3,12 +3,9 @@ import math
 import sympy
 from functools import reduce
 import operator
-from sympy import symbols, sympify, Symbol
-from collections import OrderedDict
-from concurrent.futures import ThreadPoolExecutor
+from sympy import symbols, sympify
 from PyTorchSimFrontend import extension_config
 from PyTorchSimFrontend.mlir.mlir_codegen_backend import MLIRKernel
-from PyTorchSimFrontend.mlir.mlir_autotune import MLIRBenchmarkRequest
 
 from torch._inductor import config
 from torch._inductor.scheduler import BaseScheduling, FusedSchedulerNode, SchedulerNode, BaseSchedulerNode

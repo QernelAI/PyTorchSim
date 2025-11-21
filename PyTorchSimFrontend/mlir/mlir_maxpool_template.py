@@ -1,11 +1,9 @@
-import os
 from typing import List, Optional, cast
 
 from PyTorchSimFrontend.mlir.mlir_template import MLIRTemplate
 from PyTorchSimFrontend.mlir.mlir_template import MLIRTemplateKernel
 from torch._inductor.ir import Buffer
 from torch._inductor.ir import IRNode
-from torch._inductor.ir import ReinterpretView
 from PyTorchSimFrontend.mlir import mlir_common
 import sympy
 

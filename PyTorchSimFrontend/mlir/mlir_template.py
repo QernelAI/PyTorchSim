@@ -13,8 +13,8 @@ from collections import OrderedDict
 from typing import List, Optional
 from unittest.mock import patch
 
-from torch._inductor.codegen.common import Kernel, KernelTemplate, ChoiceCaller, OpOverrides, CSE, DeferredLine
-from torch._inductor.ir import Buffer, IRNode, TemplateBuffer, View
+from torch._inductor.codegen.common import KernelTemplate, ChoiceCaller, CSE, DeferredLine
+from torch._inductor.ir import Buffer, IRNode, TemplateBuffer
 from torch._inductor.select_algorithm import PartialRender
 from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
 from torch._inductor.autotune_process import TensorMeta
