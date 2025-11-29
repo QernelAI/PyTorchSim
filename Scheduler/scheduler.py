@@ -171,7 +171,7 @@ class PyTorchSimRunner:
 
         import torch.utils.cpp_extension
         module = torch.utils.cpp_extension.load(
-            name="extension_device",
+            name="npu",
             sources=[
                 str(source_file),
             ],
@@ -179,7 +179,7 @@ class PyTorchSimRunner:
             verbose=True,
         )
 
-        torch.utils.rename_privateuse1_backend("extension_device")
+        torch.utils.rename_privateuse1_backend("npu")
         from torch._inductor.codegen.common import (
             get_scheduling_for_device,
             get_wrapper_codegen_for_device,
@@ -192,13 +192,13 @@ class PyTorchSimRunner:
             MLIRScheduling
         )
         register_backend_for_device(
-            "extension_device", MLIRScheduling, ExtensionWrapperCodegen
+            "npu", MLIRScheduling, ExtensionWrapperCodegen
         )
         assert(
-            get_scheduling_for_device("extension_device") == MLIRScheduling
+            get_scheduling_for_device("npu") == MLIRScheduling
         )
         assert(
-        get_wrapper_codegen_for_device("extension_device")
+        get_wrapper_codegen_for_device("npu")
             == ExtensionWrapperCodegen
         )
         return module
