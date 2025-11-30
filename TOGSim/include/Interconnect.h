@@ -51,8 +51,9 @@ class SimpleInterconnect : public Interconnect {
     mem_fetch* access;
   };
 
-  std::vector<std::queue<Entity>> _in_buffers;
+  std::vector<std::vector<std::queue<Entity>>> _in_buffers;
   std::vector<std::queue<mem_fetch*>> _out_buffers;
+  std::vector<int> _rr_next_src;
   std::vector<bool> _busy_node;
 };
 
