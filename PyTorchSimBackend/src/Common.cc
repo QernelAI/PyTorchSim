@@ -62,7 +62,7 @@ SimulationConfig initialize_config(json config) {
   else
     throw std::runtime_error(fmt::format("Not implemented dram type {} ",
                                          (std::string)config["dram_type"]));
-  parsed_config.dram_freq = config["dram_freq_mhz"];
+  parsed_config.dram_freq_mhz = config["dram_freq_mhz"];
   if (config.contains("dram_latency"))
     parsed_config.dram_latency = config["dram_latency"];
   if (config.contains("ramulator_config_path"))

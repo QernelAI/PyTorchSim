@@ -5,7 +5,7 @@ Simulator::Simulator(SimulationConfig config)
   // Create dram object
   _core_period = 1000000 / (config.core_freq_mhz);
   _icnt_period = 1000000 / (config.icnt_freq);
-  _dram_period = 1000000 / (config.dram_freq);
+  _dram_period = 1000000 / (config.dram_freq_mhz);
   _core_time = 0;
   _dram_time = 0;
   _icnt_time = 0;

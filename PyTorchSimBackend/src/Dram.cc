@@ -20,7 +20,7 @@ Dram::Dram(SimulationConfig config, cycle_type* core_cycle) {
   _n_ch_per_partition = _n_ch / _n_partitions;
   _config = config;
 
-  spdlog::info("[Config/DRAM] DRAM Bandwidth {} GB/s, Freq: {} MHz, Channels: {}, Request_size: {}B", config.max_dram_bandwidth(), config.dram_freq, _n_ch, _req_size);
+  spdlog::info("[Config/DRAM] DRAM Bandwidth {} GB/s, Freq: {} MHz, Channels: {}, Request_size: {}B", config.max_dram_bandwidth(), config.dram_freq_mhz, _n_ch, _req_size);
   /* Initialize DRAM Channels */
   for (int ch = 0; ch < _n_ch; ch++) {
     m_to_crossbar_queue.push_back(std::queue<mem_fetch*>());

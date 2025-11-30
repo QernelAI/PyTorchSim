@@ -351,7 +351,7 @@ export TORCHSIM_USE_TIMING_POOLING=0 # use lightweight pooling for timing
   "num_systolic_array_per_core" : 2, // Number of systolic array per core
 
   "dram_type" : "ramulator2",        // DRAM type (ex. ramulator2, simple)
-  "dram_freq" : 940,                 // DRAM frequency (MHz)
+  "dram_freq_mhz" : 940,             // DRAM frequency (MHz)
   "dram_channels": 32,               // Number of DRAM channels
   "dram_req_size": 32,               // DRAM request size (B)
   "dram_latency" : 10,               // DRAM latency (cycle)

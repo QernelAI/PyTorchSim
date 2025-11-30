@@ -27,7 +27,7 @@ struct SimulationConfig {
   /* DRAM config */
   DramType dram_type;
   uint32_t dram_num_partitions = 1;
-  uint32_t dram_freq;
+  uint32_t dram_freq_mhz;
   uint32_t dram_channels;
   uint32_t dram_req_size;
   uint32_t dram_latency;
@@ -63,6 +63,6 @@ struct SimulationConfig {
   }
 
   float max_dram_bandwidth() {
-    return dram_freq * dram_channels * dram_req_size * 2 / dram_nbl / 1000; // GB/s
+    return dram_freq_mhz * dram_channels * dram_req_size * 2 / dram_nbl / 1000; // GB/s
   }
 };
