@@ -1656,7 +1656,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
                 "spad_info": self.spad_info,
                 "vlen" : self.vlen,
                 "arg_attributes" : arg_attributes,
-                "validate" : extension_config.CONFIG_TORCHSIM_VALIDATION_MODE,
+                "validate" : extension_config.CONFIG_TORCHSIM_FUNCTIONAL_MODE,
                 "autotune" : True,
             },
             source_code=src_code,
