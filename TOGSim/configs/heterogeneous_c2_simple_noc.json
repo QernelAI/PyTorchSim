@@ -18,7 +18,8 @@
 
   "icnt_type" : "simple",
   "icnt_latency" : 7,
-  "icnt_freq_mhz" : 15000,
+  "icnt_freq_mhz" : 940,
+  "icnt_injection_ports_per_core" : 16,
 
   "num_partition" : 2,
   "partition": {

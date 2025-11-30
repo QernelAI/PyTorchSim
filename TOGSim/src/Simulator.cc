@@ -4,7 +4,7 @@ Simulator::Simulator(SimulationConfig config)
     : _config(config), _core_cycles(0) {
   // Create dram object
   _core_period = 1000000 / (config.core_freq_mhz);
-  _icnt_period = 1000000 / (config.icnt_freq);
+  _icnt_period = 1000000 / (config.icnt_freq_mhz);
   _dram_period = 1000000 / (config.dram_freq_mhz);
   _core_time = 0;
   _dram_time = 0;
@@ -14,7 +14,7 @@ Simulator::Simulator(SimulationConfig config)
   _n_cores = config.num_cores;
   _n_memories = config.dram_channels;
   _memory_req_size = config.dram_req_size;
-  _noc_node_per_core = config.icnt_node_per_core;
+  _noc_node_per_core = config.icnt_injection_ports_per_core;
   char* onnxim_path_env = std::getenv("TORCHSIM_DIR");
   std::string onnxim_path = onnxim_path_env != NULL?
     std::string(onnxim_path_env) + "/TOGSim" : std::string("./");
@@ -51,7 +51,7 @@ Simulator::Simulator(SimulationConfig config)
   }
 
   // Create interconnect object
-  spdlog::info("[Config/Interconnect] Interconnect freq: {} MHz", config.icnt_freq);
+  spdlog::info("[Config/Interconnect] Interconnect freq: {} MHz", config.icnt_freq_mhz);
   if (config.icnt_type == IcntType::SIMPLE) {
     spdlog::info("[Config/Interconnect] SimpleInerconnect selected");
     _icnt = std::make_unique<SimpleInterconnect>(config);

@@ -10,15 +10,14 @@
   "dram_channels": 8,
   "dram_req_size": 32,
   "dram_latency" : 10,
-  "dram_size" : 32,
   "dram_nbl" : 2,
   "dram_print_interval": 10000,
   "dram_config_path" : "../configs/ramulator2_configs/HBM2_TPUv3.yaml",
  
   "icnt_type" : "booksim2",
   "icnt_latency" : 1,
-  "icnt_freq" : 2000,
-  "icnt_node_per_core" : 16,
+  "icnt_freq" : 940,
+  "icnt_injection_ports_per_core" : 16,
   "icnt_config_path" : "../configs/booksim2_configs/fly_c32_m8.icnt",
  
   "precision" : 4,

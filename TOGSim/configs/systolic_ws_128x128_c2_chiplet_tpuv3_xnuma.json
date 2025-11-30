@@ -15,6 +15,6 @@
 
   "icnt_type" : "booksim2",
   "icnt_freq_mhz" : 1000,
-  "icnt_node_per_core" : 16,
+  "icnt_injection_ports_per_core" : 16,
   "booksim_config_path" : "../configs/booksim2_configs/chiplet_32_32_2.icnt"
 }

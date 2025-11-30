@@ -361,9 +361,10 @@ export TORCHSIM_USE_TIMING_POOLING=0 # use lightweight pooling for timing
   "l2d_type" : "datacache",
   "l2d_config" : "S:64:128:512,32,L:B:m:W:L,A:192:4,32:0,32",
 
-  "icnt_type" : "simple",            // Interconnect type (ex. booksim, simple)
-  "icnt_latency" : 7,                // Interconnect latency (cycle)
-  "icnt_freq" : 28000,               // Interconnect frequency (MHz)
+  "icnt_type" : "simple",              // Interconnect type (ex. booksim, simple)
+  "icnt_latency" : 7,                  // Interconnect latency (cycle)
+  "icnt_freq_mhz" : 940,               // Interconnect frequency (MHz)
+  "icnt_injection_ports_per_core" : 16 // Interconnect injection ports per core
   "icnt_config_path" : "../configs/booksim2_configs/fly_c4_m32.icnt", // Booksim2 config file path
 
   "precision" : 4,                   // Element's precision in tensor (Byte)

@@ -13,7 +13,7 @@
   "ramulator_config_path" : "../configs/ramulator2_configs/HBM2.yaml",
 
   "icnt_type" : "booksim2",
-  "icnt_freq_mhz" : 8000,
-  "icnt_node_per_core" : 16,
+  "icnt_freq_mhz" : 700,
+  "icnt_injection_ports_per_core" : 16,
   "booksim_config_path" : "../configs/booksim2_configs/fly_c16_m16.icnt"
 }
