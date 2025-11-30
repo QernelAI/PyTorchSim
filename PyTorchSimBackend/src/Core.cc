@@ -4,11 +4,9 @@ Core::Core(uint32_t id, SimulationConfig config)
     : _id(id),
       _config(config),
       _core_cycle(0),
-      _stat_tma_cycle(0),
+      _stat_dma_cycle(0),
       _num_systolic_array_per_core(config.num_systolic_array_per_core),
-      _tma(id, config.dram_req_size) {
-  _sram_size = _config.sram_size * 1024;
-  _used_sram_size = 0;
+      _dma(id, config.dram_req_size) {
   _sa_compute_pipeline.resize(_num_systolic_array_per_core);
   _stat_tot_sa_compute_cycle.resize(_num_systolic_array_per_core);
   _stat_sa_compute_cycle.resize(_num_systolic_array_per_core);
@@ -25,14 +23,9 @@ bool Core::can_issue(const std::shared_ptr<Tile>& op) {
 
 void Core::issue(std::shared_ptr<Tile> op) {
   if (op->get_instructions().size()){
-    spdlog::trace("[Core {}][{}] New Tile is issued, remain sram: {} Required size: {}, Free size: {}",
-      _id, _core_cycle, _sram_size-_used_sram_size, op->get_required_sram_size(),
-      op->get_instructions().back()->get_free_sram_size());
-  } else {
-    spdlog::trace("[Core {}][{}] New Tile is issued, remain sram: {} Required size: {}",
-      _id, _core_cycle, _sram_size-_used_sram_size, op->get_required_sram_size());
+    spdlog::trace("[{}][Core {}][TILE_SCHEDULED]",
+      _core_cycle, _id);
   }
-  //_used_sram_size += op->get_required_sram_size();
   for (const auto& inst : op->get_instructions()) {
     if (inst->is_ready())
       op->enqueue_ready(inst);
@@ -125,39 +118,38 @@ void Core::dma_cycle() {
     /* Set tag table of async dma load */
     if (instruction->is_dma_read() && instruction->is_async_dma()) {
       auto& key = instruction->get_tag_id();
-      assert(!_tma.get_tag_finish(instruction->subgraph_id, key));
-      _tma.set_tag_finish(instruction->subgraph_id, key);
-      spdlog::trace("[Core {}][{}] {} ASYNC FINISHED, Used sram: {}, Release sram: {}, subgraph_id: {} addr_name: {} tag_id: {} tag_idx_list: {} tag_stride_list: {}",
-                    _id, _core_cycle, opcode_to_string(instruction->get_opcode()),
-                    _used_sram_size, instruction->get_free_sram_size(),
+      assert(!_dma.get_tag_finish(instruction->subgraph_id, key));
+      _dma.set_tag_finish(instruction->subgraph_id, key);
+      spdlog::trace("[{}][Core {}] {} ASYNC FINISHED, subgraph_id: {} addr_name: {} tag_id: {} tag_idx_list: {} tag_stride_list: {}",
+                    _core_cycle, _id, opcode_to_string(instruction->get_opcode()),
                     instruction->subgraph_id, instruction->get_addr_name(),
                     fmt::format("[{}]", fmt::join(instruction->get_tag_id(), ", ")),
                     fmt::format("[{}]", fmt::join(instruction->get_tag_idx_list(), ", ")),
                     fmt::format("[{}]", fmt::join(instruction->get_tag_stride_list(), ", ")));
-      for (auto & wait_inst : _tma.get_tag_waiter(instruction->subgraph_id, key)) {
-        _tma.mark_tag_used(instruction->subgraph_id, key);
+      for (auto & wait_inst : _dma.get_tag_waiter(instruction->subgraph_id, key)) {
+        _dma.mark_tag_used(instruction->subgraph_id, key);
         finish_instruction(wait_inst);
       }
     }
     _dma_finished_queue.erase(_dma_finished_queue.begin());
   }
 
-  if (_tma.is_finished()) {
+  if (_dma.is_finished()) {
     /* Finish instruction when it is DMA store */
-    if (_tma.get_current_inst() != nullptr) {
-      std::shared_ptr<Instruction> finished_inst = std::move(_tma.get_current_inst());
+    if (_dma.get_current_inst() != nullptr) {
+      std::shared_ptr<Instruction> finished_inst = std::move(_dma.get_current_inst());
       if (finished_inst->is_dma_write()) {
         /* Only DMA write operation is finished! */
         finish_instruction(finished_inst);
       } else if (finished_inst->is_dma_read() && finished_inst->is_async_dma()) {
         /* Register tag table for async dma load */
-        _tma.register_tag(finished_inst->subgraph_id, finished_inst->get_tag_id());
+        _dma.register_tag(finished_inst->subgraph_id, finished_inst->get_tag_id());
         finish_instruction(finished_inst);
       } else if(!finished_inst->is_dma_read()) {
-        spdlog::error("[Core {}][{}] TMA instruction in not valid", _id, _core_cycle);
+        spdlog::error("[{}][Core {}] DMA instruction in not valid", _core_cycle, _id);
         exit(EXIT_FAILURE);
       } else if (finished_inst->get_opcode() == Opcode::BAR) {
-        spdlog::trace("[Core {}][{}] {} FINISHED, addr_name: {} tag_id: {} tag_idx_list: {} tag_stride_list: {}", _id, _core_cycle,
+        spdlog::trace("[{}][Core {}] {} FINISHED, addr_name: {} tag_id: {} tag_idx_list: {} tag_stride_list: {}", _core_cycle, _id,
                       opcode_to_string(finished_inst->get_opcode()), finished_inst->get_addr_name(),
                       fmt::format("[{}]", fmt::join(finished_inst->get_tag_id(), ", ")),
                       fmt::format("[{}]", fmt::join(finished_inst->get_tag_idx_list(), ", ")),
@@ -170,27 +162,27 @@ void Core::dma_cycle() {
     /* Issue new DMA operation */
     if (!_ld_inst_queue.empty()) {
       std::shared_ptr<Instruction> inst = _ld_inst_queue.front();
-      _tma.issue_tile(inst);
+      _dma.issue_tile(inst);
       _ld_inst_queue.pop();
     } else if (!_st_inst_queue.empty()) {
       std::shared_ptr<Instruction> inst = _st_inst_queue.front();
-      _tma.issue_tile(inst);
+      _dma.issue_tile(inst);
       _st_inst_queue.pop();
     } else {
-      /* TMA is idle */
-      _stat_tma_idle_cycle++;
+      /* DMA is idle */
+      _stat_dma_idle_cycle++;
       return;
     }
   }
   /* Generate memfetch */
-  auto access_vec = _tma.get_memory_access();
+  auto access_vec = _dma.get_memory_access(_core_cycle);
   for (auto access : *access_vec) {
     access->set_start_cycle(_core_cycle);
     _request_queue.push(access);
   }
 
-  /* Increase tma stat cycle */
-  _stat_tma_cycle++;
+  /* Increase dma stat cycle */
+  _stat_dma_cycle++;
 }
 
 void Core::cycle() {
@@ -218,20 +210,20 @@ void Core::cycle() {
             /* Check another MOVIN with same tag is issued */
             auto& key = inst->get_tag_id();
             if (inst->is_sparse_inst()) {
-              _tma.register_tag(inst->subgraph_id, key);
-              _tma.set_tag_sparse(inst->subgraph_id, key);
+              _dma.register_tag(inst->subgraph_id, key);
+              _dma.set_tag_sparse(inst->subgraph_id, key);
               finish_instruction(inst);
               issued = true;
               _stat_tot_skipped_inst.at(static_cast<size_t>(inst->get_opcode()))++;
               break;
-            } else if (inst->is_async_dma() && _tma.tag_key_exist(inst->subgraph_id, key)) {
-              bool finished = _tma.get_tag_finish(inst->subgraph_id, key);
+            } else if (inst->is_async_dma() && _dma.tag_key_exist(inst->subgraph_id, key)) {
+              bool finished = _dma.get_tag_finish(inst->subgraph_id, key);
               if (finished)
                 finish_instruction(inst);
               else
-                _tma.register_tag_waiter(inst->subgraph_id, key, inst);
-              spdlog::trace("[Core {}][{}] {} SKIPPED, free_sram_size: {} addr_name: {} tag_id: {} tag_idx_list: {} tag_stride_list: {}", _id, _core_cycle,
-                            opcode_to_string(inst->get_opcode()), inst->get_free_sram_size(),
+                _dma.register_tag_waiter(inst->subgraph_id, key, inst);
+              spdlog::trace("[{}][Core {}][SIKIPPED] {}, addr_name: {} tag_id: {} tag_idx_list: {} tag_stride_list: {}", _core_cycle, _id,
+                            opcode_to_string(inst->get_opcode()),
                             inst->get_addr_name(),
                             fmt::format("[{}]", fmt::join(inst->get_tag_id(), ", ")),
                             fmt::format("[{}]", fmt::join(inst->get_tag_idx_list(), ", ")),
@@ -240,8 +232,8 @@ void Core::cycle() {
               _stat_tot_skipped_inst.at(static_cast<size_t>(inst->get_opcode()))++;
               break;
             } else {
-              spdlog::trace("[Core {}][{}] {} ISSUED, free_sram_size: {} addr_name: {} tag_id: {} tag_idx_list: {} tag_stride_list: {}", _id, _core_cycle,
-                            opcode_to_string(inst->get_opcode()), inst->get_free_sram_size(),
+              spdlog::trace("[{}][Core {}][INST_ISSUED] {}, addr_name: {} tag_id: {} tag_idx_list: {} tag_stride_list: {}", _core_cycle, _id,
+                            opcode_to_string(inst->get_opcode()),
                             inst->get_addr_name(),
                             fmt::format("[{}]", fmt::join(inst->get_tag_id(), ", ")),
                             fmt::format("[{}]", fmt::join(inst->get_tag_idx_list(), ", ")),
@@ -252,8 +244,12 @@ void Core::cycle() {
             }
           }
         case Opcode::MOVOUT:
-          spdlog::trace("[Core {}][{}] {} ISSUED, free_sram_size: {}", _id, _core_cycle,
-                        opcode_to_string(inst->get_opcode()), inst->get_free_sram_size());
+          spdlog::trace("[{}][Core {}][INST_ISSUED] {}, addr_name: {} tag_id: {} tag_idx_list: {} tag_stride_list: {}", _core_cycle, _id,
+                        opcode_to_string(inst->get_opcode()),
+                        inst->get_addr_name(),
+                        fmt::format("[{}]", fmt::join(inst->get_tag_id(), ", ")),
+                        fmt::format("[{}]", fmt::join(inst->get_tag_idx_list(), ", ")),
+                        fmt::format("[{}]", fmt::join(inst->get_tag_stride_list(), ", ")));
           _st_inst_queue.push(inst);
           issued = true;
           break;
@@ -269,13 +265,14 @@ void Core::cycle() {
               inst->finish_cycle = target_pipeline.back()->finish_cycle + inst->get_compute_cycle() - overlapped_cycle;
               inst->bubble_cycle = bubble_cycle;
             }
+
             if (inst->get_compute_cycle() == 0) {
               inst->finish_instruction();
               static_cast<Tile*>(inst->get_owner())->inc_finished_inst();
               _stat_tot_skipped_inst.at(static_cast<size_t>(inst->get_opcode()))++;
               instructions.erase(it);
             } else {
-              spdlog::trace("[Core {}][SA {}][{}] {}-{} ISSUED, finsh at {}", _id, _systolic_array_rr, _core_cycle,
+              spdlog::trace("[{}][Core {}][INST_ISSUED][SA {}] {}-{}, finsh at {}", _core_cycle, _id, _systolic_array_rr,
                             opcode_to_string(inst->get_opcode()), inst->get_compute_type(), inst->finish_cycle);
               target_pipeline.push(inst);
               issued = true;
@@ -288,7 +285,7 @@ void Core::cycle() {
         case Opcode::BAR:
           {
             auto& key = inst->get_tag_id();
-            uint32_t finished = _tma.get_tag_finish(inst->subgraph_id, key);
+            uint32_t finished = _dma.get_tag_finish(inst->subgraph_id, key);
             if (finished == -1) {
               for (auto child_inst : inst->get_child_inst()) {
                 if (child_inst->get_opcode() == Opcode::COMP && child_inst->get_compute_type() == MATMUL) {
@@ -297,12 +294,12 @@ void Core::cycle() {
               }
               finish_instruction(inst);
             } else if (finished != 0) {
-              _tma.mark_tag_used(inst->subgraph_id, key);
+              _dma.mark_tag_used(inst->subgraph_id, key);
               finish_instruction(inst);
             } else {
-              _tma.register_tag_waiter(inst->subgraph_id, key, inst);
+              _dma.register_tag_waiter(inst->subgraph_id, key, inst);
             }
-            spdlog::trace("[Core {}][{}] {} ISSUED,  addr_name: {} tag_id: {} tag_idx_list: {} tag_stride_list: {}", _id, _core_cycle,
+            spdlog::trace("[{}][Core {}][INST_ISSUED] {},  addr_name: {} tag_id: {} tag_idx_list: {} tag_stride_list: {}", _core_cycle, _id,
                             opcode_to_string(inst->get_opcode()), inst->get_addr_name(),
                             fmt::format("[{}]", fmt::join(inst->get_tag_id(), ", ")),
                             fmt::format("[{}]", fmt::join(inst->get_tag_idx_list(), ", ")),
@@ -344,31 +341,26 @@ void Core::cycle() {
 }
 
 void Core::finish_instruction(std::shared_ptr<Instruction>& inst) {
-  size_t free_sram_size = inst->get_free_sram_size();
   if (inst->finished) {
-    spdlog::error("[Core {}][{}] {} FINISHED, inst already finished!!", _id, _core_cycle,
+    spdlog::error("[{}][Core {}][ERROR] {} inst already finished!!", _core_cycle, _id,
                   opcode_to_string(inst->get_opcode()));
     exit(EXIT_FAILURE);
   }
   inst->finish_instruction();
   static_cast<Tile*>(inst->get_owner())->inc_finished_inst();
   if (inst->get_opcode() == Opcode::COMP) {
-    spdlog::trace("[Core {}][{}] {}-{} FINISHED, Used sram: {}, Release sram: {}",
-      _id, _core_cycle, opcode_to_string(inst->get_opcode()), inst->get_compute_type(),
-      _used_sram_size, inst->get_free_sram_size());
+    spdlog::trace("[{}][Core {}][INST_FINISHED] {}-{}",
+      _core_cycle, _id, opcode_to_string(inst->get_opcode()), inst->get_compute_type());
   } else if (inst->get_opcode() != Opcode::BAR && inst->is_async_dma()){
-    spdlog::trace("[Core {}][{}] {} ASYNC REGISTERED, Used sram: {}, Release sram: {} subgraph_id: {} addr_name: {} tag_id: {} tag_idx_list: {} tag_stride_list: {}",
-      _id, _core_cycle, opcode_to_string(inst->get_opcode()), _used_sram_size,
-      inst->get_free_sram_size(), inst->subgraph_id, inst->get_addr_name(),
+    spdlog::trace("[{}][Core {}][ASYNC] {} subgraph_id: {} addr_name: {} tag_id: {} tag_idx_list: {} tag_stride_list: {}",
+      _core_cycle, _id, opcode_to_string(inst->get_opcode()), inst->subgraph_id, inst->get_addr_name(),
       inst->get_tag_id(),
       fmt::format("[{}]", fmt::join(inst->get_tag_idx_list(), ", ")),
       fmt::format("[{}]", fmt::join(inst->get_tag_stride_list(), ", ")));
   } else if ((inst->get_opcode() == Opcode::MOVIN || inst->get_opcode() == Opcode::MOVOUT) && !inst->is_async_dma()) {
-    spdlog::trace("[Core {}][{}] {} FINISHED, free_sram_size: {} addr_name: {}", _id, _core_cycle,
-      opcode_to_string(inst->get_opcode()), inst->get_free_sram_size(),
-      inst->get_addr_name());
+    spdlog::trace("[{}][Core {}][INST_FINISHED] {} addr_name: {}", _core_cycle, _id,
+      opcode_to_string(inst->get_opcode()), inst->get_addr_name());
   }
-  //_used_sram_size -= free_sram_size;
 }
 
 bool Core::running() {
@@ -378,7 +370,7 @@ bool Core::running() {
   for (int i=0; i<_num_systolic_array_per_core;i++)
     running = running || !_sa_compute_pipeline.at(i).empty();
   running = running || !_dma_waiting_queue.empty() || !_dma_finished_queue.empty();
-  running = running || !_tma.empty();
+  running = running || !_dma.empty();
   running = running || !_ld_inst_queue.empty();
   running = running || !_st_inst_queue.empty();
   return running;
@@ -431,11 +423,11 @@ void Core::print_stats() {
   for (int i=0; i<_num_systolic_array_per_core; i++)
     spdlog::info("Core [{}] : Systolic array [{}] Utilization(%) {:.2f}, active cycle {}, idle cycle {}", _id, i, sa_utilization.at(i),
       _stat_tot_sa_compute_cycle.at(i), _stat_tot_sa_compute_idle_cycle.at(i));
-  float dram_bw = _config.dram_req_size * _stat_tot_mem_response * _config.core_freq / (_core_cycle * 1000); // B/cycle
-  spdlog::info("Core [{}] : TMA active cycle {} TMA idle cycle {} DRAM BW {:.3f} GB/s ({})", _id, _stat_tot_tma_cycle, _stat_tot_tma_idle_cycle, dram_bw, _stat_tot_mem_response);
-  spdlog::info("Core [{}] : Vector Unit Utilization(%) {:.2f}, active cycle {}, idle_cycle {}", _id,
+  float dram_bw = _config.dram_req_size * _stat_tot_mem_response * _config.core_freq_mhz / (_core_cycle * 1000); // B/cycle
+  spdlog::info("Core [{}] : DMA active cycle {} DMA idle cycle {} DRAM BW {:.3f} GB/s ({})", _id, _stat_tot_dma_cycle, _stat_tot_dma_idle_cycle, dram_bw, _stat_tot_mem_response);
+  spdlog::info("Core [{}] : Vector Unit utilization(%) {:.2f}, active cycle {}, idle_cycle {}", _id,
     static_cast<float>(_stat_tot_vu_compute_cycle * 100) / _core_cycle, _stat_tot_vu_compute_cycle, _stat_tot_vu_compute_idle_cycle);
-  spdlog::info("Core [{}] : Numa hit count : {}, Numa miss count : {}", _id, _stat_numa_hit, _stat_numa_miss);
+  spdlog::info("Core [{}] : NUMA local access count : {}, NUMA remote access count : {}", _id, _stat_numa_hit, _stat_numa_miss);
   spdlog::info("Core [{}] : Total cycle {}", _id, _core_cycle);
 }
 
@@ -443,7 +435,7 @@ void Core::print_current_stats() {
   std::vector<float> sa_utilization;
   for (int i=0; i<_num_systolic_array_per_core; i++)
     sa_utilization.push_back(static_cast<float>(_stat_sa_compute_cycle.at(i) * 100) / _config.core_print_interval);
-  float dram_bw = _config.dram_req_size * _stat_mem_response * _config.core_freq / (_config.core_print_interval * 1000); // B/cycle
+  float dram_bw = _config.dram_req_size * _stat_mem_response * _config.core_freq_mhz / (_config.core_print_interval * 1000); // B/cycle
   auto level = spdlog::level::info;
   if(_id != 0)
     level = spdlog::level::debug;
@@ -452,7 +444,7 @@ void Core::print_current_stats() {
   for (int i=0; i<_num_systolic_array_per_core; i++)
     spdlog::info("Core [{}] : Systolic array [{}] Utilization(%) {:.2f}, active cycle {}, idle cycle {}", _id, i, sa_utilization.at(i),
       _stat_sa_compute_cycle.at(i), _stat_sa_compute_idle_cycle.at(i));
-  spdlog::info("Core [{}] : TMA active cycle {} TMA idle cycle {} DRAM BW {:.3f} GB/s ({})", _id, _stat_tma_cycle, _stat_tma_idle_cycle, dram_bw, _stat_mem_response);
+  spdlog::info("Core [{}] : DMA active cycle {} DMA idle cycle {} DRAM BW {:.3f} GB/s ({})", _id, _stat_dma_cycle, _stat_dma_idle_cycle, dram_bw, _stat_mem_response);
   spdlog::info("Core [{}] : Vector Unit Utilization(%) {:.2f}, active cycle {}, idle_cycle {}", _id,
     static_cast<float>(_stat_vu_compute_cycle * 100) / _config.core_print_interval, _stat_vu_compute_cycle, _stat_vu_compute_idle_cycle);
   spdlog::info("Core [{}] : Total cycle {}", _id, _core_cycle);
@@ -468,13 +460,13 @@ void Core::update_stats() {
   }
 
   _stat_tot_vu_compute_cycle += _stat_vu_compute_cycle;
-  _stat_tot_tma_cycle += _stat_tma_cycle;
-  _stat_tot_tma_idle_cycle += _stat_tma_idle_cycle;
+  _stat_tot_dma_cycle += _stat_dma_cycle;
+  _stat_tot_dma_idle_cycle += _stat_dma_idle_cycle;
   _stat_tot_mem_response += +_stat_mem_response;
 
   _stat_vu_compute_cycle = 0;
-  _stat_tma_cycle = 0;
-  _stat_tma_idle_cycle = 0;
+  _stat_dma_cycle = 0;
+  _stat_dma_idle_cycle = 0;
   _stat_vu_compute_idle_cycle = 0;
   _stat_mem_response = 0;
 }

@@ -18,8 +18,7 @@ struct SimulationConfig {
   std::vector<CoreType> core_type;
   std::string stonne_config_path;
   uint32_t num_cores;
-  uint32_t core_freq;
-  uint32_t sram_size;
+  uint32_t core_freq_mhz;
   uint32_t core_print_interval = 0;
   uint32_t num_systolic_array_per_core = 1;
   uint32_t num_stonne_per_core = 1;
@@ -28,7 +27,7 @@ struct SimulationConfig {
   /* DRAM config */
   DramType dram_type;
   uint32_t dram_num_partitions = 1;
-  uint32_t dram_freq;
+  uint32_t dram_freq_mhz;
   uint32_t dram_channels;
   uint32_t dram_req_size;
   uint32_t dram_latency;
@@ -47,7 +46,7 @@ struct SimulationConfig {
   std::string icnt_config_path;
   uint32_t icnt_freq;
   uint32_t icnt_latency;
-  uint32_t icnt_print_interval=0;
+  uint32_t icnt_stats_print_period_cycles=0;
 
   /* Sheduler config */
   uint32_t num_partition=1;
@@ -57,7 +56,6 @@ struct SimulationConfig {
   std::map<uint32_t, uint32_t> partiton_map;
 
   /* Other configs */
-  uint32_t precision;
   std::string layout;
 
   uint64_t align_address(uint64_t addr) {
@@ -65,6 +63,6 @@ struct SimulationConfig {
   }
 
   float max_dram_bandwidth() {
-    return dram_freq * dram_channels * dram_req_size * 2 / dram_nbl / 1000; // GB/s
+    return dram_freq_mhz * dram_channels * dram_req_size * 2 / dram_nbl / 1000; // GB/s
   }
 };

@@ -93,7 +93,7 @@ class MLIRConvCommonTemplate(MLIRTemplate):
             OUTPUT=Y,
             PADDING_H=self.padding[0],
             PADDING_W=self.padding[1],
-            VALIDATION_MODE=extension_config.CONFIG_TORCHSIM_VALIDATION_MODE,
+            VALIDATION_MODE=extension_config.CONFIG_TORCHSIM_FUNCTIONAL_MODE,
             BACKENDSIM_EAGER_MODE=eager_mode,
             input_reorder=self.input_reorder
         )

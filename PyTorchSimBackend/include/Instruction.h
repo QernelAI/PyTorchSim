@@ -60,9 +60,7 @@ class Instruction : public std::enable_shared_from_this<Instruction> {
   std::vector<addr_type> get_trace_address() { return _trace_address; }
   bool load_indirect_index(const std::string& path, uint64_t*& indirect_index, const std::vector<uint64_t>& tile_size);
   void set_trace_address(std::vector<addr_type>& trace_address) { _trace_address = trace_address; }
-  size_t get_free_sram_size() { return _free_sram_size; }
   addr_type get_base_dram_address() { return dram_addr; }
-  void set_free_sram_size(size_t sram_size) { _free_sram_size=sram_size; }
   void* get_owner() { return _owner; }
   void set_owner(void *owner) { _owner = owner;}
   void set_owner_ready_queue(std::list<std::shared_ptr<Instruction>>* q) { _owner_ready_queue_ref = q; }
@@ -103,7 +101,6 @@ class Instruction : public std::enable_shared_from_this<Instruction> {
   size_t _tile_numel;
   size_t _nr_waiting_request=0;
   size_t _precision=0;
-  size_t _free_sram_size=0;
   addr_type dram_addr;
   uint32_t _numa_id = 0; // For DMA instruction
   int _compute_type = 0;

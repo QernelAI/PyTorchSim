@@ -190,7 +190,7 @@ class CycleSimulator():
 
 class BackendSimulator():
     BACKEND_RESULT_PATH_KEY = "BACKEND_RESULT_PATH"
-    FINISH_STR = "Simulation Finished"
+    FINISH_STR = "Simulation finished"
     ALLOC_POOL = dict() # For eagermode buffer plan
     def __init__(self, backend_path, config_path, vectorlane_size=-1) -> None:
         self.base_dir = backend_path
@@ -367,8 +367,8 @@ class BackendSimulator():
             raise ValueError(f"Invalid JSON format: {e}")
 
     def get_core_freq(self):
-        if "core_freq" in self.config_json:
-            return self.config_json["core_freq"] * 1000 * 1000 # MHz
+        if "core_freq_mhz" in self.config_json:
+            return self.config_json["core_freq_mhz"] * 1000 * 1000 # MHz
         else:
             raise KeyError("Key 'core_freq' not found in JSON.")
 
@@ -444,8 +444,8 @@ class BackendSimulator():
                 total_cycle = int(re.search(r'Total execution cycle: (\d+)', line).group(1))
 
             # Parse total simulation time
-            if 'Simulation time' in line:
-                simulation_time = float(re.search(r'Simulation time: (\d+\.?\d*) seconds', line).group(1))
+            if 'Simulation wall clock time' in line:
+                simulation_time = float(re.search(r'Simulation wall clock time: (\d+\.?\d*) seconds', line).group(1))
         return core_metrics, dram_channel_bw, avg_dram_bw, simulation_time, total_cycle
 
 if __name__ == "__main__":

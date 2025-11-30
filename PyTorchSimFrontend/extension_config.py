@@ -21,7 +21,8 @@ CONFIG_TORCHSIM_DIR = os.environ.get('TORCHSIM_DIR', default='/workspace/PyTorch
 CONFIG_TORCHSIM_DUMP_PATH = os.environ.get('TORCHSIM_DUMP_PATH',
                         default = f"{tempfile.gettempdir()}/torchinductor")
 CONFIG_TORCHSIM_DUMP_FILE = int(os.environ.get('TORCHSIM_DUMP_FILE', default=True))
-CONFIG_TORCHSIM_VALIDATION_MODE = int(os.environ.get('TORCHSIM_VALIDATION_MODE', default=True))
+CONFIG_TORCHSIM_FUNCTIONAL_MODE = int(os.environ.get('TORCHSIM_FUNCTIONAL_MODE', default=True))
+CONFIG_TORCHSIM_TIMING_MODE = int(os.environ.get("TORCHSIM_TIMING_MODE", True))
 CONFIG_CLEANUP_DUMP_ARGS = int(os.environ.get('CLEANUP_DUMP_ARGS', default=False))
 
 # LLVM PATH
@@ -34,7 +35,6 @@ CONFIG_TORCHSIM_DUMP_LLVM_IR = int(os.environ.get("TORCHSIM_DUMP_LLVM_IR", defau
 # Backendsim config
 CONFIG_TORCHSIM_BACKEND_CONFIG = os.environ.get('TORCHSIM_CONFIG',
                                         default=f'{CONFIG_TORCHSIM_DIR}/PyTorchSimBackend/configs/systolic_ws_128x128_c1_simple_noc_tpuv3.json')
-CONFIG_BACKENDSIM_SPIKE_ONLY = int(os.environ.get("BACKENDSIM_SPIKE_ONLY", False))
 CONFIG_BACKENDSIM_EAGER_MODE = int(os.environ.get("BACKENDSIM_EAGER_MODE", default=False))
 CONFIG_BACKENDSIM_DRYRUN = int(os.environ.get('BACKENDSIM_DRYRUN', default=False))
 CONFIG_BACKENDSIM_DEBUG_LEVEL = os.environ.get("BACKENDSIM_DEBUG_LEVEL", "")
@@ -45,8 +45,8 @@ CONFIG_GEM5_SCRIPT_PATH = os.environ.get('GEM5_SCRIPT_PATH',
                                   default=f"{CONFIG_TORCHSIM_DIR}/gem5_script/script_systolic.py")
 
 # AUTOTUNE config
-CONFIG_AUTOTUNE = int(os.environ.get('AUTOTUNE', default=True))
-CONFIG_AUTOTUNE_TEMPLATE = int(os.environ.get('AUTOTUNE_TEMPLATE', default=True))
+CONFIG_AUTOTUNE = int(os.environ.get('AUTOTUNE', default=False))
+CONFIG_AUTOTUNE_TEMPLATE = int(os.environ.get('AUTOTUNE_TEMPLATE', default=False))
 CONFIG_MAX_AUTOTUNE_TRY = int(os.environ.get('MAX_AUTOTUNE_TRY', default=10))
 CONFIG_AUTOTUNE_TEMPLATE_TOPK = int(os.environ.get('AUTOTUNE_TEMPLATE_TOPK', default=4))
 

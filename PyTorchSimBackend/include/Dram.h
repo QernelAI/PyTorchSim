@@ -6,7 +6,7 @@
 #include <utility>
 
 #include "Common.h"
-#include "TMA.h"
+#include "DMA.h"
 #include "ramulator2.hh"
 #include "Hashing.h"
 #include "Cache.h"

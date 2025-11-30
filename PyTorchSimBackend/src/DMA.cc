@@ -1,24 +1,24 @@
-#include "TMA.h"
+#include "DMA.h"
 #include "TileGraph.h"
 
-TMA::TMA(uint32_t id, uint32_t dram_req_size) {
+DMA::DMA(uint32_t id, uint32_t dram_req_size) {
   _id = id;
   _dram_req_size = dram_req_size;
   _current_inst = nullptr;
   _finished = true;
 }
 
-void TMA::issue_tile(std::shared_ptr<Instruction> inst) {
+void DMA::issue_tile(std::shared_ptr<Instruction> inst) {
   _current_inst = std::move(inst);
   std::vector<size_t>& tile_size = _current_inst->get_tile_size();
   if (tile_size.size() <= 0 || tile_size.size() > get_max_dim()) {
-    spdlog::error("[TMA {}] issued tile is not supported format..", _id);
+    spdlog::error("[DMA {}] issued tile is not supported format..", _id);
     exit(EXIT_FAILURE);
   }
   _finished = false;
 }
 
-std::shared_ptr<std::vector<mem_fetch*>> TMA::get_memory_access() {
+std::shared_ptr<std::vector<mem_fetch*>> DMA::get_memory_access(cycle_type core_cycle) {
   auto addr_set = _current_inst->get_dram_address(_dram_req_size);
   auto access_vec = std::make_shared<std::vector<mem_fetch *>>();
   Tile* owner = (Tile*)_current_inst->get_owner();
@@ -26,9 +26,9 @@ std::shared_ptr<std::vector<mem_fetch*>> TMA::get_memory_access() {
   unsigned long long base_daddr = _current_inst->get_base_dram_address();
   // Todo. We use a ternsor level buffer allocation, so we don't need to check all memfetch
   bool is_cacheable = owner_subgraph->is_cacheable(base_daddr, base_daddr + _dram_req_size);
-  spdlog::trace("[SRAM Trace] Core-{}, Address: 0x{:016x}, Is_cacheable: {}", _id, base_daddr, is_cacheable);
-  spdlog::trace("[NUMA Trace] Core-{}, Subgraph id: {} , Numa id: {}, Arg: {} is_write: {}",
-    _id, owner_subgraph->get_core_id(), _current_inst->get_numa_id(), _current_inst->get_addr_name(), _current_inst->is_dma_write());
+  spdlog::trace("[{}][Core {}][SRAM] Address: 0x{:016x}, Is_cacheable: {}", core_cycle, _id, base_daddr, is_cacheable);
+  spdlog::trace("[{}][Core {}][NUMA] Subgraph id: {} , Numa id: {}, Arg: {} is_write: {}",
+    core_cycle, _id, owner_subgraph->get_core_id(), _current_inst->get_numa_id(), _current_inst->get_addr_name(), _current_inst->is_dma_write());
 
   for (auto addr: *addr_set) {
     mem_access_type acc_type = _current_inst->is_dma_write() ? mem_access_type::GLOBAL_ACC_W : mem_access_type::GLOBAL_ACC_R;
@@ -42,7 +42,7 @@ std::shared_ptr<std::vector<mem_fetch*>> TMA::get_memory_access() {
   return access_vec;
 }
 
-uint32_t TMA::generate_mem_access_id() {
+uint32_t DMA::generate_mem_access_id() {
   static uint32_t id_counter{0};
   return id_counter++;
 }

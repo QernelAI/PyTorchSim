@@ -31,6 +31,7 @@ PyTorchSim **supports**:
 - [Multi-tenancy](#multi-tenancy)
 - [Compiler optimizations](#compiler-optimizations)
 - [Mapping](#mapping)
+- [L2 Cache](#l2-cache) (persistent cache)
 
 ## Model Zoo
 | Model | Source | Status | Note |
@@ -87,6 +88,11 @@ To download the latest Docker image and set up the environment, use the followin
 # Run the Docker container
 docker run -it --ipc=host --name torchsim -w /workspace/PyTorchSim ghcr.io/psal-postech/torchsim-ci:latest bash
 ```
+### Manual Setting (Optional)
+This script provides building [Gem5](https://github.com/PSAL-POSTECH/gem5.git), [LLVM](https://github.com/PSAL-POSTECH/llvm-project.git), and [Spike](https://github.com/PSAL-POSTECH/riscv-isa-sim.git) simulator from source code for specific experts.
+```bash
+bash script/build_from_source.sh
+```
 ### Run Examples
 The `tests` directory contains several AI workloads examples.
 ```bash
@@ -141,7 +147,7 @@ Simulation consists of three steps
 
 If you want to turn off the `SpikeSimulator` for fast simulation, you can set as below.
 ```bash
-export TORCHSIM_VALIDATION_MODE=False
+export TORCHSIM_FUNCTIONAL_MODE=False
 ```
 Log contains memory & core stats.
 ```bash
@@ -150,12 +156,12 @@ Log contains memory & core stats.
 [info] ========= Core stat =========
 [info] Core [0] : Systolic array [0] Utilization(%) 0.00, active cycle 0, idle cycle 1014
 [info] Core [0] : Systolic array [1] Utilization(%) 12.62, active cycle 128, idle cycle 886
-[info] Core [0] : TMA active cycle 3 TMA idle cycle 1011 DRAM BW 182.000 GB/s (6144)
+[info] Core [0] : DMA active cycle 3 DMA idle cycle 1011 DRAM BW 182.000 GB/s (6144)
 [info] Core [0] : Vector Unit Utilization(%) 4.34, active cycle 44, idle_cycle 0
-[info] Core [0] : Numa hit count : 0, Numa miss count : 0
+[info] Core [0] : NUMA local access count : 0, NUMA remote access count : 0
 [info] Core [0] : Total cycle 1014
 [info] Total execution cycle: 1014
-[info] Simulation time: 0.039296 seconds
+[info] Simulation wall clock time: 0.039296 seconds
 ```
 The log is dumped in `TORCHSIM_DUMP_PATH` and you can set the path as below.
 ```bash
@@ -264,6 +270,7 @@ We adopt and modified heuristic-based mapping of [GEMMINI](https://github.com/uc
 Heuristic method is not optimal for some cases. PyTorchSim provides auto-tuning to find best mapping for GEMM, CONV, and vector operations. It reduces searching space by sorting of scratchpad memory utilization and pick top-k candiates. Searching parameters are tile shape and vector lane stride.
 ```bash
 export AUTOTUNE=True
+export AUTOTUNE_TEMPLATE=True
 ```
 ### Manunal setting
 User can exploit third-party(e.g. Timeloop) mapping. Set the cheatsheet path and write down their own mapping.
@@ -298,6 +305,25 @@ export TORCHSIM_TILE_M=512
 export TORCHSIM_TILE_N=512
 export TORCHSIM_TILE_K=512
 ```
+## L2 Cache
+It supports L2 cache as persistent cache. User can provide software-managed allocation/eviction strategy for tensors with persistent cache.
+
+Common Memory (CMEM) is a new feature introduced in the latest TPUs (newer than TPUv3). Multiple cores share this memory, which provides high bandwidth. Reusable tensors are stored and loaded from CMEM to avoid off-chip traffic. Our L2 cache can work like as CMEM
+
+To allocate a tensor in L2 cache, set the environment variable as shown below. The `tpuv4` directory provides example plans for L2 cache obtained from TPUv4 profiling.
+```bash
+export SRAM_BUFFER_PLAN_PATH=tpuv4/gemm_plan.py
+```
+The L2 cache strategy file is composed as follows:
+```
+plan = {
+    "arg0_1"
+}
+```
+In this example, only one input tensor is registered in L2 cache. You can refer to the tensor name from the wrapper code. After running the code, you can find the wrapper codegen path in the [result](#result) section.
+
+Last but not least, you must set `l2d_type` and `l2d_config` in the [TOGSim config](#togsim-configuration) to use L2 cache. The `l2d_config` follows the same configuration method as [AccelSim](https://github.com/accel-sim/accel-sim-framework).
+
 ## Compiler Configuration
 `PyTorchSimFrontend/extension_config.py` contains target hardware configuration to compile.
 
@@ -321,16 +347,19 @@ export TORCHSIM_USE_TIMING_POOLING=0 # use lightweight pooling for timing
 `PyTorchSimBackend/configs` directory contains example NPU configuration files in the JSON format.
 ```
   "num_cores" : 2,                   // Number of NPU cores
-  "core_freq" : 940,                 // Core's frequency (MHz)
+  "core_freq_mhz" : 940,             // Core's frequency (MHz)
   "num_systolic_array_per_core" : 2, // Number of systolic array per core
 
   "dram_type" : "ramulator2",        // DRAM type (ex. ramulator2, simple)
-  "dram_freq" : 940,                 // DRAM frequency (MHz)
+  "dram_freq_mhz" : 940,             // DRAM frequency (MHz)
   "dram_channels": 32,               // Number of DRAM channels
   "dram_req_size": 32,               // DRAM request size (B)
   "dram_latency" : 10,               // DRAM latency (cycle)
   "dram_nbl" : 2,                    // DRAM burst length size
   "dram_config_path" : "../configs/ramulator2_configs/HBM2_TPUv3.yaml", // Ramulator2 config file path
+
+  "l2d_type" : "datacache",
+  "l2d_config" : "S:64:128:512,32,L:B:m:W:L,A:192:4,32:0,32",
 
   "icnt_type" : "simple",            // Interconnect type (ex. booksim, simple)
   "icnt_latency" : 7,                // Interconnect latency (cycle)

@@ -1,5 +1,5 @@
-#ifndef TMA_H
-#define TMA_H
+#ifndef DMA_H
+#define DMA_H
 
 #include <cstdint>
 #include <memory>
@@ -16,9 +16,9 @@ struct VectorCompare {
     }
 };
 
-class TMA {
+class DMA {
  public:
-  TMA(uint32_t id, uint32_t dram_req_size);
+  DMA(uint32_t id, uint32_t dram_req_size);
 
   void issue_tile(std::shared_ptr<Instruction> inst);
   bool is_finished() { return _finished; }
@@ -114,7 +114,7 @@ class TMA {
   }
 
   std::shared_ptr<Instruction>& get_current_inst() { return _current_inst; }
-  std::shared_ptr<std::vector<mem_fetch*>> get_memory_access();
+  std::shared_ptr<std::vector<mem_fetch*>> get_memory_access(cycle_type core_cycle);
   uint32_t generate_mem_access_id();
   const uint32_t get_max_dim() { return _max_dim; }
 

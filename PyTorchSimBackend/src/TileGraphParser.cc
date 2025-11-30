@@ -627,9 +627,6 @@ std::vector<std::shared_ptr<Tile>> TileLoopNode::get_tiles_from_iter(TileGraphPa
           }
         }
       }
-      /* Set last instruction's free sram size */
-      if(parent->get_instructions().size())
-        parent->get_instructions().back()->set_free_sram_size(parent->get_required_sram_size());
 
       parent->append_child(child);
       /* Create new tile */
@@ -681,11 +678,6 @@ std::vector<std::shared_ptr<Tile>> TileLoopNode::get_tiles_from_iter(TileGraphPa
     if (inst->get_opcode() == Opcode::MOVIN)
       tile_vec.back()->inc_required_sram_size(inst->get_tile_numel() * inst->get_precision());
   }
-
-  /* Set last instruction's free sram size */
-  std::shared_ptr<Tile> parent = tile_vec.back();
-  if (parent->get_instructions().size())
-    parent->get_instructions().back()->set_free_sram_size(parent->get_required_sram_size());
 
   return tile_vec;
 }

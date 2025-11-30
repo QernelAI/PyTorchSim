@@ -21,7 +21,7 @@ def extract_simulation_stats(result_path):
             nr_multiplications = line.strip().split(":")[-1].strip()
         elif "Total execution cycle" in line:
             total_cycle = line.strip().split(":")[-1].strip()
-        elif "Simulation time" in line:
+        elif "Simulation wall clock time" in line:
             sim_time = line.strip().split(":")[-1].replace("seconds", "").strip()
     return nr_multiplications, total_cycle, sim_time
 

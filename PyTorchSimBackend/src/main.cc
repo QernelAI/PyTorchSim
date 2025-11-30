@@ -149,6 +149,6 @@ int main(int argc, char** argv) {
   /* Simulation time measurement */
   auto end = std::chrono::high_resolution_clock::now();
   std::chrono::duration<double> duration = end - start;
-  spdlog::info("Simulation time: {:2f} seconds", duration.count());
+  spdlog::info("Simulation wall clock time: {:2f} seconds", duration.count());
   return 0;
 }

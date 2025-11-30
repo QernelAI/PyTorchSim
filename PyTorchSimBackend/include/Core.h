@@ -9,7 +9,7 @@
 #include "Dram.h"
 #include "Tile.h"
 #include "SimulationConfig.h"
-#include "TMA.h"
+#include "DMA.h"
 
 class Core {
  public:
@@ -27,7 +27,7 @@ class Core {
   virtual void pop_memory_request();
   virtual mem_fetch* top_memory_request() { return _request_queue.front(); }
   virtual void push_memory_response(mem_fetch* response);
-  void check_tag() { _tma.check_table(); }
+  void check_tag() { _dma.check_table(); }
   void inc_numa_hit() { _stat_numa_hit++; }
   void inc_numa_miss() { _stat_numa_miss++; }
 
@@ -50,20 +50,18 @@ class Core {
   /* Core id & config file */
   const uint32_t _id;
   const SimulationConfig _config;
-  size_t _sram_size;
-  size_t _used_sram_size;
   uint32_t _num_systolic_array_per_core;
   uint32_t _systolic_array_rr = 0;
 
-  /* TMA Unit */
-  TMA _tma;
+  /* DMA Unit */
+  DMA _dma;
 
   /* cycle */
   cycle_type _core_cycle;
   cycle_type _stat_tot_vu_compute_cycle = 0;
   std::vector<cycle_type> _stat_tot_sa_compute_cycle;
-  cycle_type _stat_tot_tma_cycle = 0;
-  cycle_type _stat_tot_tma_idle_cycle = 0;
+  cycle_type _stat_tot_dma_cycle = 0;
+  cycle_type _stat_tot_dma_idle_cycle = 0;
   cycle_type _stat_tot_vu_compute_idle_cycle = 0;
   std::vector<cycle_type> _stat_tot_sa_compute_idle_cycle;
   std::vector<uint64_t> _stat_inst_count;
@@ -76,8 +74,8 @@ class Core {
 
   cycle_type _stat_vu_compute_cycle = 0;
   std::vector<cycle_type> _stat_sa_compute_cycle;
-  cycle_type _stat_tma_cycle = 0;
-  cycle_type _stat_tma_idle_cycle = 0;
+  cycle_type _stat_dma_cycle = 0;
+  cycle_type _stat_dma_idle_cycle = 0;
   cycle_type _stat_vu_compute_idle_cycle = 0;
   std::vector<cycle_type> _stat_sa_compute_idle_cycle;
   uint64_t _stat_mem_response = 0;
