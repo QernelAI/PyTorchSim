@@ -29,7 +29,7 @@ from PyTorchSimFrontend.mlir.mlir_codegen_backend import MLIRKernel, reduction_i
 from PyTorchSimFrontend.mlir.mlir_scheduling import SchedulerNode
 from torch._inductor.codegen import common
 
-from PyTorchSimFrontend.extension_config import CONFIG_TORCHSIM_DIR, CONFIG_AUTOTUNE_TEMPLATE_TOPK, CONFIG_AUTOTUNE_TEMPLATE
+from PyTorchSimFrontend import extension_config
 from . import mlir_common
 
 class IndentedBufferGroup:
@@ -234,7 +234,7 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
                     used_spad_size_per_lane = (weight_size_per_lane + input_size_per_lane + output_size_per_lane) * self.precision
                     check_spad_size = (used_spad_size < max_spad_size and used_spad_size_per_lane < max_spad_per_lane)
                     if check_spad_size:
-                        dir_path = f"{CONFIG_TORCHSIM_DIR}/validation/gemm_candidates"
+                        dir_path = f"{extension_config.CONFIG_TORCHSIM_DIR}/validation/gemm_candidates"
                         os.makedirs(dir_path, exist_ok=True)
                         file_path = f"{dir_path}/gemm_{M}_{K}_{N}.txt"
                         line_to_write = f"{tile_M} {tile_K} {tile_N}\n"
@@ -506,7 +506,7 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
         )
 
     def codegen_nodes(self, tile_candidates, render, template_node, prologue_nodes, epilogue_nodes):
-        if CONFIG_AUTOTUNE_TEMPLATE and len(tile_candidates):
+        if extension_config.CONFIG_AUTOTUNE_TEMPLATE and len(tile_candidates):
             src_code, loop_size = self.autotune(tile_candidates, render, template_node, prologue_nodes, epilogue_nodes)
             self.loop_size = loop_size
         else:
@@ -1230,7 +1230,7 @@ class MLIRTemplate(KernelTemplate):
                 template=self,
                 kwargs=kwargs
             )
-            tile_candidates = self.get_tile_candidates(**kwargs)[:CONFIG_AUTOTUNE_TEMPLATE_TOPK]
+            tile_candidates = self.get_tile_candidates(**kwargs)[:extension_config.CONFIG_AUTOTUNE_TEMPLATE_TOPK]
             return kernel, tile_candidates, render
 
         return MLIRTemplateCaller(
