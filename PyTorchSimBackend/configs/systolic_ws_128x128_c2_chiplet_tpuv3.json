@@ -14,7 +14,6 @@
   "ramulator_config_path" : "../configs/ramulator2_configs/HBM2_TPUv3.yaml",
 
   "icnt_type" : "booksim2",
-  "icnt_latency" : 1,
   "icnt_freq_mhz" : 1000,
   "icnt_node_per_core" : 16,
   "booksim_config_path" : "../configs/booksim2_configs/chiplet_32_32_2.icnt",

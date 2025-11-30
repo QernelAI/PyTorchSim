@@ -14,11 +14,5 @@
 
   "icnt_type" : "simple",
   "icnt_latency" : 7,
-  "icnt_freq_mhz" : 15000,
-  "booksim_config_path" : "../configs/booksim2_configs/fly_c4_m32.icnt",
-
-  "num_partition" : 1,
-  "partition": {
-    "core_0": 0
-  }
+  "icnt_freq_mhz" : 15000
 }

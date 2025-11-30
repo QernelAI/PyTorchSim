@@ -8,20 +8,12 @@
   "dram_channels": 16,
   "dram_req_size_byte": 32,
 
-  "dram_size" : 16,
   "dram_num_burst_length" : 2,
   "dram_stats_print_period_cycles": 10000,
   "ramulator_config_path" : "../configs/ramulator2_configs/HBM2.yaml",
 
   "icnt_type" : "booksim2",
-  "icnt_latency" : 1,
   "icnt_freq_mhz" : 8000,
   "icnt_node_per_core" : 16,
-  "booksim_config_path" : "../configs/booksim2_configs/fly_c16_m16.icnt",
-
-  "num_partition" : 2,
-  "partition": {
-    "core_0":0,
-    "core_1":0
-  }
+  "booksim_config_path" : "../configs/booksim2_configs/fly_c16_m16.icnt"
 }

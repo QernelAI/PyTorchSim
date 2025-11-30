@@ -14,12 +14,5 @@
 
   "icnt_type" : "booksim2",
   "icnt_latency" : 1,
-  "icnt_freq_mhz" : 8000,
-  "booksim_config_path" : "../configs/booksim2_configs/fly_c1_m1.icnt",
-
-  "num_partition" : 2,
-  "partition": {
-    "core_0":0,
-    "core_1":0
-  }
+  "icnt_freq_mhz" : 8000
 }
