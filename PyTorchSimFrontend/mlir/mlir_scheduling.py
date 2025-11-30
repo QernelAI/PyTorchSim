@@ -94,6 +94,8 @@ class MLIRScheduling(BaseScheduling):
         return self.can_fuse_horizontal(node1, node2)
 
     def can_fuse_horizontal(self, node1, node2):
+        if not extension_config.CONFIG_FUSION:
+            return False
         if (len(node1.get_nodes())+ len(node2.get_nodes())) > self.max_fusion_size:
             return False
         _, (vars1, reduce1) = node1.group

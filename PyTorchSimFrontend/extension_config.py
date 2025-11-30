@@ -66,10 +66,15 @@ CONFIG_SUBTILE_M = int(os.environ.get('TORCHSIM_SUBTILE_M', default=CONFIG_VECTO
 CONFIG_SUBTILE_N = int(os.environ.get('TORCHSIM_SUBTILE_N', default=CONFIG_VECTOR_LANE))
 CONFIG_SUBTILE_K = int(os.environ.get('TORCHSIM_SUBTILE_K', default=CONFIG_VECTOR_LANE))
 
+# Compiler Optimization
+CONFIG_COMPILER_OPTIMIZATION = os.environ.get('TORCHSIM_COMPILER_OPTIMIZATION', default="all")  # options: all, none, custom
 # Advanced fusion options
-CONFIG_FUSION_REDUCTION_EPILOGUE = int(os.environ.get('TORCHSIM_FUSION_REDUCTION_EPILOGUE', default=True))
-CONFIG_FUSION_REDUCTION_REDUCTION = int(os.environ.get('TORCHSIM_FUSION_REDUCTION_REDUCTION', default=True))
-CONFIG_FUSION_PROLOGUE = int(os.environ.get('TORCHSIM_FUSION_PROLOGUE', default=True))
+CONFIG_FUSION = True if (CONFIG_COMPILER_OPTIMIZATION == "all" or "fusion" in CONFIG_COMPILER_OPTIMIZATION) else False
+CONFIG_FUSION_REDUCTION_EPILOGUE = True if (CONFIG_COMPILER_OPTIMIZATION == "all" or "reduction_epliogue" in CONFIG_COMPILER_OPTIMIZATION) else False
+CONFIG_FUSION_REDUCTION_REDUCTION = True if (CONFIG_COMPILER_OPTIMIZATION == "all" or "reduction_reduction" in CONFIG_COMPILER_OPTIMIZATION) else False
+CONFIG_FUSION_PROLOGUE = True if ((CONFIG_COMPILER_OPTIMIZATION == "all") or ("prologue" in CONFIG_COMPILER_OPTIMIZATION)) else False
+CONFIG_SINGLE_BATCH_CONV = True if (CONFIG_COMPILER_OPTIMIZATION == "all" or "single_batch_conv" in CONFIG_COMPILER_OPTIMIZATION) else False
+CONFIG_MULTI_TILE_CONV = True if (CONFIG_COMPILER_OPTIMIZATION == "all" or "multi_tile_conv" in CONFIG_COMPILER_OPTIMIZATION) else False
 
 # SRAM Buffer allocation plan
 def load_plan_from_module(module_path):
@@ -96,3 +101,5 @@ CONFIG_SRAM_BUFFER_PLAN = load_plan_from_module(CONFIG_SRAM_BUFFER_PLAN_PATH)
 CONFIG_TLS_MODE = int(os.environ.get('TORCHSIM_TLS_MODE', default=1))
 
 CONFIG_USE_TIMING_POOLING = int(os.environ.get('TORCHSIM_USE_TIMING_POOLING', default=0))
+
+CONFIG_DEBUG_MODE = int(os.environ.get('TORCHSIM_DEBUG_MODE', default=0))

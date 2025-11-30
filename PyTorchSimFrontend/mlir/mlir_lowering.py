@@ -15,7 +15,7 @@ from PyTorchSimFrontend.mlir.mlir_conv_mt_template import MLIRConvMultiTileTempl
 from PyTorchSimFrontend.mlir.mlir_conv_sb_template import MLIRConvSingleBatchTemplate
 from PyTorchSimFrontend.mlir.mlir_conv_sbs_template import MLIRConvSingleBatchStridedTemplate
 from PyTorchSimFrontend.mlir.mlir_maxpool_template import MLIRMaxPoolTemplate
-from PyTorchSimFrontend.extension_config import CONFIG_VECTOR_LANE, CONFIG_USE_TIMING_POOLING
+from PyTorchSimFrontend.extension_config import CONFIG_VECTOR_LANE, CONFIG_USE_TIMING_POOLING, CONFIG_SINGLE_BATCH_CONV, CONFIG_MULTI_TILE_CONV
 
 aten = torch.ops.aten
 aten_spmm = MLIRExternKernelChoice(torch.sparse.mm, "custom_op::sparse_addmm")
@@ -106,11 +106,11 @@ def convolution(
     layout = conv_layout(x, weight, None, **kwargs)
 
     # Select conv kernel
-    if BATCH == 1 and stride[0] == 1:
+    if BATCH == 1 and stride[0] == 1 and CONFIG_SINGLE_BATCH_CONV:
         mlir_template = MLIRConvSingleBatchTemplate([x, weight, bias], layout, **kwargs)
-    elif BATCH == 1 and stride[0] != 1:
+    elif BATCH == 1 and stride[0] != 1 and CONFIG_SINGLE_BATCH_CONV:
         mlir_template = MLIRConvSingleBatchStridedTemplate([x, weight, bias], layout, **kwargs)
-    elif I_C < CONFIG_VECTOR_LANE // 8: # 8 is hard-coded for now. This should be changed to a better heuristic.
+    elif I_C < CONFIG_VECTOR_LANE // 8 and CONFIG_MULTI_TILE_CONV: # 8 is hard-coded for now. This should be changed to a better heuristic.
         mlir_template = MLIRConvMultiTileTemplate([x, weight, bias], layout, **kwargs)
     else:
         mlir_template = MLIRConvTemplate([x, weight, bias], layout, **kwargs)
