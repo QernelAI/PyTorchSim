@@ -694,5 +694,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: accuracy-report
-          path: /tmp/torchsim-ci/${GITHUB_SHA}/summary_cycle.out
+          path: /tmp/torchsim-ci/${{ github.sha }}/summary_cycle.out
           if-no-files-found: error
