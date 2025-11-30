@@ -51,7 +51,7 @@ Simulator::Simulator(SimulationConfig config)
   }
 
   // Create interconnect object
-  spdlog::info("[Config/Interconnect] Inerconnect freq: {} MHz", config.icnt_freq);
+  spdlog::info("[Config/Interconnect] Interconnect freq: {} MHz", config.icnt_freq);
   if (config.icnt_type == IcntType::SIMPLE) {
     spdlog::info("[Config/Interconnect] SimpleInerconnect selected");
     _icnt = std::make_unique<SimpleInterconnect>(config);
