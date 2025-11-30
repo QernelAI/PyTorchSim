@@ -101,8 +101,9 @@ class FunctionalSimulator():
         os.makedirs(os.path.join(runtime_path, "indirect_access"), exist_ok=True)
         os.makedirs(os.path.join(runtime_path, "dma_access"), exist_ok=True)
         run = f'spike --isa rv64gcv --varch=vlen:256,elen:64 {vectorlane_option} {spad_option} {kernel_address} {base_path} /workspace/riscv-pk/build/pk {target_binary} {file_path_str}'
-        if not silent_mode:
-            print("[SpikeSimulator] cmd> ", run)
+        if not silent_mode and extension_config.CONFIG_DEBUG_MODE:
+            print("[Spike] cmd> ", run)
+        print("[Spike] Running Spike simulator")
         run_cmd = shlex.split(run)
         try:
             stdout_setting = subprocess.DEVNULL if silent_mode else None
@@ -110,7 +111,7 @@ class FunctionalSimulator():
             subprocess.check_call(run_cmd, stdout=stdout_setting, stderr=stderr_setting)
         except subprocess.CalledProcessError as e:
             if not silent_mode:
-                print("[SpikeSimulator] Command failed with exit code", e.returncode)
+                print("[Spike] Command failed with exit code", e.returncode)
             error_msg = ""
             if e.returncode == 200:
                 error_msg = "INVALID_SPAD_ACCESS"
@@ -155,7 +156,7 @@ class CycleSimulator():
             while not finished:
                 i = (i + 1) % 3
                 tail = "." * i + " " * (3-i)
-                sys.stdout.write("\r[Gem5Simulator] Simulation is still running." + tail)
+                sys.stdout.write("\r[Gem5] Gem5 is running." + tail)
                 time.sleep(1)
             print("")
 
@@ -165,7 +166,8 @@ class CycleSimulator():
             # Create progress thread
             is_dryrun = int(os.environ.get('TOGSIM_DRYRUN', default=False)) or silent_mode
             if not is_dryrun:
-                print("[Gem5Simulator] cmd> ", " ".join(gem5_cmd))
+                if extension_config.CONFIG_DEBUG_MODE:
+                    print("[Gem5] cmd> ", " ".join(gem5_cmd))
                 finished = False
                 progress_thread = threading.Thread(target=show_progress)
                 progress_thread.start()
@@ -175,11 +177,11 @@ class CycleSimulator():
             else:
                 output = subprocess.check_output(gem5_cmd, stderr=subprocess.DEVNULL)
         except subprocess.CalledProcessError as e:
-            print(f"[Gem5Simulator] Gem5 simulation failed with error: \"{e.output.decode()}\"")
+            print(f"[Gem5] Gem5 simulation failed with error: \"{e.output.decode()}\"")
             if not is_dryrun:
                 finished = True
                 progress_thread.join()
-            raise RuntimeError(f"GEM5 Simulation Failed: \"{e.output.decode()}\"")
+            raise RuntimeError(f"Gem5 Simulation Failed: \"{e.output.decode()}\"")
 
         with open(f"{dir_path}/stats.txt", "r") as stat_file:
             raw_list = stat_file.readlines()
@@ -211,7 +213,7 @@ class TOGSimulator():
             while not finished:
                 i = (i + 1) % 3
                 tail = "." * i + " " * (3-i)
-                sys.stdout.write("\r[TOGSimulator] Simulation is still running." + tail)
+                sys.stdout.write("\r[TOGSim] TOGSim is running." + tail)
                 time.sleep(1)
             print("")
         cmd = f"{self.get_togsim_command()} --models_list {model_path}"
@@ -219,8 +221,8 @@ class TOGSimulator():
             cmd += f" --log_level {extension_config.CONFIG_TOGSIM_DEBUG_LEVEL}"
         if attribute_path:
             cmd = f"{cmd} --attributes_list {attribute_path}"
-        if not silent_mode:
-            print("[TOGSimulator] cmd> ", cmd)
+        if not silent_mode and extension_config.CONFIG_DEBUG_MODE:
+            print("[TOGSim] cmd> ", cmd)
 
         # Create progress thread
         if not silent_mode:
@@ -236,8 +238,8 @@ class TOGSimulator():
             if not silent_mode:
                 finished = True
                 progress_thread.join()
-                print("[TOGSimulator] Command failed with exit code", e.returncode)
-                print("[TOGSimulator] Error output:", e.output)
+                print("[TOGSim] Command failed with exit code", e.returncode)
+                print("[TOGSim] Error output:", e.output)
             assert 0
         # Save result to result_path
         result_path = os.path.join(os.path.dirname(model_path), "togsim_result")
@@ -246,7 +248,7 @@ class TOGSimulator():
         result_path = os.path.join(result_path, file_name)
         with open(result_path, "w") as f:
             f.write(result.decode())
-        print(f'[TOGSimulator] Simulation of "{model_path}" is stored to "{result_path}"')
+        print(f'[TOGSim] Simulation of "{model_path}" is stored to "{result_path}"')
         return result_path
 
     def interactive_simulation(self):
@@ -254,7 +256,8 @@ class TOGSimulator():
         if extension_config.CONFIG_TOGSIM_DEBUG_LEVEL:
             cmd += f" --log_level {extension_config.CONFIG_TOGSIM_DEBUG_LEVEL}"
 
-        print("[TOGSimulator] cmd> ", cmd)
+        if extension_config.CONFIG_DEBUG_MODE:
+            print("[TOGSim] cmd> ", cmd)
         if self.process is None:
             self.process = subprocess.Popen(
                 shlex.split(cmd),
@@ -263,22 +266,22 @@ class TOGSimulator():
                 universal_newlines=True
             )
         else:
-            print("[TOGSimulator] Simulator is already running.")
+            print("[TOGSim] Simulator is already running.")
 
     def stop(self):
         if self.process:
             self.process.terminate()
             self.process.wait()
             self.process = None
-            print("[TOGSimulator] Simulator stopped.")
+            print("[TOGSim] Simulator stopped.")
 
     def wait(self):
         if self.process:
-            print("[TOGSimulator] Waiting for simulation to complete...")
+            print("[TOGSim] Waiting for simulation to complete...")
             self.quit()
             self.process.wait()
             self.process = None
-            print("[TOGSimulator] Simulation completed.")
+            print("[TOGSim] Simulation completed.")
 
     def send_command(self, command):
         if self.process:
@@ -409,7 +412,7 @@ class TOGSimulator():
                 break
 
         if simulation_finished_idx == -1:
-            print("[TOGSimulator] Tried to parsing wrong formated output file!")
+            print("[TOGSim] Tried to parsing wrong formated output file!")
             return core_metrics, dram_channel_bw, avg_dram_bw, simulation_time
 
         total_stat_lines = lines[simulation_finished_idx:]

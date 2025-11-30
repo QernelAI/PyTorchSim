@@ -101,3 +101,5 @@ CONFIG_SRAM_BUFFER_PLAN = load_plan_from_module(CONFIG_SRAM_BUFFER_PLAN_PATH)
 CONFIG_TLS_MODE = int(os.environ.get('TORCHSIM_TLS_MODE', default=1))
 
 CONFIG_USE_TIMING_POOLING = int(os.environ.get('TORCHSIM_USE_TIMING_POOLING', default=0))
+
+CONFIG_DEBUG_MODE = int(os.environ.get('TORCHSIM_DEBUG_MODE', default=0))
