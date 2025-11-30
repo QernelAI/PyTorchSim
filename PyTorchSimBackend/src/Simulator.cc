@@ -62,7 +62,7 @@ Simulator::Simulator(SimulationConfig config)
     spdlog::error("[Configuration] Invalid interconnect type...!");
     exit(EXIT_FAILURE);
   }
-  _icnt_interval = config.icnt_print_interval;
+  _icnt_interval = config.icnt_stats_print_period_cycles;
 
   // Initialize Scheduler
   for (int i=0; i<config.num_patition;i++)

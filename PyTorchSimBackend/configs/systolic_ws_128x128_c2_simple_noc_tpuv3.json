@@ -1,7 +1,7 @@
 {
   "num_cores" : 2,
   "core_freq_mhz" : 940,
-  "core_log_print_interval_cycle" : 10000,
+  "core_stats_print_period_cycles" : 10000,
   "num_systolic_array_per_core" : 2,
 
   "dram_type" : "ramulator2",
@@ -9,7 +9,7 @@
   "dram_channels": 32,
   "dram_req_size_byte": 32,
   "dram_num_burst_length" : 2,
-  "dram_log_print_interval_cycle": 10000,
+  "dram_stats_print_period_cycles": 10000,
   "ramulator_config_path" : "../configs/ramulator2_configs/HBM2_TPUv3.yaml",
 
   "icnt_type" : "simple",

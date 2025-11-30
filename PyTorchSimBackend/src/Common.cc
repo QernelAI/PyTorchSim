@@ -46,7 +46,7 @@ SimulationConfig initialize_config(json config) {
     parsed_config.num_stonne_per_core = config["num_stonne_per_core"];
    if (config.contains("num_stonne_port"))
     parsed_config.num_stonne_port = config["num_stonne_port"];
-  parsed_config.core_print_interval = get_config_value<uint32_t>(config, "core_log_print_interval_cycle");
+  parsed_config.core_print_interval = get_config_value<uint32_t>(config, "core_stats_print_period_cycles");
 
   /* Stonne config */ 
   if (config.contains("stonne_config_path"))
@@ -70,8 +70,8 @@ SimulationConfig initialize_config(json config) {
   parsed_config.dram_channels = config["dram_channels"];
   if (config.contains("dram_req_size_byte"))
     parsed_config.dram_req_size = config["dram_req_size_byte"];
-  if (config.contains("dram_log_print_interval_cycle"))
-    parsed_config.dram_print_interval = config["dram_log_print_interval_cycle"];
+  if (config.contains("dram_stats_print_period_cycles"))
+    parsed_config.dram_print_interval = config["dram_stats_print_period_cycles"];
   if(config.contains("dram_num_burst_length"))
     parsed_config.dram_nbl = config["dram_num_burst_length"];
   if (config.contains("dram_num_partitions"))
@@ -109,7 +109,7 @@ SimulationConfig initialize_config(json config) {
   if (config.contains("booksim_config_path"))
     parsed_config.icnt_config_path = config["booksim_config_path"];
   if (config.contains("icnt_log_print_interval_cycle"))
-    parsed_config.icnt_print_interval = config["icnt_log_print_interval_cycle"];
+    parsed_config.icnt_stats_print_period_cycles = config["icnt_log_print_interval_cycle"];
   if (config.contains("icnt_node_per_core"))
     parsed_config.icnt_node_per_core = config["icnt_node_per_core"];
 

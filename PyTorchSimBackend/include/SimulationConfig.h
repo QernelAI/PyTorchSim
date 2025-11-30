@@ -46,7 +46,7 @@ struct SimulationConfig {
   std::string icnt_config_path;
   uint32_t icnt_freq;
   uint32_t icnt_latency;
-  uint32_t icnt_print_interval=0;
+  uint32_t icnt_stats_print_period_cycles=0;
 
   /* Sheduler config */
   uint32_t num_patition=1;

@@ -3,7 +3,7 @@
   "stonne_config_path" : "/workspace/PyTorchSim/PyTorchSimBackend/extern/stonneCore/tests/sparseflex_op_128mses_128_bw.cfg",
   "num_cores" : 1,
   "core_freq_mhz" : 700,
-  "core_log_print_interval_cycle" : 10000,
+  "core_stats_print_period_cycles" : 10000,
   "num_stonne_per_core" : 1,
   "num_stonne_port" : 8,
 
@@ -12,7 +12,7 @@
   "dram_channels": 8,
   "dram_req_size_byte": 32,
   "dram_num_burst_length" : 2,
-  "dram_log_print_interval_cycle": 10000,
+  "dram_stats_print_period_cycles": 10000,
   "ramulator_config_path" : "../configs/ramulator2_configs/HBM2.yaml",
 
   "icnt_type" : "simple",
