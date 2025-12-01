@@ -2,26 +2,29 @@ import contextlib
 import sympy
 import re
 import os
+import math
 from functools import reduce
 from operator import mul
 import torch
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
+from torch._dynamo.testing import rand_strided
+from torch._inductor.autotune_process import TensorMeta
 from torch._dynamo.utils import dynamo_timed
 from torch._inductor.codegen import cpp, wrapper, common, memory_planning
 from torch._inductor.virtualized import V, _ops as ops
-from torch._inductor.codecache import write_atomic, write
+from torch._inductor.codecache import write_atomic
 from torch._inductor.utils import (
     IndentedBuffer,
     is_welford_reduction,
     sympy_product
 )
 from torch.utils._sympy.functions import ModularIndexing, FloorDiv
-import PyTorchSimFrontend.extension_codecache as extension_codecache
-
+from PyTorchSimFrontend import extension_codecache
 from PyTorchSimFrontend import extension_config
 from . import mlir_common
 from .mlir_common import LoopLevel, LoopNest
+from PyTorchSimFrontend.mlir.mlir_autotune import MLIRBenchmarkRequest
 
 def reduction_init(reduction_type, dtype):
     if dtype in cpp.DTYPE_LOWP_FP:
@@ -96,8 +99,8 @@ class ExtensionWrapperCodegen(wrapper.WrapperCodeGen):
 
                 from torch import device, empty, empty_strided
                 from {extension_codecache.__name__} import CustomAsyncCompile
-                from PyTorchSimFrontend.extension_config import CONFIG_SRAM_BUFFER_PLAN, CONFIG_BACKENDSIM_EAGER_MODE
-                from Simulator.simulator import BackendSimulator
+                from PyTorchSimFrontend.extension_config import CONFIG_SRAM_BUFFER_PLAN, CONFIG_TOGSIM_EAGER_MODE
+                from Simulator.simulator import TOGSimulator
                 from PyTorchSimFrontend.extension_op import sparse_mm_dummy_stonne_outer
                 from torch._inductor.select_algorithm import extern_kernels
 
@@ -119,7 +122,7 @@ class ExtensionWrapperCodegen(wrapper.WrapperCodeGen):
                 start = buffer.data_ptr()
                 end = start + buffer_size
                 # print(f'Alloc {{buffer_name}}(0x{{start:x}} ~ 0x{{end:x}})')
-                BackendSimulator.sram_alloc(buffer_name, [start, end])
+                TOGSimulator.sram_alloc(buffer_name, [start, end])
 
             def sram_plan_postfix(buffer_name, buffer):
                 if CONFIG_SRAM_BUFFER_PLAN and (buffer_name not in CONFIG_SRAM_BUFFER_PLAN):
@@ -128,7 +131,7 @@ class ExtensionWrapperCodegen(wrapper.WrapperCodeGen):
                 start = buffer.data_ptr()
                 end = start + buffer_size
                 # print(f'Dealloc {{buffer_name}}(0x{{start:x}} ~ 0x{{end:x}})')
-                BackendSimulator.sram_dealloc(buffer_name, [start, end])
+                TOGSimulator.sram_dealloc(buffer_name, [start, end])
 
             def host2device_memcopy(buffer):
                 pass
@@ -420,6 +423,10 @@ class ExtensionOverrides(common.OpOverrides):
         dtype = op_type[1]
         shape = f"vector<{tile_size}x{dtype}>" if tile_size > 1 else dtype
         return f'math.exp %{operand} : {shape}', [tile_size, dtype]
+
+    @staticmethod
+    def exp2(operand, *args, var_info=None, **kwargs):
+        raise NotImplementedError()
 
     @staticmethod
     def erf(operand, *args, var_info=None, **kwargs):
@@ -1076,8 +1083,8 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
 
         # Extract sram info
         local_tile_desc, index_var, dram_stride = self.get_dma_info(name, index, buffer=apply_buffer)
-        vlane_split_axis = local_tile_desc.vlane_split_axis
-        vlane_stride = local_tile_desc.vlane_stride
+        vlane_split_axis = local_tile_desc.vmap.vlane_split_axis
+        vlane_stride = local_tile_desc.vmap.vlane_stride
         tile_numel_per_lane = local_tile_desc.get_numel_per_lane()
         tile_shape = local_tile_desc.get_mlir_shape(mlir_dtype)
         tile_stride = local_tile_desc.get_tile_stride()
@@ -1123,8 +1130,8 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
 
         # Prepare dma instruction
         local_tile_desc, index_var, dram_stride = self.get_dma_info(name, index)
-        vlane_split_axis = local_tile_desc.vlane_split_axis
-        vlane_stride = local_tile_desc.vlane_stride
+        vlane_split_axis = local_tile_desc.vmap.vlane_split_axis
+        vlane_stride = local_tile_desc.vmap.vlane_stride
 
         dram_shape = mlir_common.MLIRKernelArgs.get_mlir_shape(self.buffer_types[name])
         tile_shape = local_tile_desc.get_mlir_shape(mlir_dtype)
@@ -1271,8 +1278,8 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
 
         # Tile is always reuduced in inner loop
         local_tile_desc, index_var, dram_stride = self.get_dma_info(name, index, broadcast=False, store_reduction=True, buffer=self.reductions_suffix)
-        vlane_split_axis = local_tile_desc.vlane_split_axis
-        vlane_stride = local_tile_desc.vlane_stride
+        vlane_split_axis = local_tile_desc.vmap.vlane_split_axis
+        vlane_stride = local_tile_desc.vmap.vlane_stride
 
         dram_shape = mlir_common.MLIRKernelArgs.get_mlir_shape(self.buffer_types[name])
         tile_shape = local_tile_desc.get_mlir_shape(mlir_dtype)
@@ -1288,7 +1295,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
             # mean
             reduction_numel = reduce(mul, self.ranges[self.reduction_depth:], 1)
             divider = self.cse.generate(self.reductions_suffix, f"arith.constant {float(reduction_numel)} : f32")
-            if self.buffer_types[name][1] > 1:
+            if compute_vec_size > 1:
                 divider_vec = self.cse.generate(self.reductions_suffix, f"vector.broadcast %{divider} : f32 to vector<{self.var_info[sum][0]}x{mlir_dtype}>")
             else:
                 divider_vec = divider
@@ -1354,15 +1361,15 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
             self.register_var_info(div_vec, [compute_vec_size, "index"])
             self.register_var_info(mod_vec, [compute_vec_size, "index"])
             dim = ops.modular(ops.div(vector_index, div_vec), mod_vec)
-            if idx == tile_desc.vlane_split_axis: # Need to add vector lane offset
-                offset = tile_desc.vlane_stride #* strides[idx]
-                outer_sz = tile_size[idx] // tile_desc.vlane_stride
+            if idx == tile_desc.vmap.vlane_split_axis: # Need to add vector lane offset
+                offset = tile_desc.vmap.vlane_stride #* strides[idx]
+                outer_sz = tile_size[idx] // tile_desc.vmap.vlane_stride
 
                 nr_vector_lane = self.get_const_cse(self.vector_lane, "index")
                 nr_vector_lane_vec = self.const_cse.generate(self.const_buffer, f"vector.broadcast %{nr_vector_lane} : index to vector<{compute_vec_size}xindex>")
                 self.register_var_info(nr_vector_lane_vec, [compute_vec_size, "index"])
 
-                vlane_stride_coeff = self.get_const_cse(tile_desc.vlane_stride, "index")
+                vlane_stride_coeff = self.get_const_cse(tile_desc.vmap.vlane_stride, "index")
                 vlane_outer_coeff = self.get_const_cse(outer_sz, "index")
                 vlane_stride_vec = self.const_cse.generate(self.const_buffer, f"vector.broadcast %{vlane_stride_coeff} : index to vector<{compute_vec_size}xindex>")
                 vlane_outer_vec = self.const_cse.generate(self.const_buffer, f"vector.broadcast %{vlane_outer_coeff} : index to vector<{compute_vec_size}xindex>")
@@ -1432,9 +1439,9 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
             # FIXME. This is a temporary solution to get tile stride of the reduction case
             tile_desc = mlir_common.MLIRMultiDimTile(
                 base_tile_desc.get_tile_size(),
-                base_tile_desc.vector_lane,
-                base_tile_desc.vlane_split_axis,
-                base_tile_desc.vlane_stride,
+                base_tile_desc.vmap.vector_lane,
+                base_tile_desc.vmap.vlane_split_axis,
+                base_tile_desc.vmap.vlane_stride,
                 base_tile_desc.get_compute_vec_size(),
             )
             axis_order = list(range(len(tile_desc.get_tile_size())))
@@ -1536,83 +1543,148 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
     def make_choices(self, nodes, kernel_name):
         choices = []
         initial_tile_size = self.kernel_group.tile_desc.get_tile_size()
-        previous_ranges = self.ranges
-        prevent_infinite_loop = 0
-        if len(initial_tile_size) < 2:
-            return choices # Can't autotune for 1-D tile size
+        prev_ranges = self.ranges
+        prev_tail_threshold = self.kernel_group.tile_desc.tail_ratio_threshold
+
+        # Allow more tail ratio during autotuning
+        self.kernel_group.tile_desc.tail_ratio_threshold = 0.3
+
+        if prev_ranges == [1] or len(prev_ranges) == 0:
+            return choices
+        #if len(initial_tile_size) < 2:
+        #    return choices # Can't autotune for 1-D tile size
+
         for vlane_stride in [2, 4, 8]:
-            os.environ['TORCHSIM_VECTOR_LANE_STRIDE'] = str(vlane_stride)
-            previous_tile_size = initial_tile_size
-            increase_dim = -2 # increase the first dimension
-            while previous_tile_size[increase_dim] * 2 <= previous_ranges[increase_dim] and previous_tile_size[increase_dim] <= 2 ** 13 and prevent_infinite_loop < 10:
-                incrase_dim = -1 # only increase the last dimension
-                prevent_infinite_loop += 1
-                while previous_tile_size[incrase_dim] * 2 <= previous_ranges[incrase_dim] and previous_tile_size[incrase_dim] <= 2 ** 13:
+            self.kernel_group.tile_desc.set_tile_size(initial_tile_size)
+            self.kernel_group.tile_desc.vmap.vlane_stride = vlane_stride
+            prevent_infinite_loop = 0
+
+            # Get the dimension to increase
+            candidate_axes = [
+                axis for axis, constr in enumerate(self.kernel_group.tile_desc.tile_constraint)
+                if not constr.fixed
+            ]
+            search_space = set()
+
+            # Try initial tile size
+            self.reset(None)
+            src_code = super().codegen_nodes(nodes, kernel_name)
+            current_tile_sz = tuple(self.kernel_group.tile_desc.get_tile_size())
+            search_space.add(current_tile_sz)
+
+            print(f"[Auto-tune] Trying tile size: {list(current_tile_sz)}, vlane_stride: {self.kernel_group.tile_desc.vmap.vlane_stride}, split_axis: {self.kernel_group.tile_desc.vmap.vlane_split_axis}")
+            self._prepare_simulator_headers(src_code)
+            bench_runner = self.run_bench(nodes, kernel_name, src_code)
+            choices.append((bench_runner, src_code, current_tile_sz, self.kernel_group.tile_desc.vmap.vlane_stride))
+
+            while prevent_infinite_loop < 10 and candidate_axes:
+                for axis in list(candidate_axes):
+                    prev_tile_sz = self.kernel_group.tile_desc.get_tile_size()
+
+                    # If tile size is maximized for this axis, remove from candidate axes
+                    if prev_tile_sz[axis] >= prev_ranges[axis] * 2 or prev_tile_sz[axis] >= 2 ** 13:
+                        candidate_axes.remove(axis)
+                        self.reset(None)
+                        continue
+
+                    # Try increase tile size for this axis
+                    try:
+                        self.kernel_group.tile_desc.scale_tile_dim(axis, prev_ranges[axis], 2)
+                    except extension_codecache.TileSizeError as e:
+                        # Failed to find proper tile size
+                        candidate_axes.remove(axis)
+                        self.reset(None)
+                        continue
+
+                    self.reset(None)
                     src_code = super().codegen_nodes(nodes, kernel_name)
-                    if self.stop_autotune:
-                        print(f"[Auto-tune] Skipping autotuning due to enough tile size: {self.kernel_group.tile_desc.get_tile_size()}")
-                        break
-                    print(f"[Auto-tune] Trying tile size: {self.kernel_group.tile_desc.get_tile_size()}, vlane_stride: {vlane_stride}")
-                    previous_tile_size = self.kernel_group.tile_desc.get_tile_size()
+                    current_tile_sz = tuple(self.kernel_group.tile_desc.get_tile_size())
+
+                    # FIXME. How to intergrate this constraint to tile system?
+                    pad = self.kernel_group.tile_desc.vmap.get_used_vlane(current_tile_sz) * self.kernel_group.tile_desc.vmap.vlane_stride
+                    vlane_size = current_tile_sz[self.kernel_group.tile_desc.vmap.vlane_split_axis]
+                    if vlane_size > pad and vlane_size % pad:
+                        prevent_infinite_loop += 1
+                        continue
+
+                    # If tile size is converged for this axis, remove from candidate axes
+                    if current_tile_sz in search_space:
+                        candidate_axes.remove(axis)
+                        continue
+
+                    # Add this choice
+                    search_space.add(current_tile_sz)
+                    print(f"[Auto-tune] Trying tile size: {list(current_tile_sz)}, vlane_stride: {self.kernel_group.tile_desc.vmap.vlane_stride}, split_axis: {self.kernel_group.tile_desc.vmap.vlane_split_axis}")
                     self._prepare_simulator_headers(src_code)
                     bench_runner = self.run_bench(nodes, kernel_name, src_code)
-                    choices.append((bench_runner, src_code, self.kernel_group))
-                    self.reset(f"tile_size_{incrase_dim}")
-                previous_tile_size[incrase_dim] = initial_tile_size[incrase_dim]
-                self.kernel_group.tile_desc.set_tile_size(previous_tile_size)
-                self.reset(f"tile_size_{increase_dim}")
-            self.reset("vlane_stride")
+                    choices.append((bench_runner, src_code, self.kernel_group.tile_desc.get_tile_size(), self.kernel_group.tile_desc.vmap.vlane_stride))
+                    prevent_infinite_loop += 1
+        self.kernel_group.tile_desc.prev_tail_threshold = prev_tail_threshold
         return choices
 
-    def autotune(self, nodes, kernel_name):
+    def autotune(self, *args):
         def get_cycle(choice):
-            bench_runner, src_code, kernel_group = choice
+            bench_runner = choice[0]
             for n_try in range(extension_config.CONFIG_MAX_AUTOTUNE_TRY): # TODO: make simple
                 try:
-                    # bench_runner = self.run_bench(nodes, kernel_name, src_code)
-                    if int(os.environ.get('BACKENDSIM_DRYRUN', default=False)):
-                        _, _, out = bench_runner(autotune=1)
-                    else:
-                        out = bench_runner(validate=extension_config.CONFIG_TORCHSIM_VALIDATION_MODE)
+                    out = bench_runner()
                     return out[-1]
                 except (extension_codecache.SpadOverflowError, RuntimeError) as e:
                     return float("inf")
-                    #if isinstance(e, RuntimeError) and str(e) != "STACK_OVERFLOW":
-                    #    print(f"Benchmark[trial-{n_try}] failed with unexpected error: {e}")
-                    #    return float("inf")
-                    #print(f"Benchmark failed due to spad overflow with tile size: {self.kernel_group.tile_desc.get_tile_size()}")
-                    #self.kernel_group = kernel_group # Reset to the original tile desc
-                    #self.reset("spad_overflow")
-                    #src_code = super().codegen_nodes(nodes, kernel_name)
-                    #bench_runner = self.run_bench(nodes, kernel_name, src_code)
-                    #kernel_group = self.kernel_group
-                    #self._prepare_simulator_headers(src_code)
             return float("inf") # Exceeded maximum number of autotuning attempts
-
-        choices = self.make_choices(nodes, kernel_name)
+        choices = self.make_choices(*args)
 
         if len(choices) == 0: # can't autotune
-            return None
+            return [None, None]
         with ThreadPoolExecutor(max_workers=8) as executor:
             results = list(executor.map(get_cycle, choices))
         max_idx = results.index(min(results))
         if min(results) == float("inf"):
             raise RuntimeError("Failed to find optimal tile size...")
-        print(f"[Auto-tune] Optimal tile size: {choices[max_idx][2].tile_desc.get_tile_size()}, vlane_stride: {choices[max_idx][2].tile_desc.vlane_stride}, cycles: {results[max_idx]}")
-        optimal_src_code = choices[max_idx][1]
-        return optimal_src_code
+        self._log_autotune_result(choices[max_idx], results[max_idx])
+        optimal_src_code, loop_size = choices[max_idx][1], choices[max_idx][-1]
+        return optimal_src_code, loop_size
+
+    def run_bench(self, nodes, kernel_name, src_code):
+        _, _, arg_attributes, _ = self.kernel_group.args.mlir_argdefs()
+        input_call_args = tuple(self.args.input_buffers.keys())
+        output_call_args = tuple(self.args.output_buffers.keys())
+        full_input_nodes = tuple([V.graph.get_buffer(k) for k in input_call_args])
+        full_output_nodes = tuple([V.graph.get_buffer(k) for k in output_call_args])
+
+        bmreq = MLIRBenchmarkRequest(
+            kernel_name=kernel_name,
+            input_tensor_meta=TensorMeta.from_irnodes(full_input_nodes),
+            output_tensor_meta=TensorMeta.from_irnodes(full_output_nodes),
+            extra_args={
+                "vector_lane" : self.vector_lane,
+                "spad_info": self.spad_info,
+                "vlen" : self.vlen,
+                "arg_attributes" : arg_attributes,
+                "validate" : extension_config.CONFIG_TORCHSIM_FUNCTIONAL_MODE,
+                "autotune" : True,
+            },
+            source_code=src_code,
+        )
+        dummy_inputs = [rand_strided(meta.sizes,meta.strides,dtype=meta.dtype, extra_size=meta.offset).to(device=nodes[0].get_device()) for meta in bmreq.input_tensor_meta]
+        dummy_outputs = [rand_strided(meta.sizes,meta.strides,dtype=meta.dtype, extra_size=meta.offset).to(device=nodes[0].get_device()) for meta in bmreq.output_tensor_meta]
+        return bmreq.make_run_fn(dummy_inputs, dummy_outputs)
+
+    def _log_autotune_result(self, best_choice, best_cycle):
+        print(
+            f"[Auto-tune] Optimal tile size: {list(best_choice[2])}, "
+            f"vlane_stride: {best_choice[3]}, "
+            f"cycles: {best_cycle}"
+        )
 
     def codegen_nodes(self, nodes, kernel_name):
         src_code = super().codegen_nodes(nodes, kernel_name)
         self._prepare_simulator_headers(src_code)
-        if not extension_config.CONFIG_AUTOTUNE or extension_config.CONFIG_BACKENDSIM_SPIKE_ONLY:
-            return src_code
-        else:
-            optimal_src_code = self.autotune(nodes, kernel_name)
-            if optimal_src_code:
+        if extension_config.CONFIG_AUTOTUNE and extension_config.CONFIG_TORCHSIM_TIMING_MODE:
+            optimal_src_code = self.autotune(nodes, kernel_name)[0]
+            if optimal_src_code is not None:
                 return optimal_src_code
-            else:
-                return src_code
+        return src_code
 
     def _prepare_simulator_headers(self, src_code):
         write_path = extension_codecache.get_write_path(src_code)
@@ -1664,78 +1736,73 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
 
         index_var = self.parse_indices(index, buffer=buffer, indirect_dims=indirect_dims)
 
-        if kg_tile_desc.vlane_split_axis in local_dims:
-            local_vlane_split_axis = local_dims.index(kg_tile_desc.vlane_split_axis)
+        if kg_tile_desc.vmap.vlane_split_axis in local_dims:
+            local_vlane_split_axis = local_dims.index(kg_tile_desc.vmap.vlane_split_axis)
         else:
             local_vlane_split_axis = max(len(local_dims) - 1, 0)
 
         # Case 0. Tile is 0-D scalar
         if len(local_dims) == 0:
             if not store_reduction:
-                local_tile_desc.set_tile_size([kg_tile_desc.get_used_vlane() * kg_tile_desc.vlane_stride])         # Force it to use vector instruction.
-                local_tile_desc.vlane_split_axis = local_vlane_split_axis    # last axis
-                local_tile_desc.vlane_stride = kg_tile_desc.vlane_stride
+                local_tile_desc.set_tile_size([kg_tile_desc.get_used_vlane() * kg_tile_desc.vmap.vlane_stride])         # Force it to use vector instruction.
+                local_tile_desc.vmap.vlane_split_axis = local_vlane_split_axis    # last axis
+                local_tile_desc.vmap.vlane_stride = kg_tile_desc.vmap.vlane_stride
             else:
                 local_tile_desc.set_tile_size([1])
-                local_tile_desc.vlane_split_axis = 0
-                local_tile_desc.vlane_stride = 1
+                local_tile_desc.vmap.vlane_split_axis = 0
+                local_tile_desc.vmap.vlane_stride = 1
             dram_stride = [0] # Edge case
         # Case 1. Tile is 1-D vector type
         elif len(local_dims) == 1 and len(local_dims) <= self.reduction_depth:
             local_tile_desc.set_tile_size([kg_tile_desc.get_dim_size(local_dims[0])])
-            local_tile_desc.vlane_split_axis = local_vlane_split_axis
-            local_tile_desc.vlane_stride = kg_tile_desc.vlane_stride
+            local_tile_desc.vmap.vlane_split_axis = local_vlane_split_axis
+            local_tile_desc.vmap.vlane_stride = kg_tile_desc.vmap.vlane_stride
         # Case 2. Tile is 1-D vector type with reduction
         elif len(local_dims) == 1 and len(local_dims) == self.reduction_depth + 1:
             local_tile_desc.set_tile_size([1, kg_tile_desc.get_dim_size(local_dims[0])])
-            local_tile_desc.vlane_split_axis = local_vlane_split_axis + 1
-            local_tile_desc.vlane_stride = kg_tile_desc.vlane_stride
+            local_tile_desc.vmap.vlane_split_axis = local_vlane_split_axis + 1
+            local_tile_desc.vmap.vlane_stride = kg_tile_desc.vmap.vlane_stride
         # Case 3. Tile is 2-D tile
         elif len(local_dims) == 2:
             is_reduction = self.reduction_depth == 1 and not store_reduction
             if is_reduction:
                 local_tile_desc.set_tile_size([kg_tile_desc.get_dim_size(dim) for dim in local_dims], [1, 0])
-                local_tile_desc.vlane_split_axis = local_vlane_split_axis
-                local_tile_desc.vlane_stride = kg_tile_desc.vlane_stride
+                local_tile_desc.vmap.vlane_split_axis = local_vlane_split_axis
+                local_tile_desc.vmap.vlane_stride = kg_tile_desc.vmap.vlane_stride
             else:
                 local_tile_desc.set_tile_size([kg_tile_desc.get_dim_size(dim) for dim in local_dims])
-                local_tile_desc.vlane_split_axis = local_vlane_split_axis
-                local_tile_desc.vlane_stride = kg_tile_desc.vlane_stride
+                local_tile_desc.vmap.vlane_split_axis = local_vlane_split_axis
+                local_tile_desc.vmap.vlane_stride = kg_tile_desc.vmap.vlane_stride
         # Case 3. Tile is 3-D tile
         elif len(local_dims) == 3:
             is_reduction = self.reduction_depth < 3 and not store_reduction
             if is_reduction:
                 axis_order = [1, 2, 0] if self.get_nr_rdim()==1 else [2, 1, 0]
                 local_tile_desc.set_tile_size([kg_tile_desc.get_dim_size(dim) for dim in local_dims], axis_order)
-                local_tile_desc.vlane_split_axis = local_vlane_split_axis
-                local_tile_desc.vlane_stride = kg_tile_desc.vlane_stride
+                local_tile_desc.vmap.vlane_split_axis = local_vlane_split_axis
+                local_tile_desc.vmap.vlane_stride = kg_tile_desc.vmap.vlane_stride
             else:
                 local_tile_desc.set_tile_size([kg_tile_desc.get_dim_size(dim) for dim in local_dims])
-                local_tile_desc.vlane_split_axis = local_vlane_split_axis
-                local_tile_desc.vlane_stride = kg_tile_desc.vlane_stride
+                local_tile_desc.vmap.vlane_split_axis = local_vlane_split_axis
+                local_tile_desc.vmap.vlane_stride = kg_tile_desc.vmap.vlane_stride
         # Case 4. Tile is 4-D tile (e.g., Convolution epilogue)
         elif len(local_dims) == 4:
             is_reduction = self.reduction_depth < 3 and not store_reduction
             if is_reduction:
                 raise NotImplementedError("Currently not implemented... ;)")
             local_tile_desc.set_tile_size([kg_tile_desc.get_dim_size(dim) for dim in local_dims])
-            local_tile_desc.vlane_split_axis = local_vlane_split_axis
-            local_tile_desc.vlane_stride = kg_tile_desc.vlane_stride
+            local_tile_desc.vmap.vlane_split_axis = local_vlane_split_axis
+            local_tile_desc.vmap.vlane_stride = kg_tile_desc.vmap.vlane_stride
         else:
             raise NotImplementedError("Currently not implemented... ;)")
 
         if len(implicit_local_dims)!=0 and len(local_dims) != len(implicit_local_dims) and self.is_modular_indexing(index):
-            tile_size = local_tile_desc.get_tile_size()
-            new_tile_size = []
-            new_vlane_split_axis = local_tile_desc.vlane_split_axis
-            implicit_dim_size = list(kg_tile_desc.implicit_dim_size.values())
-            for i, target_dim_size in enumerate(implicit_dim_size):
-                new_tile_size += [1]*(len(target_dim_size)-1) + tile_size[i:i+1]
-                if local_tile_desc.vlane_split_axis >= i:
-                    new_vlane_split_axis += len(target_dim_size)-1
-            # Update
-            local_tile_desc.set_tile_size(new_tile_size)
-            local_tile_desc.vlane_split_axis = new_vlane_split_axis
+            for axis_constraints in self.kernel_group.tile_desc.implicit_dim_size.values():
+                if len(axis_constraints) <= 1:
+                    continue
+                sorted_constraints = sorted(axis_constraints, key=lambda c: int(c.args[1]))
+                for constraint in sorted_constraints[1:]:
+                    index = index.replace(constraint.original_expr, 0)
 
         # Calculate dram stride
         dram_stride = [0] * local_tile_desc.get_nr_dim()
@@ -1780,6 +1847,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
                         new_tile_sizes = list(self.kernel_group.tile_desc.get_tile_size())
                         new_tile_sizes[dim_idx] = new_size
                         self.kernel_group.tile_desc.set_tile_size(new_tile_sizes)
+                        self.kernel_group.tile_desc.tile_constraint[dim_idx].fixed = True
 
                         # Send recompile signal
                         self.reset("recompile")

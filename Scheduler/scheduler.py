@@ -5,7 +5,7 @@ import torch
 from pathlib import Path
 import importlib.util
 from PyTorchSimFrontend.extension_codecache import hash_prefix
-from Simulator.simulator import BackendSimulator
+from Simulator.simulator import TOGSimulator
 from PyTorchSimFrontend import extension_config
 
 def import_module_from_path(module_name, path):
@@ -140,11 +140,11 @@ class SchedulerDNNModel:
     def register_model(model_name : str, compiled_model):
         SchedulerDNNModel.MODEL_MAP[model_name] = compiled_model
 
-class ExecutionEngine:
+class PyTorchSimRunner:
     PARTITION_BUSY = 0
     PARTITION_IDLE = 1
     SELECT_NOTHING = 2
-    def __init__(self, backend_simulator : BackendSimulator, num_partion=1) -> None:
+    def __init__(self, tog_simulator : TOGSimulator, num_partion=1) -> None:
         self.module = self.setup_device()
         self.num_partion = num_partion
         self.launch_model_dicts = []
@@ -156,11 +156,11 @@ class ExecutionEngine:
             self.partition_state.append(self.PARTITION_IDLE)
 
         self.finish_req_dict = {}
-        self.backend_simulator = backend_simulator
+        self.tog_simulator = tog_simulator
 
         # Dry run for compile and create generator
-        os.environ["BACKENDSIM_DRYRUN"] = "1"
-        os.environ["BACKENDSIM_EAGER_MODE"] = "1"
+        os.environ["TOGSIM_DRYRUN"] = "1"
+        os.environ["TOGSIM_EAGER_MODE"] = "1"
 
     @staticmethod
     def setup_device():
@@ -171,7 +171,7 @@ class ExecutionEngine:
 
         import torch.utils.cpp_extension
         module = torch.utils.cpp_extension.load(
-            name="extension_device",
+            name="npu",
             sources=[
                 str(source_file),
             ],
@@ -179,7 +179,7 @@ class ExecutionEngine:
             verbose=True,
         )
 
-        torch.utils.rename_privateuse1_backend("extension_device")
+        torch.utils.rename_privateuse1_backend("npu")
         from torch._inductor.codegen.common import (
             get_scheduling_for_device,
             get_wrapper_codegen_for_device,
@@ -192,13 +192,13 @@ class ExecutionEngine:
             MLIRScheduling
         )
         register_backend_for_device(
-            "extension_device", MLIRScheduling, ExtensionWrapperCodegen
+            "npu", MLIRScheduling, ExtensionWrapperCodegen
         )
         assert(
-            get_scheduling_for_device("extension_device") == MLIRScheduling
+            get_scheduling_for_device("npu") == MLIRScheduling
         )
         assert(
-        get_wrapper_codegen_for_device("extension_device")
+        get_wrapper_codegen_for_device("npu")
             == ExtensionWrapperCodegen
         )
         return module
@@ -222,7 +222,7 @@ class ExecutionEngine:
         return all([self.is_partition_idle(i) for i in range(self.num_partion)])
 
     def prepare_model(self, req_model: SchedulerDNNModel):
-        result_path = os.path.join(extension_config.CONFIG_TORCHSIM_DUMP_PATH, "backend_result", req_model.model_name)
+        result_path = os.path.join(extension_config.CONFIG_TORCHSIM_DUMP_PATH, "togsim_result", req_model.model_name)
         os.makedirs(result_path, exist_ok=True)
         index = str(len(os.listdir(result_path)))
 
@@ -244,7 +244,7 @@ class ExecutionEngine:
         onnx_path = os.path.join(result_path, "tile_graph.onnx")
 
         attribute_path = os.path.join(runtime_path, "attribute")
-        attribute_path = self.backend_simulator.create_attribute_file(attribute_path, inputs)
+        attribute_path = self.tog_simulator.create_attribute_file(attribute_path, inputs)
         return onnx_path, attribute_path
 
     def launch_kernel(self, current_cycle, partion_idx=0):
@@ -260,11 +260,11 @@ class ExecutionEngine:
         else:
             onnx_path, attribute_path = kernel, inputs
         self.partition_state[partion_idx] = self.PARTITION_BUSY
-        return self.backend_simulator.launch(onnx_path, attribute_path, current_cycle, partion_idx)
+        return self.tog_simulator.launch(onnx_path, attribute_path, current_cycle, partion_idx)
 
-class FIFOExecutionEngine(ExecutionEngine):
-    def __init__(self, backend_simulator: BackendSimulator, num_partion=1) -> None:
-        super().__init__(backend_simulator, num_partion)
+class FIFORunner(PyTorchSimRunner):
+    def __init__(self, tog_simulator: TOGSimulator, num_partion=1) -> None:
+        super().__init__(tog_simulator, num_partion)
 
     def select_kernel(self, partition_idx):
         while len(self.nested_launch_model_dicts[partition_idx]) or len(self.launch_model_dicts[partition_idx]):
@@ -297,9 +297,9 @@ class FIFOExecutionEngine(ExecutionEngine):
         # No proper kernel now
         return self.SELECT_NOTHING
 
-class RRExecutionEngine(ExecutionEngine):
-    def __init__(self, backend_simulator: BackendSimulator, num_partion=1) -> None:
-        super().__init__(backend_simulator, num_partion)
+class RoundRobinRunner(PyTorchSimRunner):
+    def __init__(self, tog_simulator: TOGSimulator, num_partion=1) -> None:
+        super().__init__(tog_simulator, num_partion)
         self.next_pointer = None
 
     def select_kernel(self, partition_idx):
@@ -347,7 +347,7 @@ class Scheduler:
 
     FIFO_ENGINE = 0
     RR_ENGINE = 1
-    def __init__(self, num_request_queue=1, max_batch=1, engine_select=FIFO_ENGINE, backend_config=extension_config.CONFIG_TORCHSIM_BACKEND_CONFIG) -> None:
+    def __init__(self, num_request_queue=1, max_batch=1, engine_select=FIFO_ENGINE, togsim_config=extension_config.CONFIG_TOGSIM_CONFIG) -> None:
         self.current_cycle = 0
         self.max_batch = max_batch
         self.num_request_queue = num_request_queue
@@ -356,13 +356,13 @@ class Scheduler:
             self.request_queue.append([])
         self.finish_queue : List[Request] = []
 
-        backend_path = os.path.join(extension_config.CONFIG_TORCHSIM_DIR, "PyTorchSimBackend")
-        self.backend_simulator = BackendSimulator(backend_path, backend_config)
-        self.backend_simulator.interactive_simulation()
+        togsim_path = os.path.join(extension_config.CONFIG_TORCHSIM_DIR, "TOGSim")
+        self.tog_simulator = TOGSimulator(togsim_path, togsim_config)
+        self.tog_simulator.interactive_simulation()
         if engine_select == Scheduler.FIFO_ENGINE:
-            self.execution_engine = FIFOExecutionEngine(self.backend_simulator, self.num_request_queue)
+            self.execution_engine = FIFORunner(self.tog_simulator, self.num_request_queue)
         elif engine_select == Scheduler.RR_ENGINE:
-            self.execution_engine = RRExecutionEngine(self.backend_simulator, self.num_request_queue)
+            self.execution_engine = RoundRobinRunner(self.tog_simulator, self.num_request_queue)
         else:
             print(f"Not supporetd engine type {engine_select}")
             exit(1)
@@ -469,8 +469,8 @@ class Scheduler:
 
         # Need to forward the time until next_arrival_time
         if self.execution_engine.is_all_idle():
-            reason = self.backend_simulator.until(self.msec_to_cycle(next_time))
-            self.current_cycle = self.backend_simulator.cycle()
+            reason = self.tog_simulator.until(self.msec_to_cycle(next_time))
+            self.current_cycle = self.tog_simulator.cycle()
         else:
             self.run(next_time)
         return
@@ -480,7 +480,7 @@ class Scheduler:
         def execute_cycle():
             launch_ret_info = []
             for i in range(self.execution_engine.num_partion):
-                if self.execution_engine.partition_state[i] == ExecutionEngine.PARTITION_IDLE:
+                if self.execution_engine.partition_state[i] == PyTorchSimRunner.PARTITION_IDLE:
                     ret = self.execution_engine.launch_kernel(self.current_cycle, i)
                     launch_ret_info.append(ret)
 
@@ -490,12 +490,12 @@ class Scheduler:
                 return []
 
             # Schedule jobs and update the current time
-            result_list = self.backend_simulator.until(self.msec_to_cycle(until_time))
-            self.current_cycle = self.backend_simulator.cycle()
+            result_list = self.tog_simulator.until(self.msec_to_cycle(until_time))
+            self.current_cycle = self.tog_simulator.cycle()
 
             for core_idx in result_list:
                 # Kernel is finished. So set idle state
-                self.execution_engine.partition_state[core_idx] = ExecutionEngine.PARTITION_IDLE
+                self.execution_engine.partition_state[core_idx] = PyTorchSimRunner.PARTITION_IDLE
 
             return result_list
 
@@ -526,7 +526,7 @@ class Scheduler:
 
     def is_finished(self):
         if self.is_request_queue_empty() and self.execution_engine.is_all_idle():
-            self.backend_simulator.wait()
+            self.tog_simulator.wait()
             return True
         return False
 
@@ -534,7 +534,7 @@ class Scheduler:
         return self.cycle_to_msec(self.current_cycle)
 
     def cycle_to_msec(self, cycle):
-        freq = self.backend_simulator.get_core_freq()
+        freq = self.tog_simulator.get_core_freq()
         return cycle / (freq  / 1000)
 
     def msec_to_cycle(self, msec):
@@ -542,5 +542,5 @@ class Scheduler:
         if (msec == -1):
             return msec
 
-        freq = self.backend_simulator.get_core_freq()
+        freq = self.tog_simulator.get_core_freq()
         return int(msec * (freq / 1000))

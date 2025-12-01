@@ -13,7 +13,7 @@ from AsmParser.tog_generator import tog_generator
 from torch._inductor.codecache import write
 from PyTorchSimFrontend.extension_codecache import get_write_path
 from PyTorchSimFrontend import extension_config
-from Simulator.simulator import BackendSimulator, TORCH_TO_NUMPY
+from Simulator.simulator import TOGSimulator, TORCH_TO_NUMPY
 
 graph_template = {
     0: {
@@ -46,7 +46,7 @@ graph_template = {
 
 class MLIRExternKernelChoice(ExternKernelChoice):
     def call_name(self):
-        is_dryrun = int(os.environ.get('BACKENDSIM_DRYRUN', default=False))
+        is_dryrun = int(os.environ.get('TOGSIM_DRYRUN', default=False))
         if is_dryrun:
             return f"yield from sparse_mm_dummy_stonne_outer"
         return f"torch.ops.extension_op.{self.name}"
@@ -275,11 +275,11 @@ def prepare_outer_product_matrix(a, b, out):
 def sparse_mm_stonne_outer(a, b, out):
     onnx_path, attribute_path, c_result_path = prepare_outer_product_matrix(a, b, out)
 
-    backend_path = os.path.join(extension_config.CONFIG_TORCHSIM_DIR, "PyTorchSimBackend")
-    stonne_config_path = f'{extension_config.CONFIG_TORCHSIM_DIR}/PyTorchSimBackend/configs/stonne_single_c1_simple_noc.json'
-    backsim = BackendSimulator(backend_path, stonne_config_path)
+    togsim_path = os.path.join(extension_config.CONFIG_TORCHSIM_DIR, "TOGSim")
+    stonne_config_path = f'{extension_config.CONFIG_TORCHSIM_DIR}/TOGSim/configs/stonne_single_c1_simple_noc.json'
+    backsim = TOGSimulator(togsim_path, stonne_config_path)
     result_path = backsim.simulation(onnx_path)
-    BackendSimulator.get_result_from_file(result_path)
+    TOGSimulator.get_result_from_file(result_path)
 
     # Load result data
     #with open(c_result_path, 'rb') as f:

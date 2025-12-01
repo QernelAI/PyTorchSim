@@ -1,19 +1,18 @@
 import dataclasses
 import math
+from dataclasses import dataclass
 from typing import Dict
 from typing import List
 from collections import defaultdict
 from functools import reduce
 from operator import mul
 import torch
-from torch._dynamo.testing import rand_strided
-from torch._inductor.autotune_process import TensorMeta
 from torch._inductor.codegen import common
 from torch._inductor.codegen import cpp
 from torch._inductor.virtualized import V
 from torch._inductor.ir import MultiOutputLayout
 from torch._inductor.dependencies import MemoryDep, StarDep, WeakDep
-from torch.utils._sympy.functions import ModularIndexing
+from torch.utils._sympy.functions import ModularIndexing, FloorDiv, Mod
 import sympy
 import contextlib
 
@@ -32,7 +31,7 @@ from torch._inductor.utils import (
     unique,
 )
 from PyTorchSimFrontend import extension_config
-from PyTorchSimFrontend.mlir.mlir_autotune import MLIRBenchmarkRequest
+from PyTorchSimFrontend import extension_codecache
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 
 DTYPE_TO_MLIR = {
@@ -209,61 +208,316 @@ class MLIRKernelArgs(common.KernelArgs):
             set_info(outer, inner, self.MLIR_ARGS_VAR)
         return arg_defs, call_args, arg_attributes, buffer_types
 
-class MLIRMultiDimTile():
-    def __init__(self, tile_size, vector_lane, vlane_split_axis=None, vlane_stride=None, vec_size=None):
-        self.name = ""
-        self._tile_size = list(tile_size)
-        self._tile_stride = None
-        self.tile_axis_order = list(range(len(tile_size)))
-        self.vec_size = vec_size
-        self.update_tile_stride()
-
-        # Vector lane mapping config
+class VectorLaneMapping():
+    def __init__(self, vector_lane: int, forced_vec_size: int, vlane_split_axis: int, vlane_stride: int):
         self.vector_lane = vector_lane
         self.vlane_split_axis = vlane_split_axis
         self.vlane_stride = vlane_stride
+        self.forced_vec_size = forced_vec_size
+
+    def get_used_vlane(self, tile_size: list[int]):
+        return min(
+            math.ceil(tile_size[self.vlane_split_axis] / self.vlane_stride),
+            self.vector_lane
+        )
+
+    def get_tile_size_per_lane(self, tile_size: list[int]):
+        per_lane = tile_size.copy()
+        used = self.get_used_vlane(tile_size)
+        if self.vlane_split_axis < 0 or self.vlane_split_axis >= len(per_lane):
+            raise AssertionError("Not allowed split_axis")
+        per_lane[self.vlane_split_axis] = math.ceil(per_lane[self.vlane_split_axis] / used)
+        return per_lane
+
+    def get_numel_per_lane(self, tile_size: list[int]):
+        return math.prod(self.get_tile_size_per_lane(tile_size))
+
+    def get_tile_stride_per_lane(self, tile_size: list[int], tile_stride: list[int]):
+        tile_stride = tile_stride.copy()  # original strides
+        get_tile_size_per_lane = self.get_tile_size_per_lane(tile_size)
+        coeff = tile_size[self.vlane_split_axis]//get_tile_size_per_lane[self.vlane_split_axis]
+
+        # Propagate stride according to per-lane tile size
+        for i in range(len(tile_stride)):
+            if tile_stride[i] > tile_stride[self.vlane_split_axis]:
+                tile_stride[i] = tile_stride[i] // coeff
+        return tile_stride
+
+    def get_compute_vec_size(self, tile_size: list[int], reduction_numel: int, nr_rdim: int) -> int:
+        if self.forced_vec_size is not None:
+            return self.forced_vec_size
+
+        per_lane = self.get_numel_per_lane(tile_size)
+        stride = self.vlane_stride
+        if nr_rdim:
+            val = per_lane // max(reduction_numel, 1)
+            for mult in [8, 4, 2]:
+                if per_lane >= val * mult:
+                    return val * mult
+            return val
+        for mult in [8, 4, 2]:
+            if (per_lane // stride) >= mult:
+                return stride * mult
+        return stride
+
+class TileAdjustMixin():
+    def __init__(self):
+        self.tail_ratio_threshold = 0.01
+
+    def apply_divisor(self, axis: int, divisor: int, mode: str = "split"):
+        """Split or pad a given axis of the tile."""
+        old_size = self._tile_size[axis]
+        if divisor <= 1:
+            return
+
+        padded = math.ceil(old_size / divisor) * divisor
+        outer = math.ceil(old_size / divisor)
+        inner = divisor
+
+        if mode == "pad":
+            self._tile_size[axis] = padded
+            self.update_tile_stride()
+            return
+        elif mode == "split":
+            new_sizes = list(self._tile_size)
+            new_sizes[axis] = outer
+            new_sizes.insert(axis + 1, inner)
+            self._tile_size = new_sizes
+
+            old_order_val = self.tile_axis_order[axis]
+            new_order = list(self.tile_axis_order)
+            new_order.insert(axis + 1, old_order_val + 0.1)
+            self.tile_axis_order = [idx for idx, _ in sorted(
+                zip(range(len(new_order)), new_order), key=lambda x: x[1]
+            )]
+            self.update_tile_stride()
+
+            # Adjust split axis for vmap
+            if self.vmap.vlane_split_axis > axis:
+                self.vmap.vlane_split_axis += 1
+            return
+
+        raise ValueError(f"Unknown mode: {mode}. Supported: 'pad', 'split'.")
+
+    def is_dim_dividable(self, dim_sizes: list[int]) -> bool:
+        if len(dim_sizes) != len(self._tile_size):
+            raise ValueError("dim_sizes must match the tile size dimensions")
+
+        dim_sizes_cpy = list(dim_sizes)
+        axis, stride = self.vmap.vlane_split_axis, self.vmap.vlane_stride
+        remain = dim_sizes_cpy[axis] % stride
+        if remain:
+            dim_sizes_cpy[axis] += stride - remain
+
+        return all(d % t == 0 for d, t in zip(dim_sizes_cpy, self._tile_size))
+
+    def adjust_tile_to_divisible(self, dim_sizes: list[int]) -> list[int]:
+        """Adjust current tile to be divisible by given dimensions."""
+        if len(dim_sizes) != len(self._tile_size):
+            raise ValueError("dim_sizes must match the tile size dimensions")
+
+        def _adjust_one(dim_size, tile_size):
+            for candidate in range(tile_size, 0, -1):
+                if dim_size % candidate == 0:
+                    return candidate
+            return 1
+
+        candidate_tile_size = [_adjust_one(d, t) for d, t in zip(dim_sizes, self._tile_size)]
+        for i in range(len(candidate_tile_size)):
+            self.tile_constraint[i].must_divide_dim = True
+
+        axis, stride = self.vmap.vlane_split_axis, self.vmap.vlane_stride
+        remain = candidate_tile_size[axis] % stride
+
+        if remain:
+            candidate_tile_size[axis] += stride - remain
+            self.tile_constraint[axis].must_divide_dim = False
+        return candidate_tile_size
+
+    def scale_tile_dim(self, axis, dim_sz, scale_factor=2):
+        axis_constrinat = self.tile_constraint[axis]
+        current_sz = self._tile_size[axis]
+        new_sz = axis_constrinat.adjust(current_sz, int(current_sz * scale_factor), dim_sz)
+        self._tile_size[axis] = new_sz
+        self.update_tile_stride()
+        return current_sz != new_sz
+
+    def decrease_tile_size(self, dim_size):
+        tile_size = self._tile_size
+        vlane_split_axis, vlane_stride, vector_lane = self.vmap.vlane_split_axis, self.vmap.vlane_stride, self.vmap.vector_lane
+        tile_size = list(tile_size)
+
+        # Decrease vlane_split_axis when it is too large
+        if tile_size[vlane_split_axis] > 2 * vlane_stride * vector_lane:
+            if self.scale_tile_dim(vlane_split_axis, dim_size[vlane_split_axis], scale_factor=0.5):
+                return
+
+        for i in range(len(tile_size)):
+            if i == vlane_split_axis:
+                continue
+            if tile_size[i] > 1:
+                if self.scale_tile_dim(i, dim_size[i], scale_factor=0.5):
+                    return
+
+        # Decrease vlane_split_axis at the end to maximize the vlane usage
+        self.scale_tile_dim(vlane_split_axis, dim_size[vlane_split_axis], scale_factor=0.5)
+        return
+
+    def trim_large_tail(self, ranges: list[int]):
+        for i, (dim_range, tile_range) in enumerate(zip(ranges, self._tile_size)):
+            ALPHA = 1.0
+            BETA = 0.5
+            constraint = self.tile_constraint[i]
+            if constraint.fixed:
+                continue
+            elif constraint.must_divide_dim:
+                BETA = 0
+
+            padding_ratio = TileAdjustMixin.get_padding_ratio(tile_range, dim_range)
+            if padding_ratio < self.tail_ratio_threshold:
+                continue
+            best_tile = tile_range
+            best_cost = (
+                ALPHA * padding_ratio +
+                BETA * (dim_range / tile_range)
+            )
+
+            min_tile = 1
+            for candidate in range(tile_range - 1, min_tile - 1, -1):
+                new_candidate = constraint.adjust(tile_range, candidate, dim_range)
+                ratio = TileAdjustMixin.get_padding_ratio(new_candidate, dim_range)
+                iter_penalty = (dim_range / new_candidate)
+
+                cost = ALPHA * ratio + BETA * iter_penalty
+                if cost < best_cost:
+                    best_tile, best_cost = new_candidate, cost
+            self._tile_size[i] = best_tile
+
+    def select_vlane_axis(self):
+        best_vlane_split_axis = 0
+        best_used_vlane = math.ceil(self._tile_size[0] / self.vmap.vlane_stride)
+        for i, dim in enumerate(self._tile_size[1:len(self._tile_size)-self.nr_rdim]):
+            used_vlane = math.ceil(dim / self.vmap.vlane_stride)
+            if used_vlane > best_used_vlane:
+                best_used_vlane = used_vlane
+                best_vlane_split_axis = i+1
+        self.vmap.vlane_split_axis = best_vlane_split_axis
+
+    def pad_vlane_tile(self):
+        # FIXME. this doesn't follow tile constraints...
+        vlane_split_axis, vlane_stride, vector_lane = self.vmap.vlane_split_axis, self.vmap.vlane_stride, self.vmap.vector_lane
+        used_vlane = min(math.ceil(self._tile_size[vlane_split_axis] / vlane_stride), vector_lane)
+        padded_size = used_vlane * vlane_stride
+        self._tile_size[vlane_split_axis] = math.ceil(self._tile_size[vlane_split_axis] / padded_size) * padded_size
+
+    def apply_constraints(self, constraints, ranges):
+        for idx, (axis_constraints, axis_size) in enumerate(zip(constraints.values(), ranges)):
+            for const in axis_constraints:
+                if const.args[1] == 1:
+                    continue
+                divider = int(const.args[1])
+
+                if not self.tile_constraint[idx].fixed:
+                    self.tile_constraint[idx].fixed = True
+                    self._tile_size[idx] = divider
+                elif self.tile_constraint[idx].fixed and self._tile_size[idx] > divider:
+                    self._tile_size[idx] = divider
+        self.update_tile_stride()
+
+    @staticmethod
+    def init_tile_size(ranges, vlane_stride, vector_lane):
+        nr_dim = len(ranges)
+        tile_size = [1] * nr_dim
+        if len(tile_size) == 2:
+            tile_size[-1] = vlane_stride * vector_lane
+            tile_size[-2] = 2 * vector_lane
+        elif len(tile_size) == 0: # Scalar
+            tile_size = [1]
+            ranges = [1]
+        elif len(tile_size) == 1 and ranges[0]==1:
+            tile_size[0] = 1
+        elif len(tile_size) == 1:
+            tile_size[0] = 2 * vlane_stride * vector_lane
+        elif len(tile_size) == 3:
+            tile_size[-1] = vector_lane
+            tile_size[-2] = 4 * vector_lane
+            tile_size[-3] = 2
+        elif len(tile_size) == 4:
+            tile_size[-1] = vector_lane
+            tile_size[-2] = 4 * vector_lane
+            tile_size[-3] = 2
+            tile_size[-4] = 1
+        else:
+            raise NotImplementedError("dummy tile size fail!")
+        return tile_size
+
+    @staticmethod
+    def get_padding_ratio(tile_range: int, dim_range: int) -> float:
+        if tile_range <= 0 or dim_range <= 0:
+            raise ValueError("tile_range and dim_range must be positive integers")
+        tail = dim_range % tile_range
+        padding = (tile_range - tail) % tile_range
+        return float(padding / dim_range)
+
+@dataclass
+class TileConstraint:
+    multiple_of: int = 1
+    must_divide_dim: bool = False
+    fixed: bool = False
+
+    def adjust(self, old: int, new: int, dim: int) -> int:
+        if self.fixed:
+            return old # Fixed tile size
+
+        tail = new % self.multiple_of
+        new -= tail
+        if not self.must_divide_dim:
+            return max(new, self.multiple_of)
+
+        while new > 0:
+            if dim % new == 0:
+                return new
+            new -= self.multiple_of
+        raise extension_codecache.TileSizeError("Cannot find suitable tile size under the given constraints.")
+
+class MLIRMultiDimTile(TileAdjustMixin):
+    def __init__(self, tile_size, vector_lane, vlane_split_axis=None, vlane_stride=None, forced_vec_size=None):
+        super().__init__()
+        self.name = ""
+        self._tile_size = list(tile_size)
+        self._tile_stride = None
+        self.tile_constraint = [TileConstraint(vlane_stride) for _ in tile_size]
+        self.tile_axis_order = list(range(len(tile_size)))
+        self.update_tile_stride()
+
+        # Vector lane mapping config
+        self.vmap = VectorLaneMapping(
+            vector_lane=vector_lane,
+            forced_vec_size=forced_vec_size,
+            vlane_split_axis=vlane_split_axis,
+            vlane_stride=vlane_stride
+        )
+
         self.implicit_dim_size = None
         self.nr_rdim = 0
+        self.offset = sympy.Integer(0) # Dram offset
 
-        # Dram offset
-        self.offset = sympy.Integer(0)
+    def set_name(self, name: str): self.name = name
+    def get_name(self) -> str: return self.name
+    def get_tile_size(self): return list(self._tile_size)
+    def get_tile_stride(self): return list(self._tile_stride)
+    def get_numel(self) -> int :return math.prod(self._tile_size)
+    def get_nr_dim(self) -> str: return len(self._tile_size)
+    def get_reduction_numel(self): return reduce(mul, self.get_tile_size()[-1*self.nr_rdim:], 1)
 
-    def set_name(self, name: str):
-        self.name = name
-
-    def set_tile_size(self, tile_size, tile_axis_order=None):
-        self._tile_size = tile_size
-        if tile_axis_order is None:
-            self.tile_axis_order = list(range(len(tile_size)))
-        else:
-            self.tile_axis_order = tile_axis_order
+    def set_tile_size(self, tile_size, tile_axis_order=None, constraints=None):
+        self._tile_size = list(tile_size)
+        self.tile_axis_order = list(range(len(tile_size))) if tile_axis_order is None else tile_axis_order
         self.update_tile_stride()
 
     def set_tile_size_stride(self, tile_size, tile_stride):
-        self._tile_size = tile_size
-        self._tile_stride = tile_stride
-
-    def get_name(self) -> str:
-        return self.name
-
-    def get_tile_size(self):
-        return self._tile_size
-
-    def get_numel(self):
-        """
-        Return size of multi-dimensional tile
-        """
-        size = 1
-        for dim_size in self._tile_size:
-            size *= dim_size
-        return size
-
-    def get_numel_per_lane(self):
-        tile_size_per_lane = self.get_tile_size_per_lane()
-        size = 1
-        for dim_size in tile_size_per_lane:
-            size *= dim_size
-        return size
+        self._tile_size = list(tile_size)
+        self._tile_stride = list(tile_stride)
 
     def update_tile_stride(self):
         strides = [1] * len(self._tile_size)
@@ -279,38 +533,6 @@ class MLIRMultiDimTile():
             init *= size
         self._tile_stride = strides
 
-    def get_tile_stride(self):
-        return self._tile_stride
-
-    def get_tile_stride_per_lane(self):
-        tile_stride = list(self.get_tile_stride())  # original strides
-        tile_size = list(self.get_tile_size())      # original tile size
-        split_axis = self.vlane_split_axis
-
-        tile_size_per_lane = self.get_tile_size_per_lane()
-        coeff = tile_size[split_axis]//tile_size_per_lane[split_axis]
-
-        # Propagate stride according to per-lane tile size
-        for i in range(len(tile_stride)):
-            if tile_stride[i] > tile_stride[split_axis]:
-                tile_stride[i] = tile_stride[i] // coeff
-        return tile_stride
-
-    def get_tile_size_per_lane(self):
-        tile_size_per_lane = list(self._tile_size)
-        if self.vlane_split_axis < 0 or self.vlane_split_axis >= len(tile_size_per_lane):
-            raise AssertionError("Not allowed split_axis")
-        used_vlane = self.get_used_vlane()
-        tile_size_per_lane[self.vlane_split_axis] = \
-            self.div_round_up(tile_size_per_lane[self.vlane_split_axis], used_vlane)
-        return tile_size_per_lane
-
-    def get_nr_dim(self):
-        """
-        Return number of dimensions
-        """
-        return len(self._tile_size)
-
     def get_dim_size(self, index):
         if isinstance(index, int):
             return self._tile_size[index]
@@ -318,117 +540,20 @@ class MLIRMultiDimTile():
             return self._tile_size[int(str(index)[5:])]
         raise NotImplementedError("Unsupported format of index")
 
+   # Vector mapping delegation
+    def get_tile_size_per_lane(self): return self.vmap.get_tile_size_per_lane(self._tile_size)
+    def get_used_vlane(self): return self.vmap.get_used_vlane(self._tile_size)
+    def get_numel_per_lane(self): return self.vmap.get_numel_per_lane(self._tile_size)
+    def get_tile_stride_per_lane(self): return self.vmap.get_tile_stride_per_lane(self._tile_size, self._tile_stride)
+    def get_compute_vec_size(self): return self.vmap.get_compute_vec_size(self._tile_size, self.get_reduction_numel(), self.nr_rdim)
+
+    # Helper functions for codegen
     def get_mlir_shape(self, dtype):
-        str_tile_size = [str(dim) for dim in self._tile_size]
-        shape = "x".join(str_tile_size)
+        shape = "x".join([str(dim) for dim in self._tile_size])
         return f"memref<{shape}x{dtype}, 1>"
 
     def get_mlir_vshape(self, mlir_dtype):
         return f"vector<{self.get_compute_vec_size()}x{mlir_dtype}>" if self.get_compute_vec_size() > 1 else f"{mlir_dtype}"
-
-    def get_used_vlane(self):
-        """
-        Return number of used vector lane
-        """
-        if self.vlane_split_axis < 0 or self.vlane_split_axis >= len(self._tile_size):
-            raise AssertionError("Not allowed split_axis")
-        return min(self.div_round_up(self._tile_size[self.vlane_split_axis], self.vlane_stride), self.vector_lane)
-
-    def get_vlane_stride(self):
-        return self.vlane_stride
-
-    def get_compute_vec_size(self):
-        # Granule size used in compute loop
-        if self.vec_size is not None:
-            return self.vec_size
-        if self.nr_rdim:
-            assert self.nr_rdim!=0
-            val = self.get_numel_per_lane() // self.get_reduction_numel()
-            if self.get_numel_per_lane() >= val * 8:
-                return val*8
-            elif self.get_numel_per_lane() >= val * 4:
-                return val*4
-            elif self.get_numel_per_lane() >= val * 2:
-                return val*2
-            return val
-        if (self.get_numel_per_lane() // self.vlane_stride) >= 8:
-            return self.vlane_stride * 8
-        if (self.get_numel_per_lane() // self.vlane_stride) >= 4:
-            return self.vlane_stride * 4
-        if (self.get_numel_per_lane() // self.vlane_stride) >= 2:
-            return self.vlane_stride * 2
-        return self.vlane_stride
-
-    @staticmethod
-    def div_round_up(size, round_val):
-        return (size + round_val - 1) // round_val
-
-    def apply_divisor(self, axis: int, divisor: int, mode: str = "split"):
-        # Apply divisor to tile size at given axis.
-        # This method based on axis order.
-        old_size = self._tile_size[axis]
-        if divisor == 1:
-            return
-        padded = self.div_round_up(old_size, divisor) * divisor
-        outer  = self.div_round_up(old_size, divisor)
-        inner  = divisor
-        if mode == "pad":
-            self._tile_size[axis] = padded
-            self.update_tile_stride()
-            return
-        elif mode == "split":
-            new_sizes = list(self._tile_size)
-            new_sizes[axis] = outer
-            new_sizes.insert(axis + 1, inner)
-            self._tile_size = new_sizes
-
-            # Update tile_axis_order
-            old_order_val = self.tile_axis_order[axis]
-            new_order = list(self.tile_axis_order)
-            new_order.insert(axis + 1, old_order_val + 0.1)
-            sorted_pairs = sorted(
-                zip(range(len(new_order)), new_order),
-                key=lambda x: x[1]
-            )
-            self.tile_axis_order = [idx for idx, _ in sorted_pairs]
-            self.update_tile_stride()
-
-            if self.vlane_split_axis == axis:
-                self.vlane_split_axis = axis
-            elif self.vlane_split_axis > axis:
-                self.vlane_split_axis += 1
-            return
-        else:
-            raise ValueError(f"Unknown mode: {mode}. Supported modes are 'pad' and 'split'.")
-
-    def get_reduction_numel(self):
-        return reduce(mul, self.get_tile_size()[-1*self.nr_rdim:], 1)
-
-    def is_dim_dividable(self, dim_sizes):
-        if len(dim_sizes) != len(self._tile_size):
-            raise ValueError("dim_sizes must match the tile size dimensions.")
-        dim_sizes_cpy = [int(d) for d in dim_sizes]
-        remain = dim_sizes_cpy[self.vlane_split_axis] % self.vlane_stride
-        if remain:
-            dim_sizes_cpy[self.vlane_split_axis] += self.vlane_stride - remain
-        return all(d % t == 0 for d, t in zip(dim_sizes_cpy, self._tile_size))
-
-    def adjust_tile_to_divisible(self, dim_sizes):
-        def _adjust_one(dim_size, tile_size):
-            for candidate in range(tile_size, 0, -1):
-                if dim_size % candidate == 0:
-                    return candidate
-            return 1
-
-        if len(dim_sizes) != len(self._tile_size):
-            raise ValueError("dim_sizes must match the tile size dimensions.")
-        candidate_tile_size = [_adjust_one(d, t) for d, t in zip(dim_sizes, self._tile_size)]
-        # FIXME. Is this the only solution?
-        # Round up
-        remain = candidate_tile_size[self.vlane_split_axis] % self.vlane_stride
-        if remain:
-            candidate_tile_size[self.vlane_split_axis] += self.vlane_stride - remain
-        return candidate_tile_size
 
 class MLIRWrapperKenrelGroup(cpp.KernelGroup):
     def __init__(self):
@@ -525,191 +650,96 @@ class BaseMLIRKernel(common.Kernel, BaseMLIRHardwareInfo):
     def is_modular_indexing(self, expr):
         return "ModularIndexing" in str(expr)
 
-    def compute_tile_size(self, nodes, vars, reduction_vars):
-        # Handle implict dims. Input operand could have larger dimension space.
-        implicit_ranges = False
-        target_operand : MemoryDep = None
-        implicit_dim_size = defaultdict(list)
-        for read_operand in nodes[0].read_writes.reads:
-            read_operand : MemoryDep
-            if isinstance(read_operand, StarDep) or isinstance(read_operand, WeakDep): # FIXME: WeakDep & StarDep are not supported (MoE case)
-                continue
-            read_index = read_operand.index
-            for arg in read_index.args:
-                if "ModularIndexing" in str(arg) or "//" in str(arg):
-                    implicit_ranges = True
-                    target_operand = read_operand
-                    break
+    def implicit_dim_ops(self, nodes):
+        target_patterns = (ModularIndexing, FloorDiv, Mod)
+        target_operands = []
+        for target_node in nodes:
+            for read_operand in target_node.read_writes.reads:
+                read_operand: MemoryDep
+                if isinstance(read_operand, StarDep) or isinstance(read_operand, WeakDep):
+                    continue
+                read_index = read_operand.index
+                for arg_expr in read_index.args:
+                    if arg_expr.atoms(*target_patterns):
+                        target_operands.append(read_operand)
+        return target_operands
 
-        if implicit_ranges:
-            #print("This operation contain implicit dimension space!")
-            linearized_stride = [1] * len(target_operand.var_names)
-            for i in range(len(target_operand[3])-2, -1, -1):
-                linearized_stride[i] = linearized_stride[i+1] * target_operand[3][i+1]
-
-            linearized_index = sympy.Integer(0)
-            for dim, stride in zip(target_operand[2], linearized_stride):
-                linearized_index += stride * dim
-
-            new_dim_expression = []
-            new_dim_size = []
-            for arg in target_operand.index.args:
+    def extract_dividers(self, implicit_ops):
+        # When a specific axis is processed, the key constraint to verify is the divider.
+        # The tile size must be forced to match the divider size.
+        dim_dividers = defaultdict(set)
+        for operand in implicit_ops:
+            subs_map = {
+                s: sympy.symbols(s.name.replace("c", "index", 1))
+                for s in operand.index.free_symbols
+            }
+            rev_subs_map = {
+                sympy.symbols(s.name.replace("c", "index", 1)) : s
+                for s in operand.index.free_symbols
+            }
+            new_index = operand.index.subs(subs_map)
+            for arg in new_index.args:
                 if len(arg.free_symbols) != 1:
                     raise NotImplementedError("Not supporting this view operation...!")
-
                 if arg.is_Mul and arg.args[0].is_number:
                     arg = arg.args[1]
 
                 if isinstance(arg, ModularIndexing):
                     modular_expr = ModularIndexing(arg.args[0], arg.args[1], arg.args[2])
+                    modular_expr.original_expr = arg
                 elif arg.is_symbol:
-                    modular_expr = ModularIndexing(arg, 1, target_operand.ranges[arg])
+                    modular_expr = ModularIndexing(arg, 1, operand.ranges[rev_subs_map[arg]])
+                    modular_expr.original_expr = arg
                 elif "//" in str(arg):
-                    modular_expr = ModularIndexing(arg.args[0], arg.args[1], target_operand.ranges[arg.args[0]]//arg.args[1])
+                    modular_expr = ModularIndexing(arg.args[0], arg.args[1], operand.ranges[rev_subs_map[arg.args[0]]]//arg.args[1])
+                    modular_expr.original_expr = arg
                 else:
                     raise NotImplementedError("What is this case?")
-                new_dim_expression.append(modular_expr)
-                new_dim_size.append(modular_expr.args[2])
-                implicit_dim_size[int(str(modular_expr.args[0])[1:])].append(int(modular_expr.args[2]))
+                dim_dividers[modular_expr.args[0]].add(modular_expr)
+        return dim_dividers
 
-            # Sanity check
-            for dim, sub_dims in implicit_dim_size.items():
-                sz = reduce(mul, sub_dims, 1)
-                if sz != target_operand[3][dim]:
-                    raise NotImplementedError("Not supporting type...")
-
-        vlane_split_axis = len(vars) - 1 # Set split_axis as a last normal loop not reduction loop
-
-        # FIXME: Naive decrease tile size
-        def decrease_tile_size(tile_size, vlane_split_axis):
-            is_decreased = False
-
-            # Decrease vlane_split_axis when it is too large
-            if tile_size[vlane_split_axis] > vlane_stride * self.vector_lane:
-                tile_size[vlane_split_axis] = int(tile_size[vlane_split_axis] // 2)
-                return tile_size
-
-            for i in range(len(tile_size)):
-                if i == vlane_split_axis:
-                    continue
-                if tile_size[i] > 1:
-                    tile_size[i] = int(tile_size[i] // 2)
-                    is_decreased = True
-                    break
-
-            # Decrease vlane_split_axis at the end to maximize the vlane usage
-            if not is_decreased:
-                if tile_size[vlane_split_axis] > 1:
-                    tile_size[vlane_split_axis] = int(tile_size[vlane_split_axis] // 2)
-            return tile_size
-
-        # Dummy tile size
-        def dummy_tile_size():
-            tile_size = [1] * (len(vars) + len(reduction_vars))
-            if len(tile_size) == 2:
-                tile_size[-1] = vlane_stride * self.vector_lane
-                tile_size[-2] = 2 * self.vector_lane
-            elif len(tile_size) == 0: # Scalar
-                tile_size = [1]
-                self.ranges = [1]
-            elif len(tile_size) == 1:
-                tile_size[0] = 2 * vlane_stride * self.vector_lane
-            elif len(tile_size) == 3:
-                tile_size[-1] = self.vector_lane
-                tile_size[-2] = 4 * self.vector_lane
-                tile_size[-3] = 2
-            elif len(tile_size) == 4:
-                tile_size[-1] = self.vector_lane
-                tile_size[-2] = 4 * self.vector_lane
-                tile_size[-3] = 2
-                tile_size[-4] = 1
-            else:
-                raise NotImplementedError("dummy tile size fail!")
-            return tile_size
-
+    def compute_tile_size(self, nodes, vars, reduction_vars):
+        vlane_split_axis = len(vars) - 1
         vlane_stride = extension_config.CONFIG_VECTOR_LANE_STRIDE
-        if self.recodegen is None:
-            tile_size = dummy_tile_size()
-        else:
+
+        # Set initial tile size & vector lane mapping
+        if self.kernel_group.tile_desc is None:
+            tile_size = MLIRMultiDimTile.init_tile_size(self.ranges, vlane_stride, self.vector_lane)
+            init_tile_desc = MLIRMultiDimTile(tile_size, self.vector_lane, vlane_split_axis, vlane_stride)
+            init_tile_desc.nr_rdim = len(reduction_vars)
+            self.kernel_group.set_tile_info(init_tile_desc)
+
+        # Handle edge case
+        if len(self.ranges)==1 and self.ranges[0] == 1: # Scalar case 2
+            self.kernel_group.tile_desc.vmap.vlane_stride = 1
+            self.kernel_group.tile_desc.vmap.vlane_split_axis = 0
+        elif vlane_split_axis == -1: # Reduction only case
+            self.kernel_group.tile_desc.vmap.vlane_split_axis = 0
+            self.kernel_group.tile_desc.vmap.vlane_stride = self.kernel_group.tile_desc.get_tile_size()[0]
+
+        # Handle implict dims. Input operand could be high dimension tensor.
+        # Note: https://github.com/PSAL-POSTECH/PyTorchSim/issues/173
+        implicit_ops = self.implicit_dim_ops(nodes)
+        if implicit_ops:
+            tile_constraints = self.extract_dividers(implicit_ops)
+            self.kernel_group.tile_desc.apply_constraints(tile_constraints, self.ranges)
+            self.kernel_group.tile_desc.implicit_dim_size = tile_constraints
+
+        # Check recodegen reason
+        if self.recodegen is not None:
             if self.recodegen == "spad_overflow":
-                tile_size = self.kernel_group.tile_desc.get_tile_size()
-                decrease_tile_size(tile_size, vlane_split_axis)
-            elif self.recodegen == "vlane_stride":
-                tile_size = dummy_tile_size()
-            elif "tile_size" in self.recodegen:
-                dim = int(self.recodegen.split("_")[-1])
-                tile_size = self.kernel_group.tile_desc.get_tile_size() # TODO:
-                tile_size[dim] = tile_size[dim] * 2
+                self.kernel_group.tile_desc.decrease_tile_size(self.ranges)
             elif self.recodegen == "recompile":
                 return self.kernel_group.tile_desc
             else:
                 raise NotImplementedError(f"Unknown recodegen reason: {self.recodegen}")
 
-        # FIXME: Not considering removed buffers
-        n_buffer = sum(
-            len(node.read_writes.reads) + len(node.read_writes.writes)
-            for node in nodes
-        )
-
-        spad_overflow = True
-        # Find proper tile size
-        while spad_overflow:
-            # Adjust tile size to avoid too much paddings
-            for i in range(1, len(tile_size)+1):
-                target_range = self.ranges[-i]
-                if implicit_ranges:
-                    target_range = implicit_dim_size[len(tile_size)-i][-1]
-
-                if tile_size[-i] > target_range:
-                    remains = (target_range % vlane_stride)
-                    self.stop_autotune = True
-                    tile_size[-i] = target_range
-                    if remains:
-                        tile_size[-i] += vlane_stride - remains
-
-            # Adjust tile size
-            for i in range(len(vars)):
-                if tile_size[i] >= self.vector_lane: # maximize used vector lane
-                    vlane_split_axis = i
-            used_vlane = min((tile_size[vlane_split_axis] + vlane_stride - 1) // vlane_stride, self.vector_lane)
-            padded_size = used_vlane * vlane_stride
-            tile_size[vlane_split_axis] = ((tile_size[vlane_split_axis] + padded_size - 1) // padded_size) * padded_size
-
-            # Check spad overflow
-            spad_usage_per_vlane = n_buffer * math.prod(tile_size) * self.precision // used_vlane
-            if spad_usage_per_vlane >= self.spad_info["spad_size"]:
-                new_tile_size = decrease_tile_size(tile_size.copy(), vlane_split_axis)
-                if new_tile_size == tile_size:
-                    raise NotImplementedError("Error: Cannot find proper tile size")
-                tile_size = new_tile_size
-                spad_overflow = True
-                self.stop_autotune = True # for auto-tune
-                continue
-            else:
-                spad_overflow = False
-
-        # Maximize the utilizaiotn of vectorlane
-        if len(reduction_vars):
-            minimum_stride = max(self.roundup_vectorlane(tile_size[vlane_split_axis]) // self.vector_lane, 2)
-            vlane_stride = min(minimum_stride, 8)
-
-        # Handle scalar case
-        if len(self.ranges)==1 and self.ranges[0] == 1:
-            vlane_stride = 1
-            vlane_split_axis = 0
-            tile_size[0] = 1
-        elif vlane_split_axis == -1:
-            vlane_split_axis = 0
-            vlane_stride = tile_size[0]
-
-        # Select tile info.
-        # Note: Kernel Group have to share same tile desc for fusion
-        tile_desc = MLIRMultiDimTile(tile_size, self.vector_lane)
-        tile_desc.vlane_split_axis = vlane_split_axis
-        tile_desc.vlane_stride = vlane_stride
-        tile_desc.implicit_dim_size = implicit_dim_size
-        tile_desc.nr_rdim = len(reduction_vars)
-        return tile_desc
+        # Adjust tile size & vector lane mapping
+        self.kernel_group.tile_desc.trim_large_tail(self.ranges)
+        self.kernel_group.tile_desc.select_vlane_axis()
+        self.kernel_group.tile_desc.pad_vlane_tile()
+        self.kernel_group.tile_desc.update_tile_stride()
+        return self.kernel_group.tile_desc
 
     def codegen_nodes(self, nodes, kernel_name):
         recompile_try = 0
@@ -724,7 +754,6 @@ class BaseMLIRKernel(common.Kernel, BaseMLIRHardwareInfo):
             tile_desc = self.compute_tile_size(nodes, vars, reduction_vars)
             self.compute_body_loop.size = tile_desc.get_numel_per_lane()
             self.compute_body_loop.step = tile_desc.get_compute_vec_size()
-            self.kernel_group.set_tile_info(tile_desc)
             try:
                 _, _, _, self.buffer_types = self.kernel_group.args.mlir_argdefs()
                 with self as kernel:
@@ -742,29 +771,6 @@ class BaseMLIRKernel(common.Kernel, BaseMLIRHardwareInfo):
             src_code = self.codegen_kernel(kernel_name=kernel_name)
             self.meta_kernel()
             return src_code
-
-    def run_bench(self, nodes, kernel_name, src_code):
-        _, _, arg_attributes, _ = self.kernel_group.args.mlir_argdefs()
-        input_call_args = tuple(self.args.input_buffers.keys())
-        output_call_args = tuple(self.args.output_buffers.keys())
-        full_input_nodes = tuple([V.graph.get_buffer(k) for k in input_call_args])
-        full_output_nodes = tuple([V.graph.get_buffer(k) for k in output_call_args])
-
-        bmreq = MLIRBenchmarkRequest(
-            kernel_name=kernel_name,
-            input_tensor_meta=TensorMeta.from_irnodes(full_input_nodes),
-            output_tensor_meta=TensorMeta.from_irnodes(full_output_nodes),
-            extra_args={
-                "vector_lane" : self.vector_lane,
-                "spad_info": self.spad_info,
-                "vlen" : self.vlen,
-                "arg_attributes" : arg_attributes
-            },
-            source_code=src_code,
-        )
-        dummy_inputs = [rand_strided(meta.sizes,meta.strides,dtype=meta.dtype, extra_size=meta.offset).to(device=nodes[0].get_device()) for meta in bmreq.input_tensor_meta]
-        dummy_outputs = [rand_strided(meta.sizes,meta.strides,dtype=meta.dtype, extra_size=meta.offset).to(device=nodes[0].get_device()) for meta in bmreq.output_tensor_meta]
-        return bmreq.make_run_fn(dummy_inputs, dummy_outputs)
 
     def codegen_kernel(self, kernel_name):
         arg_defs, _, _, _ = self.kernel_group.args.mlir_argdefs()

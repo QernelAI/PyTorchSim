@@ -26,7 +26,7 @@ for i in "${config[@]}"; do
     echo "===== config=$i | model=$ops =====" >> "$output_file"
     sum=0.0
     count=0
-    config_path="$TORCHSIM_DIR/PyTorchSimBackend/configs/$i"
+    config_path="$TORCHSIM_DIR/TOGSim/configs/$i"
 
     for iter in {1..5}; do
       echo "[Iter $iter] Running simulation for workload=ils_$ops config=$config"

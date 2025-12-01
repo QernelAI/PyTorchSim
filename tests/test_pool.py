@@ -47,8 +47,8 @@ if __name__ == "__main__":
     import sys
     sys.path.append(os.environ.get('TORCHSIM_DIR', default='/workspace/PyTorchSim'))
 
-    from Scheduler.scheduler import ExecutionEngine
-    module = ExecutionEngine.setup_device()
+    from Scheduler.scheduler import PyTorchSimRunner
+    module = PyTorchSimRunner.setup_device()
     device = module.custom_device()
     #test_maxpool(device, b=1, c=8, h=16, w=16)
     #test_maxpool(device, b=1, c=8, h=112, w=112)

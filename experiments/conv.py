@@ -15,7 +15,7 @@ def run_conv2d(batch_size, i_h, i_w, i_c, o_c, kernel_size, stride, padding, con
         conv2d.weight = torch.nn.Parameter(b)
         # conv2d.bias = torch.nn.Parameter(bias)
         return conv2d(a)
-    scheduler = Scheduler(num_request_queue=1, engine_select=Scheduler.FIFO_ENGINE, backend_config=config)
+    scheduler = Scheduler(num_request_queue=1, engine_select=Scheduler.FIFO_ENGINE, togsim_config=config)
     device = scheduler.execution_engine.module.custom_device()
     conv_input = torch.randn(batch_size, i_c, i_h, i_w).to(memory_format=torch.channels_last, device=device)
     conv_kernel = torch.randn(o_c, i_c, kernel_size, kernel_size).to(memory_format=torch.channels_last, device=device)
@@ -37,7 +37,7 @@ if __name__ == "__main__":
     import os
     import sys
     base_dir = os.environ.get('TORCHSIM_DIR', default='/workspace/PyTorchSim')
-    config = os.environ.get('TORCHSIM_CONFIG', default=f'{base_dir}/PyTorchSimBackend/configs/systolic_ws_128x128_c2_simple_noc_tpuv4.json')
+    config = os.environ.get('TORCHSIM_CONFIG', default=f'{base_dir}/TOGSim/configs/systolic_ws_128x128_c2_simple_noc_tpuv4.json')
     config_prefix = config.split('/')[-1].split('.')[0][9:] # extract config name from config path
     sys.path.append(base_dir)
     args = argparse.ArgumentParser()
@@ -51,7 +51,7 @@ if __name__ == "__main__":
     os.environ['TORCHSIM_DUMP_PATH'] = result_path
     # only timing simulation
     os.environ['TORCHSIM_VALIDATION_MODE'] = "0"
-    if 'BACKENDSIM_SPIKE_ONLY' in os.environ:
-        del os.environ['BACKENDSIM_SPIKE_ONLY']
+    if 'TORCHSIM_FUNCTIONAL_MODE' in os.environ:
+        del os.environ['TORCHSIM_FUNCTIONAL_MODE']
 
     run_conv2d(size[0], size[1], size[2], size[3], size[4], size[5], size[6], size[7], config)

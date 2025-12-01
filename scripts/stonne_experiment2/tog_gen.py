@@ -5,7 +5,7 @@ import glob
 from collections import defaultdict
 sys.path.append(os.environ.get('TORCHSIM_DIR', default='/workspace/PyTorchSim'))
 from AsmParser.tog_generator import tog_generator
-from Simulator.simulator import BackendSimulator
+from Simulator.simulator import TOGSimulator
 from PyTorchSimFrontend import extension_config
 
 def extract_simulation_stats(result_path):
@@ -19,9 +19,9 @@ def extract_simulation_stats(result_path):
     for line in lines:
         if "nr_multiplications" in line:
             nr_multiplications = line.strip().split(":")[-1].strip()
-        elif "Total execution cycle" in line:
+        elif "Total execution cycles" in line:
             total_cycle = line.strip().split(":")[-1].strip()
-        elif "Simulation time" in line:
+        elif "Wall-clock time for simulation" in line:
             sim_time = line.strip().split(":")[-1].replace("seconds", "").strip()
     return nr_multiplications, total_cycle, sim_time
 
@@ -71,9 +71,9 @@ if __name__ == "__main__":
         if "outerPro" in path:
             continue
         tog_path = os.path.join(path, "tile_graph.onnx")
-        backend_path = os.path.join(extension_config.CONFIG_TORCHSIM_DIR, "PyTorchSimBackend")
-        stonne_config_path = f'{extension_config.CONFIG_TORCHSIM_DIR}/PyTorchSimBackend/configs/stonne_validation_c1_simple_noc.json'
-        backsim = BackendSimulator(backend_path, stonne_config_path)
+        togsim_path = os.path.join(extension_config.CONFIG_TORCHSIM_DIR, "TOGSim")
+        stonne_config_path = f'{extension_config.CONFIG_TORCHSIM_DIR}/TOGSim/configs/stonne_validation_c1_simple_noc.json'
+        backsim = TOGSimulator(togsim_path, stonne_config_path)
         result_path = backsim.simulation(tog_path)
         nr_multiplications, total_cycle, sim_time = extract_simulation_stats(result_path)
         sim_time, total_cycle = float(sim_time), int(total_cycle)

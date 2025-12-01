@@ -1,18 +1,15 @@
-[submodule "PyTorchSimBackend/extern/onnx"]
-	path = PyTorchSimBackend/extern/onnx
+[submodule "TOGSim/extern/onnx"]
+	path = TOGSim/extern/onnx
 	url = https://github.com/onnx/onnx.git
-[submodule "PyTorchSimBackend/extern/protobuf"]
-	path = PyTorchSimBackend/extern/protobuf
+[submodule "TOGSim/extern/protobuf"]
+	path = TOGSim/extern/protobuf
 	url = https://github.com/protocolbuffers/protobuf.git
-[submodule "PyTorchSimBackend/extern/booksim"]
-	path = PyTorchSimBackend/extern/booksim
+[submodule "TOGSim/extern/booksim"]
+	path = TOGSim/extern/booksim
 	url = https://github.com/PSAL-POSTECH/booksim.git
-[submodule "PyTorchSimBackend/extern/torch2timeloop"]
-        path = PyTorchSimBackend/extern/torch2timeloop
-        url = https://github.com/Accelergy-Project/pytorch2timeloop-converter.git
-[submodule "PyTorchSimBackend/extern/ramulator2"]
-	path = PyTorchSimBackend/extern/ramulator2
+[submodule "TOGSim/extern/ramulator2"]
+	path = TOGSim/extern/ramulator2
 	url = https://github.com/PSAL-POSTECH/ramulator2
-[submodule "PyTorchSimBackend/extern/stonneCore"]
-	path = PyTorchSimBackend/extern/stonneCore
+[submodule "TOGSim/extern/stonneCore"]
+	path = TOGSim/extern/stonneCore
 	url = https://github.com/PSAL-POSTECH/stonne_core.git

@@ -7,13 +7,13 @@ from test_transformer import EncoderBlock as model2
 base_path = os.environ.get('TORCHSIM_DIR', default='/workspace/PyTorchSim')
 sys.path.append(base_path)
 from Scheduler.scheduler import Scheduler, SchedulerDNNModel, Request
-config = f'{base_path}/PyTorchSimBackend/configs/systolic_ws_128x128_c2_simple_noc_tpuv3_partition.json'
+config = f'{base_path}/TOGSim/configs/systolic_ws_128x128_c2_simple_noc_tpuv3_partition.json'
 
 target_model1 = model1().eval()
 target_model2 = model2(768, 12).eval()
 
 # Init scheduler
-scheduler = Scheduler(num_request_queue=2, engine_select=Scheduler.FIFO_ENGINE, backend_config=config)
+scheduler = Scheduler(num_request_queue=2, engine_select=Scheduler.FIFO_ENGINE, togsim_config=config)
 # Register compiled model
 opt_model1 = torch.compile(target_model1.to(device=scheduler.execution_engine.module.custom_device(), memory_format=torch.channels_last))
 opt_model2 = torch.compile(target_model2.to(device=scheduler.execution_engine.module.custom_device()))

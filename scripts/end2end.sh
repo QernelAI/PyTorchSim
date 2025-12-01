@@ -7,34 +7,34 @@ BASE_PATH=$1 # Input as the first argument
 total_sum=0
 total_core=0
 total_vector=0
-# Find all backendsim_result folders
-mapfile -t backend_folders < <(find "$BASE_PATH" -type d -name "backendsim_result")
+# Find all togsim_result folders
+mapfile -t togsim_folders < <(find "$BASE_PATH" -type d -name "togsim_result")
 
-# Iterate over each backendsim_result folder
-for backend_folder in "${backend_folders[@]}"; do
-  # echo "Processing folder: $backend_folder"
+# Iterate over each togsim_result folder
+for togsim_folder in "${togsim_folders[@]}"; do
+  # echo "Processing folder: $togsim_folder"
 
-  # Find all files within the backendsim_result folder
-  mapfile -t files < <(find "$backend_folder" -type f)
+  # Find all files within the togsim_result folder
+  mapfile -t files < <(find "$togsim_folder" -type f)
 
   for file in "${files[@]}"; do
     # echo "Processing $file"
 
-    # Extract the last line containing "Total cycle"
-    total_cycle=$(grep "Total cycle" "$file" | tail -n 1 | sed -E 's/.*Total cycle ([0-9]+).*/\1/')
+    # Extract the last line containing "Total_cycles"
+    total_cycle=$(grep "Total_cycles" "$file" | tail -n 1 | sed -E 's/.*Total_cycles ([0-9]+).*/\1/')
     # echo "total_cycle: $total_cycle"
-    active_cycles=($(grep -o 'active cycle [0-9]*' "$file" | awk '{print $3}'))
+    active_cycles=($(grep -o 'active_cycles [0-9]*' "$file" | awk '{print $3}'))
     num_cycles=${#active_cycles[@]}
     if [ "$num_cycles" -ge 3 ]; then
         core_cycle=${active_cycles[$((num_cycles-3))]}
     else
-        echo "Error: cannot find core active cycle"
+        echo "Error: cannot find core active_cycles"
     fi
     if [[ "$num_cycles" -ge 1 ]]; then
-        # Extract the last two active cycles
+        # Extract the last two active_cycless
         vector_core_cycle=${active_cycles[$((num_cycles-1))]}
     else
-        echo "Error: cannot find vector core active cycle"
+        echo "Error: cannot find vector core active_cycles"
     fi
     echo "file: $file total_cycle: $total_cycle SA core_cycle: $core_cycle vector_core_cycle: $vector_core_cycle"
 

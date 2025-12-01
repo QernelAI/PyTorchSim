@@ -8,7 +8,7 @@ import datetime
 
 def run_layernorm(size, config):
     from Scheduler.scheduler import Scheduler, SchedulerDNNModel, Request
-    scheduler = Scheduler(num_request_queue=1, engine_select=Scheduler.FIFO_ENGINE, backend_config=config)
+    scheduler = Scheduler(num_request_queue=1, engine_select=Scheduler.FIFO_ENGINE, togsim_config=config)
     device = scheduler.execution_engine.module.custom_device()
     input = torch.randn(size).to(device=device)
     opt_fn = torch.compile(dynamic=False)(torch.nn.LayerNorm(size[-1]).to(device=device))
@@ -27,7 +27,7 @@ if __name__ == "__main__":
     import os
     import sys
     base_dir = os.environ.get('TORCHSIM_DIR', default='/workspace/PyTorchSim')
-    config = os.environ.get('TORCHSIM_CONFIG', default=f'{base_dir}/PyTorchSimBackend/configs/systolic_ws_128x128_c2_simple_noc_tpuv4.json')
+    config = os.environ.get('TORCHSIM_CONFIG', default=f'{base_dir}/TOGSim/configs/systolic_ws_128x128_c2_simple_noc_tpuv4.json')
     config_prefix = config.split('/')[-1].split('.')[0][9:] # extract config name from config path
     sys.path.append(base_dir)
     args = argparse.ArgumentParser()
@@ -42,7 +42,7 @@ if __name__ == "__main__":
     os.environ['TORCHSIM_FUSION_REDUCTION_REDUCTION'] = "0"
     # only timing simulation
     os.environ['TORCHSIM_VALIDATION_MODE'] = "0"
-    if 'BACKENDSIM_SPIKE_ONLY' in os.environ:
-        del os.environ['BACKENDSIM_SPIKE_ONLY']
+    if 'TORCHSIM_FUNCTIONAL_MODE' in os.environ:
+        del os.environ['TORCHSIM_FUNCTIONAL_MODE']
 
     run_layernorm(size, config)

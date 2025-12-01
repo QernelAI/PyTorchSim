@@ -7,7 +7,7 @@ from torch._inductor.codecache import AsyncCompile, get_lock_dir, get_hash, writ
 from AsmParser.tog_generator import tog_generator
 from PyTorchSimFrontend.mlir.mlir_caller_codegen import MLIRKernelCallerCodeGen
 from PyTorchSimFrontend import extension_config
-from Simulator.simulator import FunctionalSimulator, CycleSimulator, BackendSimulator
+from Simulator.simulator import FunctionalSimulator, CycleSimulator, TOGSimulator
 
 LOCK_TIMEOUT = 600
 
@@ -26,21 +26,6 @@ def dump_metadata(args, arg_attributes, path):
         for (arg_name, arg_attribute), arg in zip(arg_attributes, args):
             file.write(f'{arg_name}=({arg_attribute[0]}, {arg.dtype}, {arg.shape})\n')
     return
-
-def parse_stack_sizes(file_path):
-    meta_path = file_path.split(".")[0]+".meta"
-    cmd = ["riscv64-unknown-elf-objcopy", "--dump-section", f".stack_sizes={meta_path}", file_path, "/dev/null"]
-    subprocess.run(cmd, check=True)
-
-    with open(meta_path, 'rb') as f:
-        stack_sizes_data = list(f.read())
-    if len(stack_sizes_data) <= 17:
-        raise ValueError("Invalid .stack_sizes section size")
-
-    stack_size_bytes = stack_sizes_data[8:-9]
-    stack_size = int.from_bytes(stack_size_bytes, byteorder='little')
-    return stack_size
-
 
 def llvm_compile_command(input, output):
     opt_output = f"{input[:-3]}_opt.ll"
@@ -142,6 +127,10 @@ class SpadOverflowError(Exception):
     def __init__(self, message="SPAD overflow occurred."):
         super().__init__(message)
 
+class TileSizeError(Exception):
+    def __init__(self, message="SPAD overflow occurred."):
+        super().__init__(message)
+
 class MLIRCodeCache:
     cache = dict()
     clear = staticmethod(cache.clear)   # Todo: Cache
@@ -176,7 +165,7 @@ class MLIRCodeCache:
         else:
             link_option = ""
         # Generate LLVM kernel calller and binary for validation
-        if extension_config.CONFIG_TORCHSIM_VALIDATION_MODE:
+        if extension_config.CONFIG_TORCHSIM_FUNCTIONAL_MODE:
             # Use custom malloc to avoid size error
             new_link_option = link_option + " -Wl,--wrap=malloc -Wl,--wrap=free"
             cmds = mlir_compile_command(new_input_path, vectorlane_size, vlen=vlen)
@@ -193,7 +182,7 @@ class MLIRCodeCache:
                     print("Error output:", e.output)
                     assert(0)
 
-                val_llvm_caller = MLIRKernelCallerCodeGen(extension_config.CONFIG_TORCHSIM_VALIDATION_MODE, arg_attributes)
+                val_llvm_caller = MLIRKernelCallerCodeGen(extension_config.CONFIG_TORCHSIM_FUNCTIONAL_MODE, arg_attributes)
                 val_llvm_caller.generate_wrapper_file(write_path, validation_wrapper_name)
                 val_llvm_caller.compile_wih_kernel(write_path, key, validation_wrapper_name,
                                                    validation_binary_name, new_link_option)
@@ -224,7 +213,7 @@ class MLIRCodeCache:
                 print("Error output:", e.output)
                 assert(0)
 
-            if extension_config.CONFIG_BACKENDSIM_SPIKE_ONLY:
+            if not extension_config.CONFIG_TORCHSIM_TIMING_MODE:
                 return key
 
             # Generate MLIR kernel calller and binary for cycle calculation
@@ -278,8 +267,12 @@ class CustomAsyncCompile(AsyncCompile):
             loop_size = kwargs["loop_size"]
         else:
             loop_size = []
+
+        # In the autotune mode, skip validation to speed up
+        autotune = kwargs.get('autotune', False)
+        validate = kwargs.get('validate', False) if not autotune else False
+
         def dummy_simulator(*args, **kwargs):
-            validate = kwargs.get('validate', False)
             # Wait for compilation
             key = future.result()
             from filelock import FileLock
@@ -291,57 +284,49 @@ class CustomAsyncCompile(AsyncCompile):
                 # Dump arguments and meta data
                 dump_metadata(args, arg_attributes, result_path)
                 runtime_path = FunctionalSimulator.get_runtime_dump_path(result_path)
-                if extension_config.CONFIG_TORCHSIM_VALIDATION_MODE or validate:
+                if not autotune and (extension_config.CONFIG_TORCHSIM_FUNCTIONAL_MODE or validate):
                     funcsim = FunctionalSimulator(result_path, key)
                     funcsim.run_spike(args, arg_attributes,
                                     runtime_path, self.validation_binary_name,
                                     vectorlane_size=vectorlane_size, spad_info=spad_info,
                                     cleanup=extension_config.CONFIG_CLEANUP_DUMP_ARGS, silent_mode=silent_mode)
-                if extension_config.CONFIG_BACKENDSIM_SPIKE_ONLY:
+                if not extension_config.CONFIG_TORCHSIM_TIMING_MODE:
                     return
 
                 onnx_path = os.path.join(result_path, "tile_graph.onnx")
                 attribute_path = os.path.join(runtime_path, "attribute")
-                backend_path = os.path.join(extension_config.CONFIG_TORCHSIM_DIR, "PyTorchSimBackend")
-                backsim = BackendSimulator(backend_path, extension_config.CONFIG_TORCHSIM_BACKEND_CONFIG)
+                togsim_path = os.path.join(extension_config.CONFIG_TORCHSIM_DIR, "TOGSim")
+                backsim = TOGSimulator(togsim_path, extension_config.CONFIG_TOGSIM_CONFIG)
                 backsim.vectorlane_size = vectorlane_size
                 attribute_path = backsim.create_attribute_file(attribute_path, args, loop_size=loop_size)
                 result_path = backsim.simulation(onnx_path, attribute_path, silent_mode=silent_mode)
-                result = BackendSimulator.get_result_from_file(result_path)
+                result = TOGSimulator.get_result_from_file(result_path)
                 return result
 
         def dryrun_simulator(*args, **kwargs):
-            autotune = kwargs.get('autotune', False)
             key = future.result()
-             # Run simulator pass
-            result_path = os.path.join(extension_config.CONFIG_TORCHSIM_DUMP_PATH, "tmp", hash_prefix(key))
-            # Dump arguments and meta data
-            dump_metadata(args, arg_attributes, result_path)
-            runtime_path = FunctionalSimulator.get_runtime_dump_path(result_path)
-            if extension_config.CONFIG_BACKENDSIM_SPIKE_ONLY:
-                return
+            from filelock import FileLock
+            lock_dir = get_lock_dir()
+            lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
+            with lock:
+                # Run simulator pass
+                result_path = os.path.join(extension_config.CONFIG_TORCHSIM_DUMP_PATH, "tmp", hash_prefix(key))
+                # Dump arguments and meta data
+                dump_metadata(args, arg_attributes, result_path)
+                runtime_path = FunctionalSimulator.get_runtime_dump_path(result_path)
+                if not extension_config.CONFIG_TORCHSIM_TIMING_MODE:
+                    return
 
-            if autotune:
-                onnx_path = os.path.join(result_path, "tile_graph.onnx")
-                attribute_path = os.path.join(runtime_path, "attribute")
-                backend_path = os.path.join(extension_config.CONFIG_TORCHSIM_DIR, "PyTorchSimBackend")
-                backsim = BackendSimulator(backend_path, extension_config.CONFIG_TORCHSIM_BACKEND_CONFIG)
-                backsim.vectorlane_size = vectorlane_size
-                attribute_path = backsim.create_attribute_file(attribute_path, args, loop_size=loop_size)
-                result_path_2 = backsim.simulation(onnx_path, attribute_path)
-                result = BackendSimulator.get_result_from_file(result_path_2)
-                return result_path, runtime_path, result
-
-            # Todo. Support valude dependent mode for graph mode
-            if False: # extension_config.CONFIG_TORCHSIM_VALIDATION_MODE:
-                funcsim = FunctionalSimulator(result_path, key)
-                funcsim.run_spike(args, arg_attributes,
-                                  runtime_path, self.validation_binary_name,
-                                  vectorlane_size=vectorlane_size, spad_info=spad_info,
-                                  cleanup=extension_config.CONFIG_CLEANUP_DUMP_ARGS)
+                # Todo. Support valude dependent mode for graph mode
+                if False: # extension_config.CONFIG_TORCHSIM_FUNCTIONAL_MODE:
+                    funcsim = FunctionalSimulator(result_path, key)
+                    funcsim.run_spike(args, arg_attributes,
+                                    runtime_path, self.validation_binary_name,
+                                    vectorlane_size=vectorlane_size, spad_info=spad_info,
+                                    cleanup=extension_config.CONFIG_CLEANUP_DUMP_ARGS)
             return result_path, runtime_path, None
 
-        is_dryrun = int(os.environ.get('BACKENDSIM_DRYRUN', default=False))
+        is_dryrun = int(os.environ.get('TOGSIM_DRYRUN', default=False)) and not autotune
         target_simulator = dryrun_simulator if is_dryrun else dummy_simulator
         target_simulator.arg_attributes = arg_attributes
         target_simulator.future = future

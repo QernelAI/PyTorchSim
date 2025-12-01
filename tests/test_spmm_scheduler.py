@@ -25,7 +25,7 @@ if __name__ == "__main__":
     output_size = args.output_size
     w1_sparsity = args.w1_sparsity
     w2_sparsity = args.w2_sparsity
-    config_path = f"{CONFIG_TORCHSIM_DIR}/PyTorchSimBackend/configs/{args.config}"
+    config_path = f"{CONFIG_TORCHSIM_DIR}/TOGSim/configs/{args.config}"
 
     print("batch_size: ", batch_size)
     print("input_size: ", input_size)
@@ -37,7 +37,7 @@ if __name__ == "__main__":
     with torch.no_grad():
         # Init scheduler
         scheduler = Scheduler(num_request_queue=2, engine_select=Scheduler.FIFO_ENGINE,
-                            backend_config=config_path)
+                              togsim_config=config_path)
 
         target_model1 = model1(input_size, hidden_size, output_size, w1_sparsity, w2_sparsity, scheduler.execution_engine.module.custom_device()).eval()
         target_model2 = model2(768, 12).eval()

@@ -3,8 +3,8 @@ total_cycles=0
 
 # Read through input stream line by line
 while IFS= read -r line; do
-    # Check if the line contains both "[BackendSimulator]" and "stored"
-    if [[ "$line" == *"[BackendSimulator]"* && "$line" == *"stored"* ]]; then
+    # Check if the line contains both "[TOGSimulator]" and "stored"
+    if [[ "$line" == *"[TOGSimulator]"* && "$line" == *"stored"* ]]; then
         # Extract the file path from the line
         file_path=$(echo "$line" | sed -n 's/.*stored to "\(.*\)"$/\1/p')
         

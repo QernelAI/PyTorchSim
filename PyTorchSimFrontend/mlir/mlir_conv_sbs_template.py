@@ -1,17 +1,10 @@
-import os
-import math
 from sympy import  Symbol, Number
 from typing import List, Optional
 
-from PyTorchSimFrontend.mlir.mlir_common import MLIRKernelArgs
-from PyTorchSimFrontend.mlir.mlir_template import MLIRTemplate
+from PyTorchSimFrontend.mlir.mlir_conv_common import MLIRConvCommonTemplate
 from PyTorchSimFrontend.mlir.mlir_template import MLIRTemplateKernel
 from torch._inductor.ir import IRNode
-from torch._inductor.codecache import write_atomic
-import PyTorchSimFrontend.extension_codecache as extension_codecache
 from PyTorchSimFrontend.mlir import mlir_common
-from torch._inductor.codecache import get_hash
-from PyTorchSimFrontend import extension_config
 
 CONV_TEMPLATE = r"""
 // Single Batch Conv2D (Stride != 1) kernel
@@ -105,7 +98,8 @@ func.func @{{ KERNEL_NAME }}{{kernel.def_conv_kernel(inputs=[X, W, BIAS], output
 }
 """
 
-WRAPPER_TEMPLATE = r"""
+class MLIRConvSingleBatchStridedTemplate(MLIRConvCommonTemplate):
+    WRAPPER_TEMPLATE = r"""
 def {{ FUNC_NAME }}{{kernel.def_wrapper()}}:
     # Padding input
     padded_shape = list(X.shape)
@@ -127,67 +121,30 @@ def {{ FUNC_NAME }}{{kernel.def_wrapper()}}:
 
     # Launch kernel
     {{ KERNEL_NAME }}<DEF_CONV_WRAPPER>
-    {%- if BACKENDSIM_EAGER_MODE %}
+    {%- if TOGSIM_EAGER_MODE %}
     yield ({{KERNEL_NAME}}, <DEF_CONV_WRAPPER>)
     {%- endif %}
 """
-
-class MLIRConvSingleBatchStridedTemplate(MLIRTemplate):
     def __init__(self, input_nodes, layout, input_reorder=None, **kwargs):
-        super().__init__("kernel", input_nodes, layout, input_reorder)
-        self.stride = kwargs["stride"]
-        self.padding = kwargs["padding"]
-        self.dilation = kwargs["dilation"]
-        self.weight_shape = [str(i) for i in input_nodes[1].layout.size]
-        self.input_shape = [str(i) for i in input_nodes[0].layout.size]
-        self.function_name = "Conv2D_" + "_".join(self.input_shape) + "_".join(self.weight_shape)+ "_" \
-            + "_".join([str(i) for i in self.stride]) \
-            + "_" + "_".join([str(i) for i in self.padding]) \
-            + "_" + "_".join([str(i) for i in self.dilation])
-        self.kernel_args = ['X', 'W', 'Bias', 'Y']
-
-    def get_padded_input_size(self, X):
-        input_padded = list(X.layout.size)
-        input_padded[2] += 2 * self.padding[0]
-        input_padded[3] += 2 * self.padding[1]
-        return math.prod(input_padded)
+        super().__init__(input_nodes, layout, input_reorder, **kwargs)
 
     def render(self,
                kernel: MLIRTemplateKernel,
                template_buffer_node = None,
                epilogue_nodes: Optional[List[IRNode]] = None,
+               tile_info = None,
                **kwargs):
         # Extract input arguments info
-        if template_buffer_node is not None:
-            self.output_node = template_buffer_node
-        self.kernel = kernel
-        self.epilogue_nodes = epilogue_nodes
-
-        X, W = self.input_nodes[0], self.input_nodes[1]
-        Y = self.output_node
-        Bias = None if len(self.input_nodes) == 2 else self.input_nodes[2]
-
-        if epilogue_nodes is not None:
-            extra_node_rw = {
-                item.name for epilogue_node in epilogue_nodes
-                for item in epilogue_node.read_writes.reads | epilogue_node.read_writes.writes
-                if item.name != Y.name
-            }
-        n_extra_node = len(extra_node_rw) if epilogue_nodes is not None else 0
-
-        BATCH, I_C, I_H, I_W = X.layout.size
-        O_C, _, K_H, K_W = W.layout.size
-        O_H = Y.layout.size[2] if template_buffer_node is None else template_buffer_node.layout.size[2]
-        O_W = Y.layout.size[3] if template_buffer_node is None else template_buffer_node.layout.size[3]
-        PADDING_H=self.padding[0]
-        PADDING_W=self.padding[1]
-        STRIDE_H=self.stride[0]
-        STRIDE_W=self.stride[1]
+        X, W, Y, Bias, n_extra_node, BATCH, I_C, I_H, I_W, O_C, K_H, K_W, O_H, O_W, PADDING_H, PADDING_W, STRIDE_H, STRIDE_W = self.extract_info(kernel, template_buffer_node, epilogue_nodes)
 
         # Select tile size adn template
         conv_template = CONV_TEMPLATE
-        TILE_K_H, TILE_K_W, TILE_O_H, TILE_O_W, TILE_M, TILE_N, TILE_K, TILE_I_H, TILE_I_W, SUB_TILE_I_H, SUB_TILE_I_W, SUB_TILE_K_H, SUB_TILE_K_W, SUB_TILE_M, SUB_TILE_N, SUB_TILE_K, TOG_latency = self.select_tile(kernel, n_extra_node, BATCH, I_C, O_C, K_H, K_W, O_H, O_W)
+        if tile_info is None:
+            TILE_K_H, TILE_K_W, TILE_O_H, TILE_O_W, TILE_M, TILE_N, TILE_K, TILE_I_H, TILE_I_W, SUB_TILE_I_H, SUB_TILE_I_W, SUB_TILE_K_H, SUB_TILE_K_W, SUB_TILE_M, SUB_TILE_N, SUB_TILE_K = self.select_tile(kernel, n_extra_node, BATCH, I_C, O_C, K_H, K_W, O_H, O_W)[0]
+        else:
+            TILE_K_H, TILE_K_W, TILE_O_H, TILE_O_W, TILE_M, TILE_N, TILE_K, TILE_I_H, TILE_I_W, SUB_TILE_I_H, SUB_TILE_I_W, SUB_TILE_K_H, SUB_TILE_K_W, SUB_TILE_M, SUB_TILE_N, SUB_TILE_K = tile_info
         SUB_TILE_N = TILE_N if TILE_N > 512 else SUB_TILE_N
+        TOG_latency = O_W if TILE_M > O_W else TILE_M
         TOG_latency = 8 if TOG_latency < 8 else TOG_latency
         kernel.loop_size = [TOG_latency, TILE_N, TILE_K]
 
@@ -284,66 +241,13 @@ class MLIRConvSingleBatchStridedTemplate(MLIRTemplate):
         return code
 
     def select_tile(self, kernel, n_extra_node, BATCH, I_C, O_C, K_H, K_W, O_H, O_W):
-        TILE_K_H, TILE_K_W, TILE_O_H, TILE_O_W, TILE_M, TILE_N, TILE_K = kernel.conv_single_batch_mapping(BATCH, O_C, I_C, K_H, K_W, O_H, O_W, self.stride, self.dilation, n_extra_node) # TODO: implement K_W
-        TILE_I_H = 1 + (TILE_O_H - 1) * self.stride[0] + (TILE_K_H - 1) * self.dilation[0]
-        TILE_I_W = 1 + (TILE_O_W - 1) * self.stride[1] + (TILE_K_W - 1) * self.dilation[1]
-        SUB_TILE_I_H, SUB_TILE_I_W, SUB_TILE_K_H, SUB_TILE_K_W = 1, 1, 1, 1
-        SUB_TILE_M = TILE_M if TILE_M < kernel.vector_lane else kernel.vector_lane
-        SUB_TILE_N = TILE_N if TILE_N < kernel.vector_lane else kernel.vector_lane
-        SUB_TILE_K = TILE_K
-        TOG_latency = O_W if TILE_M > O_W else TILE_M
-        return TILE_K_H,TILE_K_W,TILE_O_H,TILE_O_W,TILE_M,TILE_N,TILE_K,TILE_I_H,TILE_I_W,SUB_TILE_I_H,SUB_TILE_I_W,SUB_TILE_K_H,SUB_TILE_K_W,SUB_TILE_M,SUB_TILE_N,SUB_TILE_K,TOG_latency
-
-    def outer_func_render(self, kernel_name, input_args):
-        X, W = self.input_nodes[0], self.input_nodes[1]
-        Y = self.output_node
-        Bias = None if len(self.input_nodes) == 2 else self.input_nodes[2]
-
-        eager_mode = int(os.environ.get('BACKENDSIM_EAGER_MODE', default=False))
-        options = dict(
-            kernel=self.kernel,
-            KERNEL_NAME=kernel_name,
-            FUNC_NAME=self.function_name + f"_{len(input_args)}",
-            INPUT=X,
-            WEIGHT=W,
-            BIAS=Bias,
-            OUTPUT=Y,
-            PADDING_H=self.padding[0],
-            PADDING_W=self.padding[1],
-            VALIDATION_MODE=extension_config.CONFIG_TORCHSIM_VALIDATION_MODE,
-            BACKENDSIM_EAGER_MODE=eager_mode,
-            input_reorder=self.input_reorder
-        )
-        code = self._template_from_string(WRAPPER_TEMPLATE).render(**options)
-        return code, self.function_name + f"_{len(input_args)}"
-
-    def get_arg_attributes(self):
-        arg_attributes = []
-
-        X = self.input_nodes[0]
-        X_shape = [X.get_size()[i] for i in (2, 3, 0, 1)]
-        X_shape[0] += 2 * self.padding[0]
-        X_shape[1] += 2 * self.padding[1]
-
-        def compute_stride(shape):
-            stride = [1] * len(shape)
-            for i in range(len(shape)-2, -1, -1):
-                stride[i] = stride[i+1] * shape[i+1]
-            return stride
-
-        X_stride = compute_stride(X_shape)
-        arg_attributes.append([X.data.data.name, [MLIRKernelArgs.MLIR_ARGS_IN, X.layout.dtype, math.prod(X_shape), X_shape, X_stride]])
-
-        return arg_attributes
-
-    def codegen_header(self, code, extra_headers):
-        write_path = extension_codecache.get_write_path(code)
-        if not os.path.exists(write_path):
-            os.makedirs(write_path)
-        spike_write_path = os.path.join(write_path, "global_var.h")
-        gem5_write_path = os.path.join(write_path, "gem5_global_var.h")
-        if not os.path.exists(spike_write_path):
-            write_atomic(spike_write_path, extra_headers[0])
-        if not os.path.exists(gem5_write_path):
-            write_atomic(gem5_write_path, extra_headers[1])
-        self.hash_value = get_hash(code.strip())
+        tile_candidates = kernel.conv_single_batch_mapping(BATCH, O_C, I_C, K_H, K_W, O_H, O_W, self.stride, self.dilation, n_extra_node) # TODO: implement K_W
+        for idx, (TILE_K_H, TILE_K_W, TILE_O_H, TILE_O_W, TILE_M, TILE_N, TILE_K) in enumerate(tile_candidates):
+            TILE_I_H = 1 + (TILE_O_H - 1) * self.stride[0] + (TILE_K_H - 1) * self.dilation[0]
+            TILE_I_W = 1 + (TILE_O_W - 1) * self.stride[1] + (TILE_K_W - 1) * self.dilation[1]
+            SUB_TILE_I_H, SUB_TILE_I_W, SUB_TILE_K_H, SUB_TILE_K_W = 1, 1, 1, 1
+            SUB_TILE_M = TILE_M if TILE_M < kernel.vector_lane else kernel.vector_lane
+            SUB_TILE_N = TILE_N if TILE_N < kernel.vector_lane else kernel.vector_lane
+            SUB_TILE_K = TILE_K
+            tile_candidates[idx] = TILE_K_H,TILE_K_W,TILE_O_H,TILE_O_W,TILE_M,TILE_N,TILE_K,TILE_I_H,TILE_I_W,SUB_TILE_I_H,SUB_TILE_I_W,SUB_TILE_K_H,SUB_TILE_K_W,SUB_TILE_M,SUB_TILE_N,SUB_TILE_K
+        return tile_candidates

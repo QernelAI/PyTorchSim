@@ -6,8 +6,6 @@ import sympy
 from PyTorchSimFrontend.mlir.mlir_template import MLIRTemplate
 from PyTorchSimFrontend.mlir.mlir_template import MLIRTemplateKernel
 from torch._inductor.ir import IRNode
-from torch._inductor.codecache import write_atomic
-import PyTorchSimFrontend.extension_codecache as extension_codecache
 from PyTorchSimFrontend.mlir import mlir_common
 
 BMM_TEMPLATE = r"""
@@ -162,51 +160,31 @@ class MLIRBMMTemplate(MLIRTemplate):
                template_buffer_node = None,
                epilogue_nodes: Optional[List[IRNode]] = None,
                prologue_nodes: Optional[List[IRNode]] = None,
+               tile_info = None,
                **kwargs):
-        if template_buffer_node is not None:
-            self.output_node = template_buffer_node
-
-        # Extract input arguments info
-        X, W = self.input_nodes[0], self.input_nodes[1]
-        Y = self.output_node
-        Bias = None if len(self.input_nodes) == 2 else self.input_nodes[2]
-
-        W_tensor =  empty_strided(W.layout.size, W.layout.stride)
-        X_tensor =  empty_strided(X.layout.size, X.layout.stride)
-        if len(W_tensor.size()) > 3 or len(W_tensor.size()) == 2:
-          W_tensor = W_tensor.view([-1, W_tensor.shape[-2], W_tensor.shape[-1]])
-        if len(X_tensor.size()) > 3 or len(X_tensor.size()) == 2:
-          X_tensor = X_tensor.view([-1, X_tensor.shape[-2], X_tensor.shape[-1]])
-        B, M, N, K = X_tensor.size()[0], X_tensor.size()[1], W_tensor.size()[2], X_tensor.size()[2]
-
-        W_stride = W_tensor.stride()
-        X_stride = X_tensor.stride()
-
-        # Select tile size
-        n_extra_node = len(epilogue_nodes) if epilogue_nodes is not None else 0
-        TILE_M, TILE_N, TILE_K = kernel.gemm_combination_mapping(M, N, K, n_extra_node=n_extra_node)
-        SUB_TILE_M = TILE_M if (TILE_M < kernel.vector_lane) or prologue_nodes else kernel.vector_lane
-        SUB_TILE_N = TILE_N # if (TILE_N < kernel.vector_lane) or prologue_nodes else kernel.vector_lane
-        SUB_TILE_K = TILE_K # if (TILE_K < kernel.vector_lane) or prologue_nodes else kernel.vector_lane
+        X, W, Y, Bias, W_tensor, X_tensor, B, M, N, K, n_extra_node, n_prologue_node = self.extract_info(template_buffer_node, epilogue_nodes, prologue_nodes)
+        if tile_info is None:
+            TILE_M, TILE_N, TILE_K, SUB_TILE_M, SUB_TILE_N, SUB_TILE_K = self.select_tile(kernel, M, N, K, n_extra_node, 0, n_prologue_node)[0]
+        else:
+            TILE_M, TILE_N, TILE_K, SUB_TILE_M, SUB_TILE_N, SUB_TILE_K = tile_info
 
         TOG_latency = M if TILE_M > M else TILE_M
         kernel.loop_size = [TOG_latency, TILE_N, TILE_K]
-        TILE_K = TILE_K // 2 if prologue_nodes else TILE_K
 
         # Select template code
         nr_reduction_nodes = [node for node in epilogue_nodes if node.is_reduction()] if epilogue_nodes is not None else []
         if nr_reduction_nodes:
-          template = BMM_REDUCTION_TEMPLATE
-          epilogue_dim_aliasing = {"index0":"index0", "index1":"index2", "index2": "index1"}
-          nr_rdim = 1
+            template = BMM_REDUCTION_TEMPLATE
+            epilogue_dim_aliasing = {"index0":"index0", "index1":"index2", "index2": "index1"}
+            nr_rdim = 1
         elif prologue_nodes:
-          template = BMM_PROLOGUE_TEMPLATE
-          epilogue_dim_aliasing = {"index0":"index0", "index1":"index1", "index2": "index2"}
-          nr_rdim = 0
+            template = BMM_PROLOGUE_TEMPLATE
+            epilogue_dim_aliasing = {"index0":"index0", "index1":"index1", "index2": "index2"}
+            nr_rdim = 0
         else:
-          template = BMM_TEMPLATE
-          epilogue_dim_aliasing = {"index0":"index0", "index1":"index1", "index2": "index2"}
-          nr_rdim = 0
+            template = BMM_TEMPLATE
+            epilogue_dim_aliasing = {"index0":"index0", "index1":"index1", "index2": "index2"}
+            nr_rdim = 0
 
         # Prepare tile descriptors
         vlane_stride = 1
@@ -323,19 +301,53 @@ class MLIRBMMTemplate(MLIRTemplate):
             dram_idx = Y_idx,
             dram_tile_desc = Y_tile_desc,
             nr_rdim = nr_rdim,
+            r_dim_size = M,
             dim_aliasing = epilogue_dim_aliasing
         )
         code = self._template_from_string(template).render(**kernel.render_options)
         kernel.add_loop_info([kernel.render_options["M"], kernel.render_options["N"], kernel.render_options["K"]], [kernel.render_options["TILE_M"], kernel.render_options["TILE_N"], kernel.render_options["TILE_K"]])
         return code
 
-    def codegen_header(self, code, extra_headers):
-        write_path = extension_codecache.get_write_path(code)
-        if not os.path.exists(write_path):
-            os.makedirs(write_path)
-        spike_write_path = os.path.join(write_path, "global_var.h")
-        gem5_write_path = os.path.join(write_path, "gem5_global_var.h")
-        if not os.path.exists(spike_write_path):
-            write_atomic(spike_write_path, extra_headers[0])
-        if not os.path.exists(gem5_write_path):
-            write_atomic(gem5_write_path, extra_headers[1])
+    def extract_info(self, template_buffer_node, epilogue_nodes, prologue_nodes):
+        if template_buffer_node is not None:
+            self.output_node = template_buffer_node
+
+        # Extract input arguments info
+        X, W = self.input_nodes[0], self.input_nodes[1]
+        Y = self.output_node
+        Bias = None if len(self.input_nodes) == 2 else self.input_nodes[2]
+
+        W_tensor =  empty_strided(W.layout.size, W.layout.stride)
+        X_tensor =  empty_strided(X.layout.size, X.layout.stride)
+        if len(W_tensor.size()) > 3 or len(W_tensor.size()) == 2:
+          W_tensor = W_tensor.view([-1, W_tensor.shape[-2], W_tensor.shape[-1]])
+        if len(X_tensor.size()) > 3 or len(X_tensor.size()) == 2:
+          X_tensor = X_tensor.view([-1, X_tensor.shape[-2], X_tensor.shape[-1]])
+        B, M, N, K = X_tensor.size()[0], X_tensor.size()[1], W_tensor.size()[2], X_tensor.size()[2]
+
+        W_stride = W_tensor.stride()
+        X_stride = X_tensor.stride()
+
+        # Select tile size
+        n_extra_node = len(epilogue_nodes) if epilogue_nodes is not None else 0
+        n_prologue_node = len(prologue_nodes) if prologue_nodes is not None else 0
+        return X,W,Y,Bias,W_tensor,X_tensor,B,M,N,K,n_extra_node, n_prologue_node
+
+    def get_tile_candidates(self,
+               kernel: MLIRTemplateKernel,
+               template_buffer_node = None,
+               epilogue_nodes: Optional[List[IRNode]] = None,
+               prologue_nodes: Optional[List[IRNode]] = None,
+               **kwargs):
+        X, W, Y, Bias, W_tensor, X_tensor, B, M, N, K, n_extra_node, n_prologue_node = self.extract_info(template_buffer_node, epilogue_nodes, prologue_nodes)
+        return self.select_tile(kernel, M, N, K, n_extra_node, 0, n_prologue_node)
+
+    def select_tile(self, kernel, M, N, K, n_extra_node, n_extra_read, n_prologue_node):
+        tile_candidates = kernel.gemm_combination_mapping(M, N, K, n_extra_node=n_extra_node)
+        for idx, (TILE_M, TILE_N, TILE_K) in enumerate(tile_candidates):
+            SUB_TILE_M = TILE_M if (TILE_M < kernel.vector_lane) or n_prologue_node else kernel.vector_lane
+            SUB_TILE_N = TILE_N # if (TILE_N < kernel.vector_lane) or prologue_nodes else kernel.vector_lane
+            SUB_TILE_K = TILE_K # if (TILE_K < kernel.vector_lane) or prologue_nodes else kernel.vector_lane
+            TILE_K = TILE_K // 2 if n_prologue_node else TILE_K
+            tile_candidates[idx] = TILE_M,TILE_N,TILE_K,SUB_TILE_M,SUB_TILE_N,SUB_TILE_K
+        return tile_candidates

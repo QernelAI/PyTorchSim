@@ -88,7 +88,7 @@ if __name__ == "__main__":
             name = file[:-4]
             with open(full_path, errors="ignore") as f:
                 for line in f:
-                    match = re.search(r"Total execution cycle:\s*([0-9]+)", line)
+                    match = re.search(r"Total execution cycles:\s*([0-9]+)", line)
                     if match:
                         cycle_map[name] = int(match.group(1))
                         break

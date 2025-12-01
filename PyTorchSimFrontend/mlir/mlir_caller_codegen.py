@@ -1,16 +1,46 @@
+import os
+import subprocess
+import shlex
+import re
 import torch
-from PyTorchSimFrontend.mlir.mlir_common import MLIRKernelArgs
-from PyTorchSimFrontend.llvm.llvm_caller_codegen import LLVMKernelCallerCodeGen
-from PyTorchSimFrontend.mlir.mlir_common import DTYPE_TO_C
+from torch._inductor.utils import IndentedBuffer
+from torch._inductor.codecache import write_atomic
+from PyTorchSimFrontend.mlir.mlir_common import MLIRKernelArgs, DTYPE_TO_C
 
-class MLIRKernelCallerCodeGen(LLVMKernelCallerCodeGen):
+class MLIRKernelCallerCodeGen():
+    """
+    Generate C that calls the llvm kernel.
+    """
 
     def __init__(self, validation, arg_attributes, cycle_sim=False):
-        super().__init__(validation, arg_attributes)
+        super().__init__()
+        self.code = IndentedBuffer()
+        self.ending = ";"
+        self.open_bracket = "{"
+        self.closed_bracket = "}"
+        self.newline = "\n"
+        self.kernel_name = "kernel"
+        self.validation = validation
+        self.n_arg = len(arg_attributes)
+        self.arg_attributes = arg_attributes
+        self.arg_use_count = 1
+        self.load_args = {}
+        self.kernel_start_addr = ""
+        self.kernel_end_addr = ""
         self.cycle_sim = cycle_sim
 
+    def get_argv_idx(self):
+        self.arg_use_count += 1
+        return self.arg_use_count-1
+
     def write_header(self):
-        super().write_header()
+        self.writeline('#include <stdio.h>')
+        self.writeline('#include <stdlib.h>')
+        self.writeline("#include <stdint.h>")
+        if self.validation:
+            self.writeline("#include <unistd.h>")
+            self.writeline('#include <string.h>')
+            self.writeline('#include <fcntl.h>')
         global_var_header = "gem5_global_var.h" if self.cycle_sim else "global_var.h"
         self.writeline(f"#include \"{global_var_header}\"")
 
@@ -41,6 +71,9 @@ class MLIRKernelCallerCodeGen(LLVMKernelCallerCodeGen):
                 with self.code.indent():
                     self.writeline(f'return -1{self.ending}')
                 self.writeline(self.closed_bracket)
+
+    def write_exit(self):
+        self.writeline(f'return 0{self.ending}')
 
     def generate_kernel_declare(self):
         # memref to llvm arguments (memref -> ptr, ptr, i64, <?xi64>, <?xi64>) allocated pointer, aligned pointer, offset, size, stride
@@ -87,3 +120,141 @@ class MLIRKernelCallerCodeGen(LLVMKernelCallerCodeGen):
 
             self.write_exit()
         self.writeline(self.closed_bracket)
+
+    def generate_load_dump_fn(self):
+        self.writeline(f'{self.newline}int load_arg(void *arg, size_t size, const char *path) {self.open_bracket}')
+        with self.code.indent():
+            self.writeline(f'int fd = open(path, 0x00000000){self.ending}')
+            self.writeline(f'if (fd == -1) {self.open_bracket}')
+            with self.code.indent():
+                self.writeline(f'return -1{self.ending}')
+            self.writeline(self.closed_bracket)
+
+            self.writeline(f'if (read(fd, arg, size) == -1) {self.open_bracket}')
+            with self.code.indent():
+                self.writeline(f'return -1{self.ending}')
+            self.writeline(self.closed_bracket)
+            self.writeline(f'close(fd){self.ending}')
+            self.writeline(f'return 0{self.ending}')
+        self.writeline(self.closed_bracket)
+
+        self.writeline(f'{self.newline}int dump_arg(void *arg, size_t size, const char *path) {self.open_bracket}')
+        with self.code.indent():
+            self.writeline(f'int fd = open(path, 0x00000001 | 0x00000040, 0644){self.ending}')
+            self.writeline(f'if (fd == -1) {self.open_bracket}')
+            with self.code.indent():
+                self.writeline(f'return -1{self.ending}')
+            self.writeline(self.closed_bracket)
+
+            self.writeline(f'if (write(fd, arg, size) == -1) {self.open_bracket}')
+            with self.code.indent():
+                self.writeline(f'return -1{self.ending}')
+            self.writeline(self.closed_bracket)
+            self.writeline(f'close(fd){self.ending}')
+            self.writeline(f'return 0{self.ending}')
+        self.writeline(self.closed_bracket)
+
+
+    def writeline(self, line):
+        self.code.writeline(line)
+
+    def generate_wrapper_file(self, path, name):
+        self.dump_path = path
+
+        self.write_header()
+        self.generate_kernel_declare()
+
+        if self.validation:
+            self.generate_load_dump_fn()
+        self.generate_main()
+
+        write_path = os.path.join(path, name+".c",)
+        write_atomic(write_path, self.code.getvalue())
+        return
+
+    def add_extention(self, name, extension):
+        return name + "." + extension
+
+    def compile_wih_kernel(self, write_path, llvm_name, wrapper_name, binary_name, link_option=""):
+        main_path = os.path.join(write_path, self.add_extention(wrapper_name, 'c'))
+        main_obj_path = os.path.join(write_path, self.add_extention(wrapper_name, 'o'))
+        kernel_path = os.path.join(write_path, self.add_extention(llvm_name, 's'))
+        kernel_obj_path = os.path.join(write_path, self.add_extention(llvm_name, 'o'))
+
+        main_compile = f'riscv64-unknown-elf-gcc -march=rv64gcv -c {main_path} -o {main_obj_path}'
+        kernel_compile = f'clang -c --target="riscv64" -march=rv64gcv -O2 -nostdlib {kernel_path} -o {kernel_obj_path}'
+
+        target = os.path.join(write_path, binary_name)
+        link = f'riscv64-unknown-elf-gcc -march=rv64gcv {main_obj_path} {kernel_obj_path} -o {target} -lm {link_option}'
+
+        main_compile_cmd = shlex.split(main_compile)
+        kernel_compile_cmd = shlex.split(kernel_compile)
+        link_cmd = shlex.split(link)
+
+        try:
+            subprocess.check_call(main_compile_cmd)
+            subprocess.check_call(kernel_compile_cmd)
+            subprocess.check_call(link_cmd)
+        except subprocess.CalledProcessError as e:
+            print("Command failed with exit code", e.returncode)
+            print("Error output:", e.output)
+            assert(0)
+
+    def parse_stack_sizes(self, file_path, vlenb=256):
+        with open(file_path, 'r') as f:
+            stack_sizes_data = f.readlines()
+
+        in_proc = False
+        stack_base = None
+        dynamic_expr = None
+        max_offset = 0
+
+        for line in stack_sizes_data:
+            line = line.strip()
+            if line.startswith(".cfi_startproc"):
+                in_proc = True
+                continue
+            elif line.startswith(".cfi_endproc") and in_proc:
+                if dynamic_expr:
+                    total_stack = eval(dynamic_expr, {"vlenb": vlenb})
+                    return total_stack
+                elif stack_base:
+                    return stack_base
+                else:
+                    return max_offset
+
+            # Skip outer function
+            if not in_proc:
+                continue
+
+            if line.startswith(".cfi_def_cfa_offset"):
+                stack_base = int(line.split()[-1])
+
+            if ".cfi_escape" in line and "#" in line:
+                comment = line.split("#")[-1].strip()
+                m = re.search(r"sp \+ (\d+)\s*\+\s*(\d+)\s*\*\s*vlenb", comment)
+                if m:
+                    base, scale = int(m.group(1)), int(m.group(2))
+                    dynamic_expr = f"{base} + {scale} * vlenb"
+
+    def get_spad_size(self, binary_path):
+        cmd = ["riscv64-unknown-elf-readelf", "-s", binary_path]
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if result.returncode != 0:
+            raise RuntimeError(f"Readelf error: {result.stderr}")
+
+        output = result.stdout
+        spad_start = None
+        spad_end = None
+        for line in output.splitlines():
+            if '.spad' in line and 'SECTION' in line:
+                parts = line.split()
+                spad_start = int(parts[1], 16)
+            elif 'spad_end' in line:
+                parts = line.split()
+                spad_end = int(parts[1], 16)
+
+        if spad_start is None or spad_end is None:
+            return 0
+        spad_size = spad_end - spad_start
+        return spad_size

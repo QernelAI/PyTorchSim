@@ -12,7 +12,7 @@ from pathlib import Path
 import torch
 import numpy as np
 
-from PyTorchSimFrontend.llvm.llvm_common import LLVMKernelArgs
+from PyTorchSimFrontend.mlir.mlir_common import MLIRKernelArgs
 from PyTorchSimFrontend import extension_config
 
 TORCH_TO_NUMPY = {
@@ -64,10 +64,10 @@ class FunctionalSimulator():
         for (arg_name, arg_attribute), arg in zip(arg_attributes, args):
             size = arg_attribute[2] if arg_attribute[1] != torch.bool else (arg_attribute[2] + 7) // 8
             array_size.append(size)
-            if LLVMKernelArgs.is_llvm_arg_in(arg_attribute[0]):
+            if MLIRKernelArgs.is_mlir_arg_in(arg_attribute[0]):
                 index = self.write_arg(arg, load_path, arg_name)
                 file_path.append(os.path.join(load_path, arg_name, f'{index}.raw'))
-            elif LLVMKernelArgs.is_llvm_arg_out(arg_attribute[0]):
+            elif MLIRKernelArgs.is_mlir_arg_out(arg_attribute[0]):
                 path = os.path.join(dump_path, arg_name)
                 os.makedirs(path, exist_ok=True)
                 file_path.append(os.path.join(path, f'{self.get_biggest_filename(path)}.raw'))
@@ -101,15 +101,17 @@ class FunctionalSimulator():
         os.makedirs(os.path.join(runtime_path, "indirect_access"), exist_ok=True)
         os.makedirs(os.path.join(runtime_path, "dma_access"), exist_ok=True)
         run = f'spike --isa rv64gcv --varch=vlen:256,elen:64 {vectorlane_option} {spad_option} {kernel_address} {base_path} /workspace/riscv-pk/build/pk {target_binary} {file_path_str}'
-        if not silent_mode:
-            print("[SpikeSimulator] cmd> ", run)
+        if not silent_mode and extension_config.CONFIG_DEBUG_MODE:
+            print("[Spike] cmd> ", run)
+        print("[Spike] Running Spike simulator")
         run_cmd = shlex.split(run)
         try:
             stdout_setting = subprocess.DEVNULL if silent_mode else None
             stderr_setting = subprocess.DEVNULL if silent_mode else None
             subprocess.check_call(run_cmd, stdout=stdout_setting, stderr=stderr_setting)
         except subprocess.CalledProcessError as e:
-            print("[SpikeSimulator] Command failed with exit code", e.returncode)
+            if not silent_mode:
+                print("[Spike] Command failed with exit code", e.returncode)
             error_msg = ""
             if e.returncode == 200:
                 error_msg = "INVALID_SPAD_ACCESS"
@@ -120,7 +122,7 @@ class FunctionalSimulator():
             raise RuntimeError(f"{error_msg}")
 
         for (arg_name, arg_attribute), arg, path in zip(arg_attributes, args, file_path):
-            if LLVMKernelArgs.is_llvm_arg_out(arg_attribute[0]):
+            if MLIRKernelArgs.is_mlir_arg_out(arg_attribute[0]):
                 self.load_tensor(arg, arg_name, arg_attribute, path)
 
         if cleanup:
@@ -154,7 +156,7 @@ class CycleSimulator():
             while not finished:
                 i = (i + 1) % 3
                 tail = "." * i + " " * (3-i)
-                sys.stdout.write("\r[Gem5Simulator] Simulation is still running." + tail)
+                sys.stdout.write("\r[Gem5] Gem5 is running." + tail)
                 time.sleep(1)
             print("")
 
@@ -162,9 +164,10 @@ class CycleSimulator():
         gem5_cmd = [extension_config.CONFIG_GEM5_PATH, "-r", "--stdout-file=sto.log", "-d", dir_path, extension_config.CONFIG_GEM5_SCRIPT_PATH, "-c", target_binary, "--vlane", str(vectorlane_size)]
         try:
             # Create progress thread
-            is_dryrun = int(os.environ.get('BACKENDSIM_DRYRUN', default=False)) or silent_mode
+            is_dryrun = int(os.environ.get('TOGSIM_DRYRUN', default=False)) or silent_mode
             if not is_dryrun:
-                print("[Gem5Simulator] cmd> ", " ".join(gem5_cmd))
+                if extension_config.CONFIG_DEBUG_MODE:
+                    print("[Gem5] cmd> ", " ".join(gem5_cmd))
                 finished = False
                 progress_thread = threading.Thread(target=show_progress)
                 progress_thread.start()
@@ -174,11 +177,11 @@ class CycleSimulator():
             else:
                 output = subprocess.check_output(gem5_cmd, stderr=subprocess.DEVNULL)
         except subprocess.CalledProcessError as e:
-            print("[Gem5Simulator] Command failed with exit code", e.returncode)
-            print("[Gem5Simulator] Error output:", e.output)
-            finished = True
-            progress_thread.join()
-            assert(0)
+            print(f"[Gem5] Gem5 simulation failed with error: \"{e.output.decode()}\"")
+            if not is_dryrun:
+                finished = True
+                progress_thread.join()
+            raise RuntimeError(f"Gem5 Simulation Failed: \"{e.output.decode()}\"")
 
         with open(f"{dir_path}/stats.txt", "r") as stat_file:
             raw_list = stat_file.readlines()
@@ -187,18 +190,18 @@ class CycleSimulator():
         cycle_list = cycle_list[:-1]
         return cycle_list
 
-class BackendSimulator():
-    BACKEND_RESULT_PATH_KEY = "BACKEND_RESULT_PATH"
-    FINISH_STR = "Simulation Finished"
+class TOGSimulator():
+    TOGSIM_RESULT_PATH_KEY = "TOGSIM_RESULT_PATH"
+    FINISH_STR = "Simulation finished"
     ALLOC_POOL = dict() # For eagermode buffer plan
-    def __init__(self, backend_path, config_path, vectorlane_size=-1) -> None:
-        self.base_dir = backend_path
+    def __init__(self, togsim_path, config_path, vectorlane_size=-1) -> None:
+        self.base_dir = togsim_path
         self.config_path = config_path
         self.config_json = self.load_json(self.config_path)
         self.process = None
         self.vectorlane_size = vectorlane_size
 
-    def get_backend_command(self):
+    def get_togsim_command(self):
         bin = os.path.join(self.base_dir, "build/bin/Simulator")
         config = os.path.join(self.base_dir, self.config_path)
         cmd = f"{bin} --config {config}"
@@ -210,16 +213,16 @@ class BackendSimulator():
             while not finished:
                 i = (i + 1) % 3
                 tail = "." * i + " " * (3-i)
-                sys.stdout.write("\r[BackendSimulator] Simulation is still running." + tail)
+                sys.stdout.write("\r[TOGSim] TOGSim is running." + tail)
                 time.sleep(1)
             print("")
-        cmd = f"{self.get_backend_command()} --models_list {model_path}"
-        if extension_config.CONFIG_BACKENDSIM_DEBUG_LEVEL:
-            cmd += f" --log_level {extension_config.CONFIG_BACKENDSIM_DEBUG_LEVEL}"
+        cmd = f"{self.get_togsim_command()} --models_list {model_path}"
+        if extension_config.CONFIG_TOGSIM_DEBUG_LEVEL:
+            cmd += f" --log_level {extension_config.CONFIG_TOGSIM_DEBUG_LEVEL}"
         if attribute_path:
             cmd = f"{cmd} --attributes_list {attribute_path}"
-        if not silent_mode:
-            print("[BackendSimulator] cmd> ", cmd)
+        if not silent_mode and extension_config.CONFIG_DEBUG_MODE:
+            print("[TOGSim] cmd> ", cmd)
 
         # Create progress thread
         if not silent_mode:
@@ -235,28 +238,26 @@ class BackendSimulator():
             if not silent_mode:
                 finished = True
                 progress_thread.join()
-                print("[BackendSimulator] Command failed with exit code", e.returncode)
-                print("[BackendSimulator] Error output:", e.output)
+                print("[TOGSim] Command failed with exit code", e.returncode)
+                print("[TOGSim] Error output:", e.output)
             assert 0
-        result_path = extension_config.CONFIG_BACKEND_RESULT_PATH_KEY
-        if result_path is None:
-            result_path = os.path.join(os.path.dirname(model_path), "backendsim_result")
-
         # Save result to result_path
+        result_path = os.path.join(os.path.dirname(model_path), "togsim_result")
         os.makedirs(result_path, exist_ok=True)
         file_name = str(len(os.listdir(result_path)))
         result_path = os.path.join(result_path, file_name)
         with open(result_path, "w") as f:
             f.write(result.decode())
-        print(f'[BackendSimulator] Simulation of "{model_path}" is stored to "{result_path}"')
+        print(f'[TOGSim] Simulation of "{model_path}" is stored to "{result_path}"')
         return result_path
 
     def interactive_simulation(self):
-        cmd = f"{self.get_backend_command()} --mode interactive"
-        if extension_config.CONFIG_BACKENDSIM_DEBUG_LEVEL:
-            cmd += f" --log_level {extension_config.CONFIG_BACKENDSIM_DEBUG_LEVEL}"
+        cmd = f"{self.get_togsim_command()} --mode interactive"
+        if extension_config.CONFIG_TOGSIM_DEBUG_LEVEL:
+            cmd += f" --log_level {extension_config.CONFIG_TOGSIM_DEBUG_LEVEL}"
 
-        print("[BackendSimulator] cmd> ", cmd)
+        if extension_config.CONFIG_DEBUG_MODE:
+            print("[TOGSim] cmd> ", cmd)
         if self.process is None:
             self.process = subprocess.Popen(
                 shlex.split(cmd),
@@ -265,27 +266,27 @@ class BackendSimulator():
                 universal_newlines=True
             )
         else:
-            print("[BackendSimulator] Simulator is already running.")
+            print("[TOGSim] Simulator is already running.")
 
     def stop(self):
         if self.process:
             self.process.terminate()
             self.process.wait()
             self.process = None
-            print("[BackendSimulator] Simulator stopped.")
+            print("[TOGSim] Simulator stopped.")
 
     def wait(self):
         if self.process:
-            print("[BackendSimulator] Waiting for simulation to complete...")
+            print("[TOGSim] Waiting for simulation to complete...")
             self.quit()
             self.process.wait()
             self.process = None
-            print("[BackendSimulator] Simulation completed.")
+            print("[TOGSim] Simulation completed.")
 
     def send_command(self, command):
         if self.process:
             try:
-                if not extension_config.CONFIG_BACKENDSIM_DRYRUN:
+                if not extension_config.CONFIG_TOGSIM_DRYRUN:
                     print(command, flush=True)
                 self.process.stdin.write(command + '\n')
                 self.process.stdin.flush()
@@ -352,6 +353,8 @@ class BackendSimulator():
 
         with open(attribute_path, "w") as f:
             json.dump(json_content, f, indent=4)
+            f.flush()
+            os.fsync(f.fileno()) # There could be a race condition.
         return attribute_path
 
     def load_json(self, config_path):
@@ -367,8 +370,8 @@ class BackendSimulator():
             raise ValueError(f"Invalid JSON format: {e}")
 
     def get_core_freq(self):
-        if "core_freq" in self.config_json:
-            return self.config_json["core_freq"] * 1000 * 1000 # MHz
+        if "core_freq_mhz" in self.config_json:
+            return self.config_json["core_freq_mhz"] * 1000 * 1000 # MHz
         else:
             raise KeyError("Key 'core_freq' not found in JSON.")
 
@@ -403,13 +406,13 @@ class BackendSimulator():
         simulation_finished_idx = -1
         simulation_finished = False
         for idx, line in enumerate(lines):
-            if BackendSimulator.FINISH_STR in line:
+            if TOGSimulator.FINISH_STR in line:
                 simulation_finished = True
                 simulation_finished_idx = idx
                 break
 
         if simulation_finished_idx == -1:
-            print("[BackendSimulator] Treid to parsing wrong formated output file!")
+            print("[TOGSim] Tried to parsing wrong formated output file!")
             return core_metrics, dram_channel_bw, avg_dram_bw, simulation_time
 
         total_stat_lines = lines[simulation_finished_idx:]
@@ -440,15 +443,15 @@ class BackendSimulator():
             if 'DRAM: AVG BW Util' in line:
                 avg_dram_bw = float(re.search(r'AVG BW Util (\d+\.?\d*)%', line).group(1))
 
-            if 'Total execution cycle' in line:
-                total_cycle = int(re.search(r'Total execution cycle: (\d+)', line).group(1))
+            if 'Total execution cycles' in line:
+                total_cycle = int(re.search(r'Total execution cycles: (\d+)', line).group(1))
 
             # Parse total simulation time
-            if 'Simulation time' in line:
-                simulation_time = float(re.search(r'Simulation time: (\d+\.?\d*) seconds', line).group(1))
+            if 'Wall-clock time for simulation' in line:
+                simulation_time = float(re.search(r'Wall-clock time for simulation: (\d+\.?\d*) seconds', line).group(1))
         return core_metrics, dram_channel_bw, avg_dram_bw, simulation_time, total_cycle
 
 if __name__ == "__main__":
-    sim = BackendSimulator("/workspace/PyTorchSim/PyTorchSimBackend", "/workspace/PyTorchSim/PyTorchSimBackend/configs/systolic_ws_128x128_c4_simple_noc_tpuv4.json")
+    sim = TOGSimulator("/workspace/PyTorchSim/TOGSim", "/workspace/PyTorchSim/TOGSim/configs/systolic_ws_128x128_c2_simple_noc_tpuv3_partition.json")
     sim.interactive_simulation()
     sim.until(4000)

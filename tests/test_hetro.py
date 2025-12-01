@@ -26,7 +26,7 @@ if __name__ == "__main__":
     K = args.K
     sparsity = args.sparsity
     mode = args.mode
-    config_path = f"{CONFIG_TORCHSIM_DIR}/PyTorchSimBackend/configs/{args.config}"
+    config_path = f"{CONFIG_TORCHSIM_DIR}/TOGSim/configs/{args.config}"
 
     print("M: ", M)
     print("N: ", N)
@@ -36,7 +36,7 @@ if __name__ == "__main__":
     with torch.no_grad():
         # Init scheduler
         scheduler = Scheduler(num_request_queue=2, engine_select=Scheduler.FIFO_ENGINE,
-                            backend_config=config_path)
+                            togsim_config=config_path)
 
         # Register compiled model
         opt_model1 = torch.compile(custom_matmul)

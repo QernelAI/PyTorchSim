@@ -1,0 +1,91 @@
+#ifndef DRAM_H
+#define DRAM_H
+#include <robin_hood.h>
+#include <cstdint>
+#include <queue>
+#include <utility>
+
+#include "Common.h"
+#include "DMA.h"
+#include "ramulator2.hh"
+#include "Hashing.h"
+#include "Cache.h"
+#include "DelayQueue.h"
+#include "L2Cache.h"
+
+class Dram {
+ public:
+  Dram(SimulationConfig config, cycle_type* core_cycle);
+  virtual ~Dram() = default;
+  virtual bool running() = 0;
+  virtual void cycle() = 0;
+  virtual void cache_cycle() = 0;
+  virtual bool is_full(uint32_t cid, mem_fetch* request) = 0;
+  virtual void push(uint32_t cid, mem_fetch* request) = 0;
+  virtual bool is_empty(uint32_t cid) = 0;
+  virtual mem_fetch* top(uint32_t cid) = 0;
+  virtual void pop(uint32_t cid) = 0;
+  uint32_t get_channel_id(mem_fetch* request);
+  virtual void print_stat() {}
+  virtual void print_cache_stats() {};
+  uint32_t get_channels_per_partition() { return _n_ch_per_partition; }
+ protected:
+  SimulationConfig _config;
+  CacheConfig _m_cache_config;
+  uint32_t _n_ch;
+  uint32_t _n_bl;
+  uint32_t _n_partitions;
+  uint32_t _n_ch_per_partition;
+  uint32_t _req_size;
+  cycle_type _cycles;
+  cycle_type* _core_cycles;
+  std::vector<DelayQueue<mem_fetch*>> m_cache_latency_queue;
+  std::vector<std::queue<mem_fetch*>> m_from_crossbar_queue;
+  std::vector<std::queue<mem_fetch*>> m_to_crossbar_queue;
+  std::vector<std::queue<mem_fetch*>> m_to_mem_queue;
+  std::vector<L2CacheBase*> _m_caches;
+};
+
+class DramRamulator2 : public Dram {
+ public:
+  DramRamulator2(SimulationConfig config, cycle_type *core_cycle);
+
+  virtual bool running() override;
+  virtual void cycle() override;
+  virtual void cache_cycle() override;
+  virtual bool is_full(uint32_t cid, mem_fetch* request) override;
+  virtual void push(uint32_t cid, mem_fetch* request) override;
+  virtual bool is_empty(uint32_t cid) override;
+  virtual mem_fetch* top(uint32_t cid) override;
+  virtual void pop(uint32_t cid) override;
+  virtual void print_stat() override;
+  void print_cache_stats() override;
+
+ private:
+  std::vector<std::unique_ptr<Ramulator2>> _mem;
+  int _tx_ch_log2;
+  int _tx_log2;
+};
+
+class SimpleDRAM: public Dram {
+ public:
+  SimpleDRAM(SimulationConfig config, cycle_type *core_cycle);
+
+  virtual bool running() override;
+  virtual void cycle() override;
+  virtual void cache_cycle() override;
+  virtual bool is_full(uint32_t cid, mem_fetch* request) override;
+  virtual void push(uint32_t cid, mem_fetch* request) override;
+  virtual bool is_empty(uint32_t cid) override;
+  virtual mem_fetch* top(uint32_t cid) override;
+  virtual void pop(uint32_t cid) override;
+  virtual void print_stat() override;
+  void print_cache_stats() override;
+ private:
+  int _latency = 1;
+  int _tx_ch_log2;
+  int _tx_log2;
+  std::vector<std::unique_ptr<DelayQueue<mem_fetch*>>> _mem;
+};
+
+#endif

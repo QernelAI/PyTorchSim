@@ -1,7 +1,7 @@
 #!/bin/bash
 LOG_DIR=$TORCHSIM_DIR/experiments/artifact/logs
-CONFIG_DIR="$TORCHSIM_DIR/PyTorchSimBackend/configs"
-SIMULATOR_BIN="$TORCHSIM_DIR/PyTorchSimBackend/build/bin/Simulator"
+CONFIG_DIR="$TORCHSIM_DIR/TOGSim/configs"
+SIMULATOR_BIN="$TORCHSIM_DIR/TOGSim/build/bin/Simulator"
 
 configs=(
     "systolic_ws_128x128_c2_simple_noc_tpuv3.json"

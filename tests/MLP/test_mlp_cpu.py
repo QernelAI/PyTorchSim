@@ -399,7 +399,6 @@ def train_mlp_mnist(device):
 
 
 if __name__ == "__main__":
-    from Scheduler.scheduler import ExecutionEngine
     # torch.set_printoptions(threshold=float('inf'), linewidth=600)
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")

@@ -6,15 +6,15 @@ BASE_PATH=$1 # Input as the first argument
 # Initialize total_sum as string for awk processing
 total_sum=0.0
 
-# Find all backendsim_result folders
-mapfile -t backend_folders < <(find "$BASE_PATH" -type d -name "backendsim_result")
+# Find all togsim_result folders
+mapfile -t togsim_folders < <(find "$BASE_PATH" -type d -name "togsim_result")
 
-# Iterate over each backendsim_result folder
-for backend_folder in "${backend_folders[@]}"; do
-  mapfile -t files < <(find "$backend_folder" -type f)
+# Iterate over each togsim_result folder
+for togsim_folder in "${togsim_folders[@]}"; do
+  mapfile -t files < <(find "$togsim_folder" -type f)
 
   for file in "${files[@]}"; do
-    sim_time=$(grep "Simulation time:" "$file" | tail -n 1 | sed -E 's/.*Simulation time: ([0-9]+(\.[0-9]+)?).*/\1/')
+    sim_time=$(grep "Wall-clock time for simulation:" "$file" | tail -n 1 | sed -E 's/.*Wall-clock time for simulation: ([0-9]+(\.[0-9]+)?).*/\1/')
     echo "file: $file total_cycle: $sim_time"
 
     if [[ -n "$sim_time" ]]; then

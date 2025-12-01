@@ -14,16 +14,16 @@ fi
 
 GEMM_PATH="$1"
 INDEX_NAME="$2"
-SIMULATOR_PATH="$TORCHSIM_DIR/PyTorchSimBackend/build/bin/Simulator"
+SIMULATOR_PATH="$TORCHSIM_DIR/TOGSim/build/bin/Simulator"
 GEMM_DIR_NAME=$(basename "$GEMM_PATH")
 echo "GEMM Directory Name: $GEMM_DIR_NAME"
 
 CONFIG_LIST=(
-    "$TORCHSIM_DIR/PyTorchSimBackend/configs/systolic_ws_128x128_c2_chiplet_tpuv3.json"
+    "$TORCHSIM_DIR/TOGSim/configs/systolic_ws_128x128_c2_chiplet_tpuv3.json"
 )
 CONFIG_LIST2=(
-    "$TORCHSIM_DIR/PyTorchSimBackend/configs/systolic_ws_128x128_c2_booksim_tpuv3.json"
-    "$TORCHSIM_DIR/PyTorchSimBackend/configs/systolic_ws_128x128_c2_chiplet_tpuv3_xnuma.json"
+    "$TORCHSIM_DIR/TOGSim/configs/systolic_ws_128x128_c2_booksim_tpuv3.json"
+    "$TORCHSIM_DIR/TOGSim/configs/systolic_ws_128x128_c2_chiplet_tpuv3_xnuma.json"
 )
 shift
 shift
@@ -51,7 +51,7 @@ for CONFIG in "${CONFIG_LIST[@]}"; do
         # Run Simulator
         echo "$SIMULATOR_PATH" --config "$CONFIG" --models_list "$MODELS_LIST" --attributes_list "$ATTRIBUTE_PATH/$ATTRIBUTE_NAME"
         "$SIMULATOR_PATH" --config "$CONFIG" --models_list "$MODELS_LIST" --log_level trace --attributes_list "$ATTRIBUTE_PATH/$ATTRIBUTE_NAME" > "$OUTPUT_FILE" &
-        echo "[BackendSimulator] for $CONFIG stored to \"$(pwd)/$OUTPUT_FILE\""
+        echo "[TOGSim] for $CONFIG stored to \"$(pwd)/$OUTPUT_FILE\""
     done
 done
 
@@ -65,6 +65,6 @@ for CONFIG in "${CONFIG_LIST2[@]}"; do
     # Run Simulator
     # echo "$SIMULATOR_PATH" --config "$CONFIG" --models_list "$MODELS_LIST" --attributes_list "$ATTRIBUTE_PATH/$ATTRIBUTE_NAME"
     "$SIMULATOR_PATH" --config "$CONFIG" --models_list "$MODELS_LIST" --log_level trace --attributes_list "$ATTRIBUTE_PATH/$ATTRIBUTE_NAME" > "$OUTPUT_FILE" &
-    echo "[BackendSimulator] for $CONFIG stored to \"$(pwd)/$OUTPUT_FILE\""
+    echo "[TOGSim] for $CONFIG stored to \"$(pwd)/$OUTPUT_FILE\""
 done
 wait

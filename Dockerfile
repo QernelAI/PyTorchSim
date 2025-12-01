@@ -4,7 +4,7 @@ FROM ghcr.io/psal-postech/torchsim_base:latest
 # Prepare PyTorchSim project
 COPY . /workspace/PyTorchSim
 
-RUN cd PyTorchSim/PyTorchSimBackend && \
+RUN cd PyTorchSim/TOGSim && \
     mkdir -p build && \
     cd build && \
     conan install .. --build=missing && \
