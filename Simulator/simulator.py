@@ -398,6 +398,7 @@ class TOGSimulator():
         dram_channel_bw = {}
         avg_dram_bw = None
         simulation_time = None
+        total_cycle = None
 
         # Read and find total stat position
         with open(result_path, "r") as f:
