@@ -296,10 +296,10 @@ class CustomAsyncCompile(AsyncCompile):
                 onnx_path = os.path.join(result_path, "tile_graph.onnx")
                 attribute_path = os.path.join(runtime_path, "attribute")
                 togsim_path = os.path.join(extension_config.CONFIG_TORCHSIM_DIR, "TOGSim")
-                backsim = TOGSimulator(togsim_path, extension_config.CONFIG_TOGSIM_CONFIG)
-                backsim.vectorlane_size = vectorlane_size
-                attribute_path = backsim.create_attribute_file(attribute_path, args, loop_size=loop_size)
-                result_path = backsim.simulation(onnx_path, attribute_path, silent_mode=silent_mode)
+                TOGSim = TOGSimulator(togsim_path, extension_config.CONFIG_TOGSIM_CONFIG)
+                TOGSim.vectorlane_size = vectorlane_size
+                attribute_path = TOGSim.create_attribute_file(attribute_path, args, loop_size=loop_size)
+                result_path = TOGSim.simulation(onnx_path, attribute_path, silent_mode=silent_mode)
                 result = TOGSimulator.get_result_from_file(result_path)
                 return result
 
