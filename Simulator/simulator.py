@@ -161,7 +161,8 @@ class CycleSimulator():
             print("")
 
         dir_path = os.path.join(os.path.dirname(target_binary), "m5out")
-        gem5_cmd = [extension_config.CONFIG_GEM5_PATH, "-r", "--stdout-file=sto.log", "-d", dir_path, extension_config.CONFIG_GEM5_SCRIPT_PATH, "-c", target_binary, "--vlane", str(vectorlane_size)]
+        gem5_script_path = os.path.join(extension_config.CONFIG_TORCHSIM_DIR, "gem5_script/script_systolic.py")
+        gem5_cmd = [extension_config.CONFIG_GEM5_PATH, "-r", "--stdout-file=sto.log", "-d", dir_path, gem5_script_path, "-c", target_binary, "--vlane", str(vectorlane_size)]
         try:
             # Create progress thread
             is_dryrun = int(os.environ.get('TOGSIM_DRYRUN', default=False)) or silent_mode

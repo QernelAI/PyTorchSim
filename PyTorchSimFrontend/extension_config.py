@@ -42,9 +42,6 @@ def __getattr__(name):
     # LLVM PATH
     if name == "CONFIG_TORCHSIM_LLVM_PATH":
         return os.environ.get('TORCHSIM_LLVM_PATH', default="/usr/bin")
-    if name == "CONFIG_TORCHSIM_CUSTOM_PASS_PATH":
-        return os.environ.get('TORCHSIM_CUSTOM_PASS_PATH',
-                                              default=f"{__getattr__('CONFIG_TORCHSIM_DIR')}/GemminiLowerPass/build")
     if name == "CONFIG_TORCHSIM_DUMP_MLIR_IR":
         return int(os.environ.get("TORCHSIM_DUMP_MLIR_IR", default=False))
     if name == "CONFIG_TORCHSIM_DUMP_LLVM_IR":
@@ -64,13 +61,6 @@ def __getattr__(name):
     # GEM5 config
     if name == "CONFIG_GEM5_PATH":
         return os.environ.get('GEM5_PATH', default="/workspace/gem5/build/RISCV/gem5.opt")
-    if name == "CONFIG_GEM5_SCRIPT_PATH":
-        return os.environ.get('GEM5_SCRIPT_PATH',
-                                      default=f"{__getattr__('CONFIG_TORCHSIM_DIR')}/gem5_script/script_systolic.py")
-
-    # For block sparse
-    if name == "CONFIG_BLOCK_SPARSE":
-        return int(os.environ.get('BLOCK_SPARSE', default=0))
 
     # Mapping Policy
     if name == "CONFIG_MAPPING_POLICY":
@@ -105,6 +95,7 @@ def __getattr__(name):
     # Compiler Optimization
     if name == "CONFIG_COMPILER_OPTIMIZATION":
         return os.environ.get('TORCHSIM_COMPILER_OPTIMIZATION', default="all")  # options: all, none, custom
+
     # Advanced fusion options
     if name == "CONFIG_FUSION":
         return True if (__getattr__("CONFIG_COMPILER_OPTIMIZATION") == "all" or "fusion" in __getattr__("CONFIG_COMPILER_OPTIMIZATION")) else False

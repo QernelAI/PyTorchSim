@@ -27,19 +27,6 @@ def dump_metadata(args, arg_attributes, path):
             file.write(f'{arg_name}=({arg_attribute[0]}, {arg.dtype}, {arg.shape})\n')
     return
 
-def llvm_compile_command(input, output):
-    opt_output = f"{input[:-3]}_opt.ll"
-    return [re.sub(r"[ \n]+", " ",
-        f"""
-            {extension_config.CONFIG_TORCHSIM_LLVM_PATH}/opt --load-pass-plugin={extension_config.CONFIG_TORCHSIM_CUSTOM_PASS_PATH}/libLowerGemminiPass.so -S -march=riscv64 --passes=LowerGemminiPass {input} -o {opt_output}
-        """,
-    ).strip(),
-            re.sub(r"[ \n]+", " ",
-        f"""
-            {extension_config.CONFIG_TORCHSIM_LLVM_PATH}/llc -march=riscv64 -mattr=+m,+f,+d,+a,+c,+v -O2 {opt_output} -o {output}
-        """,
-    ).strip()]
-
 def mlir_compile_command(filename, vectorlane_size, vlen=256):
     return [re.sub(r"[ \n]+", " ",
         f"""

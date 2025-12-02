@@ -333,8 +333,6 @@ export TORCHSIM_VECTOR_LANE=128 # vector lane size
 export TORCHSIM_VECTOR_LANE_STRIDE=2  # vector lane stride for DMA
 export TORCHSIM_DIR=/workspace/PyTorchSim # home directory
 
-export BLOCK_SPARSE=0 # If you want to use block sparse workload, turn it on
-
 # Plan which tensor allocated in TPUv4's CMEM
 export SRAM_BUFFER_PLAN_PATH=/workspace/PyTorchSim/tpuv4/gemm_plan.py
 
