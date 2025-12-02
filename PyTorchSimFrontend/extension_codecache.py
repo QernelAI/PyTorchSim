@@ -15,7 +15,7 @@ def hash_prefix(hash_value):
     return hash_value[1:12]
 
 def get_write_path(src_code):
-    return os.path.join(extension_config.CONFIG_TORCHSIM_DUMP_PATH, "tmp", hash_prefix(get_hash(src_code.strip())))
+    return os.path.join(extension_config.CONFIG_TORCHSIM_DUMP_PATH, "outputs", hash_prefix(get_hash(src_code.strip())))
 
 def dump_metadata(args, arg_attributes, path):
     meta_path = os.path.join(path, "meta.txt")
@@ -267,7 +267,7 @@ class CustomAsyncCompile(AsyncCompile):
             lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
             with lock:
                 # Run simulator pass
-                result_path = os.path.join(extension_config.CONFIG_TORCHSIM_DUMP_PATH, "tmp", hash_prefix(key))
+                result_path = os.path.join(extension_config.CONFIG_TORCHSIM_DUMP_PATH, "outputs", hash_prefix(key))
                 # Dump arguments and meta data
                 dump_metadata(args, arg_attributes, result_path)
                 runtime_path = FunctionalSimulator.get_runtime_dump_path(result_path)
@@ -297,7 +297,7 @@ class CustomAsyncCompile(AsyncCompile):
             lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
             with lock:
                 # Run simulator pass
-                result_path = os.path.join(extension_config.CONFIG_TORCHSIM_DUMP_PATH, "tmp", hash_prefix(key))
+                result_path = os.path.join(extension_config.CONFIG_TORCHSIM_DUMP_PATH, "outputs", hash_prefix(key))
                 # Dump arguments and meta data
                 dump_metadata(args, arg_attributes, result_path)
                 runtime_path = FunctionalSimulator.get_runtime_dump_path(result_path)

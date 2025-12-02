@@ -6,6 +6,7 @@ import re
 import sys
 import json
 import time
+import datetime
 import threading
 from pathlib import Path
 
@@ -245,7 +246,7 @@ class TOGSimulator():
         # Save result to result_path
         result_path = extension_config.CONFIG_TORCHSIM_LOG_PATH
         os.makedirs(result_path, exist_ok=True)
-        file_name = "togsim_result.log"
+        file_name = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')+".log"
         result_path = os.path.join(result_path, file_name)
         with open(result_path, "w") as f:
             f.write(result.decode())

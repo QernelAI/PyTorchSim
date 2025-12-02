@@ -1,8 +1,6 @@
 import os
 import sys
-import tempfile
 import importlib
-import datetime
 import json
 
 CONFIG_TORCHSIM_DIR = os.environ.get('TORCHSIM_DIR', default='/workspace/PyTorchSim')
@@ -82,7 +80,7 @@ def __getattr__(name):
     if name == "CONFIG_TORCHSIM_DUMP_PATH":
         return os.environ.get('TORCHSIM_DUMP_PATH', default = CONFIG_TORCHSIM_DIR)
     if name == "CONFIG_TORCHSIM_LOG_PATH":
-        return os.environ.get('TORCHSIM_DUMP_LOG_PATH', default = os.path.join(CONFIG_TORCHSIM_DIR, "outputs", datetime.datetime.now().strftime('%Y%m%d_%H%M%S')))
+        return os.environ.get('TORCHSIM_DUMP_LOG_PATH', default = os.path.join(CONFIG_TORCHSIM_DIR, "togsim_results"))
 
     if name == "CONFIG_TOGSIM_EAGER_MODE":
         return int(os.environ.get("TOGSIM_EAGER_MODE", default=False))
