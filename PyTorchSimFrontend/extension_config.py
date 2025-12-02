@@ -29,11 +29,9 @@ def __getattr__(name):
           return os.environ.get('TORCHSIM_DIR', default='/workspace/PyTorchSim')
 
     if name == "CONFIG_TORCHSIM_DUMP_PATH":
-        return os.environ.get('TORCHSIM_DUMP_PATH', default = f"{tempfile.gettempdir()}/torchinductor")
+        return os.environ.get('TORCHSIM_DUMP_PATH', default = __getattr__('CONFIG_TORCHSIM_DIR'))
     if name == "CONFIG_TORCHSIM_LOG_PATH":
         return os.environ.get('TORCHSIM_DUMP_LOG_PATH', default = os.path.join(__getattr__("CONFIG_TORCHSIM_DIR"), "outputs", datetime.datetime.now().strftime('%Y%m%d_%H%M%S')))
-    if name == "CONFIG_TORCHSIM_DUMP_FILE":
-        return int(os.environ.get('TORCHSIM_DUMP_FILE', default=True))
     if name == "CONFIG_TORCHSIM_FUNCTIONAL_MODE":
         return int(os.environ.get('TORCHSIM_FUNCTIONAL_MODE', default=True))
     if name == "CONFIG_TORCHSIM_TIMING_MODE":
@@ -70,23 +68,15 @@ def __getattr__(name):
         return os.environ.get('GEM5_SCRIPT_PATH',
                                       default=f"{__getattr__('CONFIG_TORCHSIM_DIR')}/gem5_script/script_systolic.py")
 
-    # AUTOTUNE config
-    if name == "CONFIG_AUTOTUNE":
-        return int(os.environ.get('AUTOTUNE', default=False))
-    if name == "CONFIG_AUTOTUNE_TEMPLATE":
-        return int(os.environ.get('AUTOTUNE_TEMPLATE', default=False))
-    if name == "CONFIG_MAX_AUTOTUNE_TRY":
-        return int(os.environ.get('MAX_AUTOTUNE_TRY', default=10))
-    if name == "CONFIG_AUTOTUNE_TEMPLATE_TOPK":
-        return int(os.environ.get('AUTOTUNE_TEMPLATE_TOPK', default=4))
-
     # For block sparse
     if name == "CONFIG_BLOCK_SPARSE":
         return int(os.environ.get('BLOCK_SPARSE', default=0))
 
-    # For GEMM tile size
-    if name == "CONFIG_MANUAL_TILE_SIZE":
-        return int(os.environ.get('TORCHSIM_MANUAL_TILE_SIZE', default=False))
+    # Mapping Policy
+    if name == "CONFIG_MAPPING_POLICY":
+        return os.environ.get('TORCHSIM_MAPPING_POLICY', default="heuristic") # heuristic, manual, autotune
+
+    # Manual Tile Size
     if name == "CONFIG_TILE_M":
         return int(os.getenv("TORCHSIM_TILE_M", __getattr__("CONFIG_VECTOR_LANE")))
     if name == "CONFIG_TILE_N":
@@ -102,6 +92,12 @@ def __getattr__(name):
         return int(os.environ.get('TORCHSIM_SUBTILE_N', default=__getattr__("CONFIG_VECTOR_LANE")))
     if name == "CONFIG_SUBTILE_K":
         return int(os.environ.get('TORCHSIM_SUBTILE_K', default=__getattr__("CONFIG_VECTOR_LANE")))
+
+    # Autotune config
+    if name == "CONFIG_MAX_AUTOTUNE_TRY":
+        return int(os.environ.get('MAX_AUTOTUNE_TRY', default=10))
+    if name == "CONFIG_AUTOTUNE_TEMPLATE_TOPK":
+        return int(os.environ.get('AUTOTUNE_TEMPLATE_TOPK', default=4))
 
     if name == "CONFIG_GEMM_CHEATSHEET_PATH":
           return os.environ.get('TORCHSIM_GEMM_CHEATSHEET_PATH',

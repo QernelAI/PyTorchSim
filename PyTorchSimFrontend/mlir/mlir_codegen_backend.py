@@ -1683,7 +1683,7 @@ class MLIRKernel(mlir_common.BaseMLIRKernel):
     def codegen_nodes(self, nodes, kernel_name):
         src_code = super().codegen_nodes(nodes, kernel_name)
         self._prepare_simulator_headers(src_code)
-        if extension_config.CONFIG_AUTOTUNE and extension_config.CONFIG_TORCHSIM_TIMING_MODE:
+        if extension_config.CONFIG_MAPPING_POLICY == "autotune" and extension_config.CONFIG_TORCHSIM_TIMING_MODE:
             optimal_src_code = self.autotune(nodes, kernel_name)[0]
             if optimal_src_code is not None:
                 return optimal_src_code

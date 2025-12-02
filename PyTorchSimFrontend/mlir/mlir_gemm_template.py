@@ -307,7 +307,7 @@ class MLIRGemmTemplate(MLIRTemplate):
                     data = json.load(f)
 
         gemm_shape = f"{M}_{K}_{N}"
-        if extension_config.CONFIG_MANUAL_TILE_SIZE:
+        if extension_config.CONFIG_MAPPING_POLICY == "manual":
             # case 1: use manual tile size
             TILE_M = extension_config.CONFIG_TILE_M
             TILE_N = extension_config.CONFIG_TILE_N

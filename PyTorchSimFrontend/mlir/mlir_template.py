@@ -508,7 +508,7 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
         )
 
     def codegen_nodes(self, tile_candidates, render, template_node, prologue_nodes, epilogue_nodes):
-        if extension_config.CONFIG_AUTOTUNE_TEMPLATE and len(tile_candidates):
+        if extension_config.CONFIG_MAPPING_POLICY == "autotune" and len(tile_candidates):
             src_code, loop_size = self.autotune(tile_candidates, render, template_node, prologue_nodes, epilogue_nodes)
             self.loop_size = loop_size
         else:
