@@ -110,7 +110,7 @@ def convolution(
         mlir_template = MLIRConvSingleBatchTemplate([x, weight, bias], layout, **kwargs)
     elif BATCH == 1 and stride[0] != 1 and extension_config.CONFIG_SINGLE_BATCH_CONV:
         mlir_template = MLIRConvSingleBatchStridedTemplate([x, weight, bias], layout, **kwargs)
-    elif I_C < extension_config.CONFIG_VECTOR_LANE // 8 and extension_config.CONFIG_MULTI_TILE_CONV: # 8 is hard-coded for now. This should be changed to a better heuristic.
+    elif I_C < extension_config.vpu_num_lanes // 8 and extension_config.CONFIG_MULTI_TILE_CONV: # 8 is hard-coded for now. This should be changed to a better heuristic.
         mlir_template = MLIRConvMultiTileTemplate([x, weight, bias], layout, **kwargs)
     else:
         mlir_template = MLIRConvTemplate([x, weight, bias], layout, **kwargs)

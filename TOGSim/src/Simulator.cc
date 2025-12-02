@@ -17,7 +17,7 @@ Simulator::Simulator(SimulationConfig config)
   _noc_node_per_core = config.icnt_injection_ports_per_core;
   char* onnxim_path_env = std::getenv("TORCHSIM_DIR");
   std::string onnxim_path = onnxim_path_env != NULL?
-    std::string(onnxim_path_env) + "/TOGSim" : std::string("./");
+    std::string(onnxim_path_env): std::string("./");
 
   // Create core objects
   _cores.resize(_n_cores);

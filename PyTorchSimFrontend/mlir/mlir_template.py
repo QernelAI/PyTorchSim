@@ -1232,7 +1232,7 @@ class MLIRTemplate(KernelTemplate):
                 template=self,
                 kwargs=kwargs
             )
-            tile_candidates = self.get_tile_candidates(**kwargs)[:extension_config.CONFIG_AUTOTUNE_TEMPLATE_TOPK]
+            tile_candidates = self.get_tile_candidates(**kwargs)[:extension_config.codegen_autotune_template_topk]
             return kernel, tile_candidates, render
 
         return MLIRTemplateCaller(

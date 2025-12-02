@@ -147,7 +147,7 @@ Simulation consists of three steps
 
 If you want to turn off the `SpikeSimulator` for fast simulation, you can set as below.
 ```bash
-export TORCHSIM_FUNCTIONAL_MODE=False
+export pytorchsim_functional_mode=False
 ```
 Log contains memory & core stats.
 ```bash
@@ -329,8 +329,8 @@ Last but not least, you must set `l2d_type` and `l2d_config` in the [TOGSim conf
 
 You can configure these options using environment variables.
 ```bash
-export TORCHSIM_VECTOR_LANE=128 # vector lane size
-export TORCHSIM_VECTOR_LANE_STRIDE=2  # vector lane stride for DMA
+export vpu_num_lanes=128 # vector lane size
+export vpu_num_lanes_STRIDE=2  # vector lane stride for DMA
 export TORCHSIM_DIR=/workspace/PyTorchSim # home directory
 
 # Plan which tensor allocated in TPUv4's CMEM
@@ -342,7 +342,7 @@ export TORCHSIM_USE_TIMING_POOLING=0 # use lightweight pooling for timing
 ## TOGSim Configuration
 ![NPU_Core](./docs/npu_core.jpg)
 
-`TOGSim/configs` directory contains example NPU configuration files in the JSON format.
+`configs` directory contains example NPU configuration files in the JSON format.
 ```
   "num_cores" : 2,                   // Number of NPU cores
   "core_freq_mhz" : 940,             // Core's frequency (MHz)

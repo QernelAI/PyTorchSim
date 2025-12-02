@@ -567,11 +567,11 @@ class MLIRWrapperKenrelGroup(cpp.KernelGroup):
 class BaseMLIRHardwareInfo():
     def __init__(self):
         # Default HW setting
-        self.vector_lane = extension_config.CONFIG_VECTOR_LANE
+        self.vector_lane = extension_config.vpu_num_lanes
         self.spad_info = extension_config.CONFIG_SPAD_INFO
         self.precision = extension_config.CONFIG_PRECISION
         self.num_cores = extension_config.CONFIG_NUM_CORES
-        self.vlen = extension_config.CONFIG_VLEN
+        self.vlen = extension_config.vpu_vector_length_bits
 
 class BaseMLIRKernel(common.Kernel, BaseMLIRHardwareInfo):
     newvar_prefix = "%"
@@ -700,7 +700,7 @@ class BaseMLIRKernel(common.Kernel, BaseMLIRHardwareInfo):
 
     def compute_tile_size(self, nodes, vars, reduction_vars):
         vlane_split_axis = len(vars) - 1
-        vlane_stride = extension_config.CONFIG_VECTOR_LANE_STRIDE
+        vlane_stride = 2 # Set minimum vlane stride
 
         # Set initial tile size & vector lane mapping
         if self.kernel_group.tile_desc is None:

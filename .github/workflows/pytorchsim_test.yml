@@ -33,8 +33,8 @@ jobs:
           docker run --rm \
             -v /tmp/torchsim-ci/${GITHUB_SHA}:/dump \
             -e TORCHSIM_DUMP_PATH=/dump \
-            -e TORCHSIM_VECTOR_LANE="${{ inputs.vector_lane }}" \
-            -e TORCHSIM_SPAD_SIZE="${{ inputs.spad_size }}" \
+            -e vpu_num_lanes="${{ inputs.vector_lane }}" \
+            -e vpu_spad_size_kb_per_lane="${{ inputs.spad_size }}" \
             ${{ inputs.image_name }} python3 PyTorchSim/tests/test_add.py
 
   test_transcendental:
@@ -54,8 +54,8 @@ jobs:
           docker run --rm \
             -v /tmp/torchsim-ci/${GITHUB_SHA}:/dump \
             -e TORCHSIM_DUMP_PATH=/dump \
-            -e TORCHSIM_VECTOR_LANE="${{ inputs.vector_lane }}" \
-            -e TORCHSIM_SPAD_SIZE="${{ inputs.spad_size }}" \
+            -e vpu_num_lanes="${{ inputs.vector_lane }}" \
+            -e vpu_spad_size_kb_per_lane="${{ inputs.spad_size }}" \
             ${{ inputs.image_name }} python3 PyTorchSim/tests/test_transcendental.py
 
   test_activation:
@@ -75,8 +75,8 @@ jobs:
           docker run --rm \
             -v /tmp/torchsim-ci/${GITHUB_SHA}:/dump \
             -e TORCHSIM_DUMP_PATH=/dump \
-            -e TORCHSIM_VECTOR_LANE="${{ inputs.vector_lane }}" \
-            -e TORCHSIM_SPAD_SIZE="${{ inputs.spad_size }}" \
+            -e vpu_num_lanes="${{ inputs.vector_lane }}" \
+            -e vpu_spad_size_kb_per_lane="${{ inputs.spad_size }}" \
             ${{ inputs.image_name }} python3 PyTorchSim/tests/test_activation.py
 
   test_batchnorm:
@@ -96,8 +96,8 @@ jobs:
           docker run --rm \
             -v /tmp/torchsim-ci/${GITHUB_SHA}:/dump \
             -e TORCHSIM_DUMP_PATH=/dump \
-            -e TORCHSIM_VECTOR_LANE="${{ inputs.vector_lane }}" \
-            -e TORCHSIM_SPAD_SIZE="${{ inputs.spad_size }}" \
+            -e vpu_num_lanes="${{ inputs.vector_lane }}" \
+            -e vpu_spad_size_kb_per_lane="${{ inputs.spad_size }}" \
             ${{ inputs.image_name }} python3 PyTorchSim/tests/test_batchnorm.py
 
   test_bmm:
@@ -117,8 +117,8 @@ jobs:
           docker run --rm \
             -v /tmp/torchsim-ci/${GITHUB_SHA}:/dump \
             -e TORCHSIM_DUMP_PATH=/dump \
-            -e TORCHSIM_VECTOR_LANE="${{ inputs.vector_lane }}" \
-            -e TORCHSIM_SPAD_SIZE="${{ inputs.spad_size }}" \
+            -e vpu_num_lanes="${{ inputs.vector_lane }}" \
+            -e vpu_spad_size_kb_per_lane="${{ inputs.spad_size }}" \
             ${{ inputs.image_name }} python3 PyTorchSim/tests/test_bmm.py
 
   test_cnn:
@@ -138,8 +138,8 @@ jobs:
           docker run --rm \
             -v /tmp/torchsim-ci/${GITHUB_SHA}:/dump \
             -e TORCHSIM_DUMP_PATH=/dump \
-            -e TORCHSIM_VECTOR_LANE="${{ inputs.vector_lane }}" \
-            -e TORCHSIM_SPAD_SIZE="${{ inputs.spad_size }}" \
+            -e vpu_num_lanes="${{ inputs.vector_lane }}" \
+            -e vpu_spad_size_kb_per_lane="${{ inputs.spad_size }}" \
             ${{ inputs.image_name }} python3 PyTorchSim/tests/test_cnn.py
 
   test_conv2d:
@@ -159,8 +159,8 @@ jobs:
           docker run --rm \
             -v /tmp/torchsim-ci/${GITHUB_SHA}:/dump \
             -e TORCHSIM_DUMP_PATH=/dump \
-            -e TORCHSIM_VECTOR_LANE="${{ inputs.vector_lane }}" \
-            -e TORCHSIM_SPAD_SIZE="${{ inputs.spad_size }}" \
+            -e vpu_num_lanes="${{ inputs.vector_lane }}" \
+            -e vpu_spad_size_kb_per_lane="${{ inputs.spad_size }}" \
             ${{ inputs.image_name }} python3 PyTorchSim/tests/test_conv2d.py
 
   test_matmul:
@@ -180,8 +180,8 @@ jobs:
           docker run --rm \
             -v /tmp/torchsim-ci/${GITHUB_SHA}:/dump \
             -e TORCHSIM_DUMP_PATH=/dump \
-            -e TORCHSIM_VECTOR_LANE="${{ inputs.vector_lane }}" \
-            -e TORCHSIM_SPAD_SIZE="${{ inputs.spad_size }}" \
+            -e vpu_num_lanes="${{ inputs.vector_lane }}" \
+            -e vpu_spad_size_kb_per_lane="${{ inputs.spad_size }}" \
             ${{ inputs.image_name }} python3 PyTorchSim/tests/test_matmul.py
 
   test_reduce:
@@ -201,8 +201,8 @@ jobs:
           docker run --rm \
             -v /tmp/torchsim-ci/${GITHUB_SHA}:/dump \
             -e TORCHSIM_DUMP_PATH=/dump \
-            -e TORCHSIM_VECTOR_LANE="${{ inputs.vector_lane }}" \
-            -e TORCHSIM_SPAD_SIZE="${{ inputs.spad_size }}" \
+            -e vpu_num_lanes="${{ inputs.vector_lane }}" \
+            -e vpu_spad_size_kb_per_lane="${{ inputs.spad_size }}" \
             ${{ inputs.image_name }} python3 PyTorchSim/tests/test_reduce.py
 
   test_softmax:
@@ -222,8 +222,8 @@ jobs:
           docker run --rm \
             -v /tmp/torchsim-ci/${GITHUB_SHA}:/dump \
             -e TORCHSIM_DUMP_PATH=/dump \
-            -e TORCHSIM_VECTOR_LANE="${{ inputs.vector_lane }}" \
-            -e TORCHSIM_SPAD_SIZE="${{ inputs.spad_size }}" \
+            -e vpu_num_lanes="${{ inputs.vector_lane }}" \
+            -e vpu_spad_size_kb_per_lane="${{ inputs.spad_size }}" \
             ${{ inputs.image_name }} python3 PyTorchSim/tests/test_softmax.py
 
   test_transpose2D:
@@ -243,8 +243,8 @@ jobs:
           docker run --rm \
             -v /tmp/torchsim-ci/${GITHUB_SHA}:/dump \
             -e TORCHSIM_DUMP_PATH=/dump \
-            -e TORCHSIM_VECTOR_LANE="${{ inputs.vector_lane }}" \
-            -e TORCHSIM_SPAD_SIZE="${{ inputs.spad_size }}" \
+            -e vpu_num_lanes="${{ inputs.vector_lane }}" \
+            -e vpu_spad_size_kb_per_lane="${{ inputs.spad_size }}" \
             ${{ inputs.image_name }} python3 PyTorchSim/tests/test_transpose2D.py
 
   test_view3D_2D:
@@ -264,8 +264,8 @@ jobs:
           docker run --rm \
             -v /tmp/torchsim-ci/${GITHUB_SHA}:/dump \
             -e TORCHSIM_DUMP_PATH=/dump \
-            -e TORCHSIM_VECTOR_LANE="${{ inputs.vector_lane }}" \
-            -e TORCHSIM_SPAD_SIZE="${{ inputs.spad_size }}" \
+            -e vpu_num_lanes="${{ inputs.vector_lane }}" \
+            -e vpu_spad_size_kb_per_lane="${{ inputs.spad_size }}" \
             ${{ inputs.image_name }} python3 PyTorchSim/tests/test_view3D_2D.py
 
   test_layernorm:
@@ -285,8 +285,8 @@ jobs:
           docker run --rm \
             -v /tmp/torchsim-ci/${GITHUB_SHA}:/dump \
             -e TORCHSIM_DUMP_PATH=/dump \
-            -e TORCHSIM_VECTOR_LANE="${{ inputs.vector_lane }}" \
-            -e TORCHSIM_SPAD_SIZE="${{ inputs.spad_size }}" \
+            -e vpu_num_lanes="${{ inputs.vector_lane }}" \
+            -e vpu_spad_size_kb_per_lane="${{ inputs.spad_size }}" \
             ${{ inputs.image_name }} python3 PyTorchSim/tests/test_layernorm.py
 
   test_mlp:
@@ -306,8 +306,8 @@ jobs:
           docker run --rm \
             -v /tmp/torchsim-ci/${GITHUB_SHA}:/dump \
             -e TORCHSIM_DUMP_PATH=/dump \
-            -e TORCHSIM_VECTOR_LANE="${{ inputs.vector_lane }}" \
-            -e TORCHSIM_SPAD_SIZE="${{ inputs.spad_size }}" \
+            -e vpu_num_lanes="${{ inputs.vector_lane }}" \
+            -e vpu_spad_size_kb_per_lane="${{ inputs.spad_size }}" \
             ${{ inputs.image_name }} python3 PyTorchSim/tests/test_mlp.py
 
   test_resnet:
@@ -327,8 +327,8 @@ jobs:
           docker run --rm \
             -v /tmp/torchsim-ci/${GITHUB_SHA}:/dump \
             -e TORCHSIM_DUMP_PATH=/dump \
-            -e TORCHSIM_VECTOR_LANE="${{ inputs.vector_lane }}" \
-            -e TORCHSIM_SPAD_SIZE="${{ inputs.spad_size }}" \
+            -e vpu_num_lanes="${{ inputs.vector_lane }}" \
+            -e vpu_spad_size_kb_per_lane="${{ inputs.spad_size }}" \
             ${{ inputs.image_name }} python3 PyTorchSim/tests/test_resnet.py
 
       - name: Run test_resnet50.py
@@ -337,8 +337,8 @@ jobs:
           docker run --rm \
             -v /tmp/torchsim-ci/${GITHUB_SHA}:/dump \
             -e TORCHSIM_DUMP_PATH=/dump \
-            -e TORCHSIM_VECTOR_LANE="${{ inputs.vector_lane }}" \
-            -e TORCHSIM_SPAD_SIZE="${{ inputs.spad_size }}" \
+            -e vpu_num_lanes="${{ inputs.vector_lane }}" \
+            -e vpu_spad_size_kb_per_lane="${{ inputs.spad_size }}" \
             ${{ inputs.image_name }} python3 PyTorchSim/tests/test_resnet.py --model_type resnet50
 
   test_transformer:
@@ -358,8 +358,8 @@ jobs:
           docker run --rm \
             -v /tmp/torchsim-ci/${GITHUB_SHA}:/dump \
             -e TORCHSIM_DUMP_PATH=/dump \
-            -e TORCHSIM_VECTOR_LANE="${{ inputs.vector_lane }}" \
-            -e TORCHSIM_SPAD_SIZE="${{ inputs.spad_size }}" \
+            -e vpu_num_lanes="${{ inputs.vector_lane }}" \
+            -e vpu_spad_size_kb_per_lane="${{ inputs.spad_size }}" \
             ${{ inputs.image_name }} python3 PyTorchSim/tests/test_transformer.py
 
   test_transpose3D:
@@ -379,8 +379,8 @@ jobs:
           docker run --rm \
             -v /tmp/torchsim-ci/${GITHUB_SHA}:/dump \
             -e TORCHSIM_DUMP_PATH=/dump \
-            -e TORCHSIM_VECTOR_LANE="${{ inputs.vector_lane }}" \
-            -e TORCHSIM_SPAD_SIZE="${{ inputs.spad_size }}" \
+            -e vpu_num_lanes="${{ inputs.vector_lane }}" \
+            -e vpu_spad_size_kb_per_lane="${{ inputs.spad_size }}" \
             ${{ inputs.image_name }} python3 PyTorchSim/tests/test_transpose3D.py
 
   test_sparsity:
@@ -400,8 +400,8 @@ jobs:
           docker run --rm \
             -v /tmp/torchsim-ci/${GITHUB_SHA}:/dump \
             -e TORCHSIM_DUMP_PATH=/dump \
-            -e TORCHSIM_VECTOR_LANE="${{ inputs.vector_lane }}" \
-            -e TORCHSIM_SPAD_SIZE="${{ inputs.spad_size }}" \
+            -e vpu_num_lanes="${{ inputs.vector_lane }}" \
+            -e vpu_spad_size_kb_per_lane="${{ inputs.spad_size }}" \
             ${{ inputs.image_name }} python3 PyTorchSim/tests/test_sparsity.py
 
   test_pool:
@@ -421,8 +421,8 @@ jobs:
           docker run --rm \
             -v /tmp/torchsim-ci/${GITHUB_SHA}:/dump \
             -e TORCHSIM_DUMP_PATH=/dump \
-            -e TORCHSIM_VECTOR_LANE="${{ inputs.vector_lane }}" \
-            -e TORCHSIM_SPAD_SIZE="${{ inputs.spad_size }}" \
+            -e vpu_num_lanes="${{ inputs.vector_lane }}" \
+            -e vpu_spad_size_kb_per_lane="${{ inputs.spad_size }}" \
             ${{ inputs.image_name }} python3 PyTorchSim/tests/test_pool.py
 
   test_perceptron:
@@ -442,8 +442,8 @@ jobs:
           docker run --rm \
             -v /tmp/torchsim-ci/${GITHUB_SHA}:/dump \
             -e TORCHSIM_DUMP_PATH=/dump \
-            -e TORCHSIM_VECTOR_LANE="${{ inputs.vector_lane }}" \
-            -e TORCHSIM_SPAD_SIZE="${{ inputs.spad_size }}" \
+            -e vpu_num_lanes="${{ inputs.vector_lane }}" \
+            -e vpu_spad_size_kb_per_lane="${{ inputs.spad_size }}" \
             ${{ inputs.image_name }} python3 PyTorchSim/tests/test_single_perceptron.py
 
   test_fusion:
@@ -463,8 +463,8 @@ jobs:
           docker run --rm \
             -v /tmp/torchsim-ci/${GITHUB_SHA}:/dump \
             -e TORCHSIM_DUMP_PATH=/dump \
-            -e TORCHSIM_VECTOR_LANE="${{ inputs.vector_lane }}" \
-            -e TORCHSIM_SPAD_SIZE="${{ inputs.spad_size }}" \
+            -e vpu_num_lanes="${{ inputs.vector_lane }}" \
+            -e vpu_spad_size_kb_per_lane="${{ inputs.spad_size }}" \
             ${{ inputs.image_name }} python3 PyTorchSim/tests/Fusion/test_addmm_residual.py
 
       - name: Run test_matmul_activation.py
@@ -473,8 +473,8 @@ jobs:
           docker run --rm \
             -v /tmp/torchsim-ci/${GITHUB_SHA}:/dump \
             -e TORCHSIM_DUMP_PATH=/dump \
-            -e TORCHSIM_VECTOR_LANE="${{ inputs.vector_lane }}" \
-            -e TORCHSIM_SPAD_SIZE="${{ inputs.spad_size }}" \
+            -e vpu_num_lanes="${{ inputs.vector_lane }}" \
+            -e vpu_spad_size_kb_per_lane="${{ inputs.spad_size }}" \
             ${{ inputs.image_name }} python3 PyTorchSim/tests/Fusion/test_matmul_activation.py
 
       - name: Run test_matmul_scalar.py
@@ -483,8 +483,8 @@ jobs:
           docker run --rm \
             -v /tmp/torchsim-ci/${GITHUB_SHA}:/dump \
             -e TORCHSIM_DUMP_PATH=/dump \
-            -e TORCHSIM_VECTOR_LANE="${{ inputs.vector_lane }}" \
-            -e TORCHSIM_SPAD_SIZE="${{ inputs.spad_size }}" \
+            -e vpu_num_lanes="${{ inputs.vector_lane }}" \
+            -e vpu_spad_size_kb_per_lane="${{ inputs.spad_size }}" \
             ${{ inputs.image_name }} python3 PyTorchSim/tests/Fusion/test_matmul_scalar.py
 
       - name: Run test_matmul_reduction.py
@@ -493,8 +493,8 @@ jobs:
           docker run --rm \
             -v /tmp/torchsim-ci/${GITHUB_SHA}:/dump \
             -e TORCHSIM_DUMP_PATH=/dump \
-            -e TORCHSIM_VECTOR_LANE="${{ inputs.vector_lane }}" \
-            -e TORCHSIM_SPAD_SIZE="${{ inputs.spad_size }}" \
+            -e vpu_num_lanes="${{ inputs.vector_lane }}" \
+            -e vpu_spad_size_kb_per_lane="${{ inputs.spad_size }}" \
             ${{ inputs.image_name }} python3 PyTorchSim/tests/Fusion/test_matmul_reduction.py
 
       - name: Run test_bmm_reduction.py
@@ -503,8 +503,8 @@ jobs:
           docker run --rm \
             -v /tmp/torchsim-ci/${GITHUB_SHA}:/dump \
             -e TORCHSIM_DUMP_PATH=/dump \
-            -e TORCHSIM_VECTOR_LANE="${{ inputs.vector_lane }}" \
-            -e TORCHSIM_SPAD_SIZE="${{ inputs.spad_size }}" \
+            -e vpu_num_lanes="${{ inputs.vector_lane }}" \
+            -e vpu_spad_size_kb_per_lane="${{ inputs.spad_size }}" \
             ${{ inputs.image_name }} python3 PyTorchSim/tests/Fusion/test_bmm_reduction.py
 
       - name: Run test_prologue_fusion.py
@@ -513,8 +513,8 @@ jobs:
           docker run --rm \
             -v /tmp/torchsim-ci/${GITHUB_SHA}:/dump \
             -e TORCHSIM_DUMP_PATH=/dump \
-            -e TORCHSIM_VECTOR_LANE="${{ inputs.vector_lane }}" \
-            -e TORCHSIM_SPAD_SIZE="${{ inputs.spad_size }}" \
+            -e vpu_num_lanes="${{ inputs.vector_lane }}" \
+            -e vpu_spad_size_kb_per_lane="${{ inputs.spad_size }}" \
             ${{ inputs.image_name }} python3 PyTorchSim/tests/Fusion/test_prologue_fusion.py
 
       - name: Run test_transformer_fusion.py
@@ -523,8 +523,8 @@ jobs:
           docker run --rm \
             -v /tmp/torchsim-ci/${GITHUB_SHA}:/dump \
             -e TORCHSIM_DUMP_PATH=/dump \
-            -e TORCHSIM_VECTOR_LANE="${{ inputs.vector_lane }}" \
-            -e TORCHSIM_SPAD_SIZE="${{ inputs.spad_size }}" \
+            -e vpu_num_lanes="${{ inputs.vector_lane }}" \
+            -e vpu_spad_size_kb_per_lane="${{ inputs.spad_size }}" \
             ${{ inputs.image_name }} python3 PyTorchSim/tests/Fusion/test_transformer_fusion.py
 
       - name: Run test_conv_fusion.py
@@ -533,8 +533,8 @@ jobs:
           docker run --rm \
             -v /tmp/torchsim-ci/${GITHUB_SHA}:/dump \
             -e TORCHSIM_DUMP_PATH=/dump \
-            -e TORCHSIM_VECTOR_LANE="${{ inputs.vector_lane }}" \
-            -e TORCHSIM_SPAD_SIZE="${{ inputs.spad_size }}" \
+            -e vpu_num_lanes="${{ inputs.vector_lane }}" \
+            -e vpu_spad_size_kb_per_lane="${{ inputs.spad_size }}" \
             ${{ inputs.image_name }} python3 PyTorchSim/tests/Fusion/test_conv_fusion.py
 
   test_moe:
@@ -554,8 +554,8 @@ jobs:
           docker run --rm \
             -v /tmp/torchsim-ci/${GITHUB_SHA}:/dump \
             -e TORCHSIM_DUMP_PATH=/dump \
-            -e TORCHSIM_VECTOR_LANE="${{ inputs.vector_lane }}" \
-            -e TORCHSIM_SPAD_SIZE="${{ inputs.spad_size }}" \
+            -e vpu_num_lanes="${{ inputs.vector_lane }}" \
+            -e vpu_spad_size_kb_per_lane="${{ inputs.spad_size }}" \
             ${{ inputs.image_name }} python3 PyTorchSim/tests/MoE/test_moe.py
 
   test_mistral:
@@ -575,8 +575,8 @@ jobs:
           docker run --rm \
             -v /tmp/torchsim-ci/${GITHUB_SHA}:/dump \
             -e TORCHSIM_DUMP_PATH=/dump \
-            -e TORCHSIM_VECTOR_LANE="${{ inputs.vector_lane }}" \
-            -e TORCHSIM_SPAD_SIZE="${{ inputs.spad_size }}" \
+            -e vpu_num_lanes="${{ inputs.vector_lane }}" \
+            -e vpu_spad_size_kb_per_lane="${{ inputs.spad_size }}" \
             ${{ inputs.image_name }} python3 PyTorchSim/tests/Mixtral_8x7B/test_attention.py
 
   test_vit:
@@ -596,8 +596,8 @@ jobs:
           docker run --rm \
             -v /tmp/torchsim-ci/${GITHUB_SHA}:/dump \
             -e TORCHSIM_DUMP_PATH=/dump \
-            -e TORCHSIM_VECTOR_LANE="${{ inputs.vector_lane }}" \
-            -e TORCHSIM_SPAD_SIZE="${{ inputs.spad_size }}" \
+            -e vpu_num_lanes="${{ inputs.vector_lane }}" \
+            -e vpu_spad_size_kb_per_lane="${{ inputs.spad_size }}" \
             ${{ inputs.image_name }} python3 PyTorchSim/tests/test_vit.py
 
   test_diffusion:
@@ -617,8 +617,8 @@ jobs:
           docker run --rm \
             -v /tmp/torchsim-ci/${GITHUB_SHA}:/dump \
             -e TORCHSIM_DUMP_PATH=/dump \
-            -e TORCHSIM_VECTOR_LANE="${{ inputs.vector_lane }}" \
-            -e TORCHSIM_SPAD_SIZE="${{ inputs.spad_size }}" \
+            -e vpu_num_lanes="${{ inputs.vector_lane }}" \
+            -e vpu_spad_size_kb_per_lane="${{ inputs.spad_size }}" \
             ${{ inputs.image_name }} python3 PyTorchSim/tests/Diffusion/test_diffusion.py
 
   test_indirect:
@@ -638,8 +638,8 @@ jobs:
           docker run --rm \
             -v /tmp/torchsim-ci/${GITHUB_SHA}:/dump \
             -e TORCHSIM_DUMP_PATH=/dump \
-            -e TORCHSIM_VECTOR_LANE="${{ inputs.vector_lane }}" \
-            -e TORCHSIM_SPAD_SIZE="${{ inputs.spad_size }}" \
+            -e vpu_num_lanes="${{ inputs.vector_lane }}" \
+            -e vpu_spad_size_kb_per_lane="${{ inputs.spad_size }}" \
             ${{ inputs.image_name }} python3 PyTorchSim/tests/test_indirect_access.py
 
   test_scheduler:
@@ -659,8 +659,8 @@ jobs:
           docker run --rm \
             -v /tmp/torchsim-ci/${GITHUB_SHA}:/dump \
             -e TORCHSIM_DUMP_PATH=/dump \
-            -e TORCHSIM_VECTOR_LANE="${{ inputs.vector_lane }}" \
-            -e TORCHSIM_SPAD_SIZE="${{ inputs.spad_size }}" \
+            -e vpu_num_lanes="${{ inputs.vector_lane }}" \
+            -e vpu_spad_size_kb_per_lane="${{ inputs.spad_size }}" \
             ${{ inputs.image_name }} python3 PyTorchSim/tests/test_scheduler.py
 
   test_accuracy:
@@ -683,8 +683,8 @@ jobs:
           docker run --rm \
             -v /tmp/torchsim-ci/${GITHUB_SHA}:/dump \
             -e TORCHSIM_DUMP_PATH=/dump \
-            -e TORCHSIM_VECTOR_LANE="${{ inputs.vector_lane }}" \
-            -e TORCHSIM_SPAD_SIZE="${{ inputs.spad_size }}" \
+            -e vpu_num_lanes="${{ inputs.vector_lane }}" \
+            -e vpu_spad_size_kb_per_lane="${{ inputs.spad_size }}" \
             ${{ inputs.image_name }} bash -c \
             "cd /workspace && PyTorchSim/experiments/artifact/cycle_validation/run_cycle.sh && \
             cp PyTorchSim/experiments/artifact/cycle_validation/summary_cycle.out /dump/summary_cycle.out"

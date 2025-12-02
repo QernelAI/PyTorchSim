@@ -51,7 +51,7 @@ if __name__ == "__main__":
     os.environ['TORCHSIM_DUMP_PATH'] = result_path
     # only timing simulation
     os.environ['TORCHSIM_VALIDATION_MODE'] = "0"
-    if 'TORCHSIM_FUNCTIONAL_MODE' in os.environ:
-        del os.environ['TORCHSIM_FUNCTIONAL_MODE']
+    if 'pytorchsim_functional_mode' in os.environ:
+        del os.environ['pytorchsim_functional_mode']
 
     run_conv2d(size[0], size[1], size[2], size[3], size[4], size[5], size[6], size[7], config)

@@ -1,6 +1,6 @@
 #!/bin/bash
 LOG_DIR=$TORCHSIM_DIR/experiments/artifact/logs
-CONFIG_DIR="$TORCHSIM_DIR/TOGSim/configs"
+CONFIG_DIR="$TORCHSIM_DIR/configs"
 SIMULATOR_BIN="$TORCHSIM_DIR/TOGSim/build/bin/Simulator"
 
 configs=(

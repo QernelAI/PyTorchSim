@@ -257,7 +257,7 @@ class MLIRScheduling(BaseScheduling):
             codecache_def.writeline(f"spad_info={spad_info},")
             codecache_def.writeline(f"origins={origins},")
             codecache_def.writeline("arg_attributes=arg_attributes,")
-            codecache_def.writeline(f"vlen={extension_config.CONFIG_VLEN})")
+            codecache_def.writeline(f"vlen={extension_config.vpu_vector_length_bits})")
             wrapper.define_kernel(kernel_name, codecache_def.getvalue(), cuda=False)
         return kernel_name
 
