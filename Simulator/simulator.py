@@ -242,14 +242,15 @@ class TOGSimulator():
                 print("[TOGSim] Error output:", e.output)
             assert 0
         # Save result to result_path
-        result_path = os.path.join(os.path.dirname(model_path), "togsim_result")
+        result_path = extension_config.CONFIG_TORCHSIM_LOG_PATH
         os.makedirs(result_path, exist_ok=True)
-        file_name = str(len(os.listdir(result_path)))
+        file_name = "togsim_result.log"
         result_path = os.path.join(result_path, file_name)
         with open(result_path, "w") as f:
             f.write(result.decode())
         if not silent_mode or extension_config.CONFIG_DEBUG_MODE:
-            print(f'[TOGSim] Simulation of "{model_path}" is stored to "{result_path}"')
+            model_path_log = f' of "{model_path}" ' if extension_config.CONFIG_DEBUG_MODE else " "
+            print(f'[TOGSim] Simulation log{model_path_log}is stored to "{result_path}"')
         return result_path
 
     def interactive_simulation(self):

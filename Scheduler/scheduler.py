@@ -222,7 +222,7 @@ class PyTorchSimRunner:
         return all([self.is_partition_idle(i) for i in range(self.num_partion)])
 
     def prepare_model(self, req_model: SchedulerDNNModel):
-        result_path = os.path.join(extension_config.CONFIG_TORCHSIM_DUMP_PATH, "togsim_result", req_model.model_name)
+        result_path = os.path.join(extension_config.CONFIG_TORCHSIM_LOG_PATH, "togsim_result", req_model.model_name)
         os.makedirs(result_path, exist_ok=True)
         index = str(len(os.listdir(result_path)))
 

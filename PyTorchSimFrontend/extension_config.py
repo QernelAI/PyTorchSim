@@ -2,6 +2,7 @@ import os
 import sys
 import tempfile
 import importlib
+import datetime
 
 def __getattr__(name):
 
@@ -28,7 +29,9 @@ def __getattr__(name):
           return os.environ.get('TORCHSIM_DIR', default='/workspace/PyTorchSim')
 
     if name == "CONFIG_TORCHSIM_DUMP_PATH":
-        return os.environ.get('TORCHSIM_DUMP_PATH', default = __getattr__("CONFIG_TORCHSIM_DIR"))
+        return os.environ.get('TORCHSIM_DUMP_PATH', default = f"{tempfile.gettempdir()}/torchinductor")
+    if name == "CONFIG_TORCHSIM_LOG_PATH":
+        return os.environ.get('TORCHSIM_DUMP_LOG_PATH', default = os.path.join(__getattr__("CONFIG_TORCHSIM_DIR"), "outputs", datetime.datetime.now().strftime('%Y%m%d_%H%M%S')))
     if name == "CONFIG_TORCHSIM_DUMP_FILE":
         return int(os.environ.get('TORCHSIM_DUMP_FILE', default=True))
     if name == "CONFIG_TORCHSIM_FUNCTIONAL_MODE":
