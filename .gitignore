@@ -1,3 +1,9 @@
 __pycache__/
 TOGSim/build/
 .vscode
+*.txt
+*.ipynb_checkpoints
+output
+togsim_results/*
+outputs/*
+experiments/artifact/logs/*
