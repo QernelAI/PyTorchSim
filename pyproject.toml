@@ -1,0 +1,22 @@
+[project]
+name = "pytorchsim"
+version = "0.1.0"
+description = "NPU Simulation Framework for Q32 CIM Accelerator"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    "torch==2.2.0",
+    "torchvision==0.17.0",
+    "numpy<2",
+    "sympy",
+    "onnx",
+    "matplotlib",
+]
+
+[tool.setuptools]
+packages = []
+
+[project.optional-dependencies]
+dev = [
+    "diffusers",
+    "torchsummary",
+]
