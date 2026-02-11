@@ -5,6 +5,7 @@ import subprocess
 import re
 import sys
 import json
+import math
 import time
 import datetime
 import threading
@@ -146,6 +147,26 @@ class FunctionalSimulator():
 
         os.makedirs(full_path)
         return full_path
+
+class Q32CycleModel:
+    """Analytical latency model for Q32 CIM tensor core."""
+    def __init__(self, config_json):
+        freq_mhz = config_json.get("core_freq_mhz", 940)
+        self.ns_per_cycle = 1000.0 / freq_mhz
+        self.mac_ns = config_json.get("q32_mac_ns", 40)
+        self.cim_dim = config_json.get("q32_cim_tile_dim", 512)
+
+    def gemm_cycles(self, M, N, K):
+        """MAC cycles for a GEMM tile. Weight fill is captured by MOVIN."""
+        n_tiles_n = math.ceil(N / self.cim_dim)
+        n_tiles_k = math.ceil(K / self.cim_dim)
+        total_macs = M * n_tiles_n * n_tiles_k
+        return int(total_macs * self.mac_ns / self.ns_per_cycle)
+
+    def vector_cycles(self, num_elements):
+        """Approximate DSP cycles. Vision 341: 1024-bit SIMD, ~4 TOPS."""
+        return max(1, num_elements // 128)
+
 
 class CycleSimulator():
     def __init__(self) -> None:

@@ -40,6 +40,14 @@ def __getattr__(name):
     if name == "pytorchsim_timing_mode":
         return config_json['pytorchsim_timing_mode']
 
+    # Q32 CIM mode
+    if name == "q32_cim_mode":
+        return config_json.get('q32_cim_mode', 0)
+    if name == "q32_mac_ns":
+        return config_json.get('q32_mac_ns', 40)
+    if name == "q32_cim_tile_dim":
+        return config_json.get('q32_cim_tile_dim', 512)
+
     # Mapping strategy
     if name == "codegen_mapping_strategy":
         codegen_mapping_strategy = config_json["codegen_mapping_strategy"]

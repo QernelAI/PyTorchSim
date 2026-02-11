@@ -32,6 +32,7 @@ struct SimulationConfig {
   uint32_t dram_channels;
   uint32_t dram_req_size;
   uint32_t dram_latency;
+  std::vector<uint32_t> dram_latency_per_partition;
   uint32_t dram_nbl = 1;
   uint32_t dram_print_interval;
   std::string dram_config_path;

@@ -1,10 +1,12 @@
 import os
+import json
 import re
 import shlex
 import subprocess
 
 from torch._inductor.codecache import AsyncCompile, get_lock_dir, get_hash, write
 from AsmParser.tog_generator import tog_generator
+from AsmParser.onnx_utility import compute_node
 from PyTorchSimFrontend.mlir.mlir_caller_codegen import MLIRKernelCallerCodeGen
 from PyTorchSimFrontend import extension_config
 from Simulator.simulator import FunctionalSimulator, CycleSimulator, TOGSimulator
@@ -203,34 +205,70 @@ class MLIRCodeCache:
             if not extension_config.pytorchsim_timing_mode:
                 return key
 
-            # Generate MLIR kernel calller and binary for cycle calculation
-            cycle_llvm_caller = MLIRKernelCallerCodeGen(False, arg_attributes, cycle_sim=True)
-            cycle_llvm_caller.generate_wrapper_file(write_path, cycle_wrapper_name)
-            cycle_llvm_caller.compile_wih_kernel(write_path, key + "_sample", cycle_wrapper_name, cycle_binary_name, link_option)
-            array_size = []
-            for (arg_name, arg_attribute) in arg_attributes:
-                array_size.append(str(arg_attribute[2]))
+            if extension_config.q32_cim_mode:
+                # Q32 CIM mode: use analytical cycle model instead of Gem5
+                from Simulator.simulator import Q32CycleModel
+                config_path = extension_config.CONFIG_TOGSIM_CONFIG
+                with open(config_path, 'r') as f:
+                    q32_config = json.load(f)
+                q32_model = Q32CycleModel(q32_config)
 
-            # Run cyclesim
-            cyclesim = CycleSimulator()
-            cycle_list = cyclesim.compile_and_simulate(os.path.join(write_path, cycle_binary_name), " ".join(array_size), vectorlane_size, silent_mode=silent_mode)
+                tile_graph_generator = tog_generator(origins)
+                tile_graph_generator.load_file(raw_tog_path)
 
-            # Create TOG
-            w_offset, x_offset = vectorlane_size, vectorlane_size
-            if kwargs['loop_size'] is not None and kwargs['loop_size'][-3] < vectorlane_size:
-                x_offset = kwargs['loop_size'][-3]
-            if kwargs['loop_size'] is not None and kwargs['loop_size'][-1] < vectorlane_size:
-                w_offset = kwargs['loop_size'][-1]
-            w_offset = 0 # max(w_offset - x_offset, 0)
-            tile_graph_generator = tog_generator(origins)
-            tile_graph_generator.load_file(raw_tog_path)
-            tile_graph_generator.generate_tile_graph(
-                os.path.join(write_path, "tile_graph.onnx"),
-                cycle_list=cycle_list,
-                x_offset=x_offset, # FIXME.
-                w_offset=w_offset, # FIXME.
-                vector_lane=vectorlane_size
-            )
+                cycle_list = []
+                for node in tile_graph_generator.node_dict.values():
+                    if isinstance(node, compute_node):
+                        if node.torchsim_compute_type != 0:  # GEMM (SA)
+                            # Each compute node = one tiled MAC pass
+                            cycle_list.append(q32_model.gemm_cycles(1, q32_model.cim_dim, q32_model.cim_dim))
+                        else:  # Vector (VU)
+                            cycle_list.append(q32_model.vector_cycles(q32_model.cim_dim))
+
+                w_offset, x_offset = 0, vectorlane_size
+                tile_graph_generator.generate_tile_graph(
+                    os.path.join(write_path, "tile_graph.onnx"),
+                    cycle_list=cycle_list,
+                    x_offset=x_offset,
+                    w_offset=w_offset,
+                    vector_lane=vectorlane_size
+                )
+
+                # Generate Q32 attribute file for subgraph-to-core mapping
+                from scripts.q32_attribute_gen import generate_q32_attributes
+                onnx_path = os.path.join(write_path, "tile_graph.onnx")
+                q32_attr_path = os.path.join(write_path, "q32_attribute.json")
+                generate_q32_attributes(onnx_path, q32_attr_path)
+            else:
+                # Standard Gem5 path
+                # Generate MLIR kernel calller and binary for cycle calculation
+                cycle_llvm_caller = MLIRKernelCallerCodeGen(False, arg_attributes, cycle_sim=True)
+                cycle_llvm_caller.generate_wrapper_file(write_path, cycle_wrapper_name)
+                cycle_llvm_caller.compile_wih_kernel(write_path, key + "_sample", cycle_wrapper_name, cycle_binary_name, link_option)
+                array_size = []
+                for (arg_name, arg_attribute) in arg_attributes:
+                    array_size.append(str(arg_attribute[2]))
+
+                # Run cyclesim
+                cyclesim = CycleSimulator()
+                cycle_list = cyclesim.compile_and_simulate(os.path.join(write_path, cycle_binary_name), " ".join(array_size), vectorlane_size, silent_mode=silent_mode)
+
+                # Create TOG
+                w_offset, x_offset = vectorlane_size, vectorlane_size
+                if kwargs['loop_size'] is not None and kwargs['loop_size'][-3] < vectorlane_size:
+                    x_offset = kwargs['loop_size'][-3]
+                if kwargs['loop_size'] is not None and kwargs['loop_size'][-1] < vectorlane_size:
+                    w_offset = kwargs['loop_size'][-1]
+                w_offset = 0 # max(w_offset - x_offset, 0)
+                tile_graph_generator = tog_generator(origins)
+                tile_graph_generator.load_file(raw_tog_path)
+                tile_graph_generator.generate_tile_graph(
+                    os.path.join(write_path, "tile_graph.onnx"),
+                    cycle_list=cycle_list,
+                    x_offset=x_offset, # FIXME.
+                    w_offset=w_offset, # FIXME.
+                    vector_lane=vectorlane_size
+                )
         return key
 
 class CustomAsyncCompile(AsyncCompile):
@@ -286,6 +324,17 @@ class CustomAsyncCompile(AsyncCompile):
                 TOGSim = TOGSimulator(togsim_path, extension_config.CONFIG_TOGSIM_CONFIG)
                 TOGSim.vectorlane_size = vectorlane_size
                 attribute_path = TOGSim.create_attribute_file(attribute_path, args, loop_size=loop_size)
+                # In Q32 mode, merge subgraph_map from pre-generated attribute
+                if extension_config.q32_cim_mode:
+                    q32_attr_path = os.path.join(result_path, "q32_attribute.json")
+                    if os.path.exists(q32_attr_path):
+                        with open(q32_attr_path, 'r') as f:
+                            q32_attr = json.load(f)
+                        with open(attribute_path, 'r') as f:
+                            attr_data = json.load(f)
+                        attr_data.update(q32_attr)
+                        with open(attribute_path, 'w') as f:
+                            json.dump(attr_data, f, indent=4)
                 result_path = TOGSim.simulation(onnx_path, attribute_path, silent_mode=silent_mode)
                 result = TOGSimulator.get_result_from_file(result_path)
                 return result

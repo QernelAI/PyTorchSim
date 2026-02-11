@@ -137,6 +137,7 @@ SimpleDRAM::SimpleDRAM(SimulationConfig config, cycle_type* core_cycle) : Dram(c
     _mem.push_back(std::make_unique<DelayQueue<mem_fetch*>>("SimpleDRAM", true, -1));
   }
   _latency =  config.dram_latency;
+  _latency_per_partition = config.dram_latency_per_partition;
   _tx_log2 = log2(_req_size);
   _tx_ch_log2 = log2(_n_ch_per_partition) + _tx_log2;
 }
@@ -159,7 +160,10 @@ void SimpleDRAM::cycle() {
     if (mem_fetch* req = _m_caches[ch]->top()) {
       //spdlog::info("[Cache->DRAM] mem_fetch: addr={:#x}", req->get_addr());
 
-      _mem[ch]->push(req, _latency);
+      uint32_t partition_id = ch / _n_ch_per_partition;
+      uint32_t lat = (partition_id < _latency_per_partition.size())
+          ? _latency_per_partition[partition_id] : _latency;
+      _mem[ch]->push(req, lat);
       _m_caches[ch]->pop();
     }
 

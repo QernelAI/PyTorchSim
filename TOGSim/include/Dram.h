@@ -83,6 +83,7 @@ class SimpleDRAM: public Dram {
   void print_cache_stats() override;
  private:
   int _latency = 1;
+  std::vector<uint32_t> _latency_per_partition;
   int _tx_ch_log2;
   int _tx_log2;
   std::vector<std::unique_ptr<DelayQueue<mem_fetch*>>> _mem;

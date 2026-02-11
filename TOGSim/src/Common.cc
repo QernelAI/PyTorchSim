@@ -76,6 +76,10 @@ SimulationConfig initialize_config(json config) {
     parsed_config.dram_print_interval = config["dram_stats_print_period_cycles"];
   if(config.contains("dram_num_burst_length"))
     parsed_config.dram_nbl = config["dram_num_burst_length"];
+  if (config.contains("dram_latency_per_partition")) {
+    parsed_config.dram_latency_per_partition =
+        config["dram_latency_per_partition"].get<std::vector<uint32_t>>();
+  }
   if (config.contains("dram_num_partitions")) {
     parsed_config.dram_num_partitions = config["dram_num_partitions"];
     if (parsed_config.dram_channels % parsed_config.dram_num_partitions != 0) {
