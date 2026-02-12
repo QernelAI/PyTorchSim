@@ -161,6 +161,8 @@ Key parameters:
 - `*_tpuv4.json` — TPUv4-like configs with L2 cache support
 - `*_chiplet_*` — Chiplet configs with NUMA
 - `stonne_*` — Sparse tensor core configs
+- `q32_cim_dsp.json` — 2-core Q32 CIM (1 tensor core + 1 DSP), simple NoC
+- `q32_4core_dsp.json` — 5-core Q32 CIM (4 tensor cores + 1 DSP), BookSim2 NoC
 
 ### Environment Variables
 
@@ -186,6 +188,14 @@ python tests/test_matmul.py
 
 # Run multi-tenancy test
 python tests/test_scheduler.py
+
+# Run Q32 multi-core tests (set TOGSIM_CONFIG first)
+export TOGSIM_CONFIG=configs/q32_4core_dsp.json
+python tests/test_q32_multicore_sweep.py   # Single matmul, size sweep
+python tests/test_q32_multi_gemm.py        # 4 concurrent matmuls on 4 cores
+
+# Analyze simulation logs
+python scripts/analyze_multicore_log.py togsim_results/*.log
 
 # Build from source (optional)
 bash scripts/build_from_source.sh
@@ -286,6 +296,67 @@ A 2-core simulation mapping one Q32 CIM tensor core (core 0) + one Vision 341 DS
 5. **DRAM calibration is approximate**: The SimpleDRAM pipeline model (`requests_per_channel + latency - 1`) doesn't account for interconnect overhead, DMA request generation timing, or cache pass-through delays. The 83-cycle latency was chosen analytically, not validated against actual simulation output.
 
 6. **Multi-core scaling path**: When expanding to full Q-Tile (48 Q32 + 1 DSP), need to increase partitions, switch to `booksim2` NoC, and round-robin GEMM subgraphs across 48 cores.
+
+## Q32 CIM Multi-Core Simulation (4 Q32 + 1 DSP)
+
+### What Was Implemented
+
+Scaled from 2-core to 5-core: 4 Q32 tensor cores (cores 0-3) + 1 Vision 341 DSP (core 4) with cycle-accurate BookSim2 flattened butterfly NoC. Demonstrates concurrent GEMM execution across multiple cores with NoC contention modeling.
+
+**Architecture**:
+```
+Core 0 (Q32)  Core 1 (Q32)  Core 2 (Q32)  Core 3 (Q32)  Core 4 (DSP)
+Partition 0    Partition 1    Partition 2    Partition 3    Partition 4
+(local DRAM)   (local DRAM)   (local DRAM)   (local DRAM)   (shared SRAM)
+  83 cycles      83 cycles      83 cycles      83 cycles      10 cycles
+  4 channels     4 channels     4 channels     4 channels     4 channels
+                    BookSim2 Flattened Butterfly NoC (k=40)
+```
+
+**Files created/modified**:
+- `configs/q32_4core_dsp.json` — 5-core config: 20 DRAM channels, 5 partitions, BookSim2 NoC
+- `configs/booksim2_configs/fly_c20_m20.icnt` — Flattened butterfly, k=40 (5 cores × 4 ports + 20 channels)
+- `scripts/q32_attribute_gen.py` — Round-robin GEMM subgraphs across N Q32 cores (was: hardcoded core 0)
+- `PyTorchSimFrontend/extension_config.py` — `q32_num_cores` accessor (reads from JSON, default 1)
+- `PyTorchSimFrontend/extension_codecache.py` — Passes core count to attribute gen
+- `TOGSim/src/Simulator.cc` — Fixed NUMA tracking to use `get_partition_id(core_id)` instead of raw `core_id`
+
+### Multi-Core Test Scripts
+
+**`tests/test_q32_multicore_sweep.py`**: Runs matmul at various sizes through the standard `torch.compile()` path with the 4-core config. Single matmul → single subgraph → lands on core 0 only (round-robin with 1 GEMM = core 0).
+
+**`tests/test_q32_multi_gemm.py`**: Exercises all 4 cores concurrently by:
+1. Compiling a matmul through standard path to generate the TOG
+2. Launching the same TOG to 4 separate partitions via interactive TOGSim (`launch config tog attr time partition_id`)
+3. Using an empty attribute JSON (no `subgraph_map` → `core_id=-1` → any core in the partition picks up the subgraph)
+4. Comparing single-core baseline vs 4-core concurrent execution
+
+**`scripts/analyze_multicore_log.py`**: Post-hoc analysis of TOGSim logs. Extracts:
+- Per-core instruction counts (MOVIN, MOVOUT, COMP with GEMM/Vector breakdown, BAR)
+- Per-core DMA stats (active/idle cycles, utilization, DRAM bandwidth, request counts)
+- Per-core SA and VPU utilization
+- NUMA local vs remote memory access pattern
+- BookSim2 NoC stats (packet/network/flit latency, injection/accepted rates, hotspot detection)
+- Scheduler timing (per-partition finish cycles, spread)
+- ICNT bandwidth intervals
+
+Usage: `python scripts/analyze_multicore_log.py togsim_results/*.log`
+
+### Key Architecture Insights (TOGSim Interactive Mode)
+
+- **Partition-based scheduling**: `schedule_graph(partition_id, tile_graph)` assigns a TOG to a specific partition's scheduler. Each core polls only its own partition.
+- **Subgraph allocation**: `TileGraph::allocate_subgraph(core_id)` checks `subgraph.core_id == -1 || subgraph.core_id == core_id`. Empty attribute → `core_id=-1` → any core can pick up.
+- **Interactive commands**: `launch config_path onnx_path attr_path arrival_time partition_id` via stdin, responses on stderr. `quit` triggers `cycle()` then `print_core_stat()`.
+- **BookSim2 node count formula**: `(num_cores × icnt_injection_ports_per_core) + dram_channels = k` for fly topology.
+- **Partition map typo**: `_config.partiton_map` (not "partition") throughout C++ codebase.
+
+### Known Multi-Core Limitations
+
+1. **NUMA asymmetry with identical TOGs**: When launching the same TOG to multiple partitions, all cores use identical virtual addresses → all DRAM requests hash to partition 0's channels. Cores 1-3 show 100% remote accesses. In production, each core would have distinct weight addresses in its own local DRAM.
+2. **NoC hotspot at DRAM channels**: Node 20 (first DRAM channel node) receives ~5x average injection rate because all cores target the same address space.
+3. **SimpleDRAM limitations**: No per-channel bandwidth stats or row hit/miss/conflict ratios. Switch to `dram_type: "ramulator2"` for detailed DRAM analytics.
+4. **ICNT bandwidth reporting**: Periodic stats use integer division that truncates to 0 — actual NoC traffic is confirmed by BookSim2 stats.
+5. **Single matmul = single core**: `torch.compile` of one matmul produces one GEMM subgraph, which lands on core 0 (0 % 4 = 0). Multi-core requires multiple independent TOGs launched to different partitions.
 
 ## Codebase Conventions
 
