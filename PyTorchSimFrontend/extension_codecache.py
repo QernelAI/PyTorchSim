@@ -238,7 +238,11 @@ class MLIRCodeCache:
                 from scripts.q32_attribute_gen import generate_q32_attributes
                 onnx_path = os.path.join(write_path, "tile_graph.onnx")
                 q32_attr_path = os.path.join(write_path, "q32_attribute.json")
-                generate_q32_attributes(onnx_path, q32_attr_path)
+                num_q32 = extension_config.q32_num_cores
+                dsp_core = num_q32  # DSP is the core after all Q32 cores
+                generate_q32_attributes(onnx_path, q32_attr_path,
+                                        num_q32_cores=num_q32,
+                                        dsp_core_id=dsp_core)
             else:
                 # Standard Gem5 path
                 # Generate MLIR kernel calller and binary for cycle calculation

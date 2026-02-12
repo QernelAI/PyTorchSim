@@ -47,6 +47,8 @@ def __getattr__(name):
         return config_json.get('q32_mac_ns', 40)
     if name == "q32_cim_tile_dim":
         return config_json.get('q32_cim_tile_dim', 512)
+    if name == "q32_num_cores":
+        return config_json.get('q32_num_cores', 1)
 
     # Mapping strategy
     if name == "codegen_mapping_strategy":

@@ -1,10 +1,10 @@
 """Generate Q32 CIM attribute JSON for subgraph-to-core mapping.
 
-Assigns GEMM (systolic array) subgraphs to core 0 (Q32 tensor core)
-and vector subgraphs to core 1 (DSP / Vision 341).
+Assigns GEMM (systolic array) subgraphs round-robin across Q32 tensor
+cores and vector subgraphs to the DSP core.
 
 Usage:
-    python scripts/q32_attribute_gen.py <onnx_path> <output_path>
+    python scripts/q32_attribute_gen.py <onnx_path> <output_path> [num_q32_cores] [dsp_core_id]
 """
 import json
 import os
@@ -16,21 +16,22 @@ except ImportError:
     onnx = None
 
 
-def generate_q32_attributes(onnx_path, output_path):
-    """Assign GEMM subgraphs to core 0, vector subgraphs to core 1.
+def generate_q32_attributes(onnx_path, output_path, num_q32_cores=1, dsp_core_id=1):
+    """Assign GEMM subgraphs round-robin across Q32 cores, vector to DSP.
 
     Subgraph IDs are auto-assigned by TileGraphParser based on parallel
     loop iteration order.  Without full C++ parsing, we use a heuristic:
     scan compute nodes for their compute_type attribute and build a
     per-subgraph mapping.
 
-    For pure GEMM workloads (matmul), all subgraphs go to core 0.
-    For mixed workloads, the outermost parallel loop determines subgraph
-    boundaries; each iteration is one subgraph.
+    GEMM subgraphs are distributed round-robin across cores 0..num_q32_cores-1.
+    Vector-only subgraphs are assigned to dsp_core_id.
     """
     if onnx is None:
         # Fallback: assign all subgraphs to core 0
-        _write_default_attribute(output_path, num_subgraphs=1)
+        _write_default_attribute(output_path, num_subgraphs=1,
+                                 num_q32_cores=num_q32_cores,
+                                 dsp_core_id=dsp_core_id)
         return
 
     model = onnx.load(onnx_path)
@@ -64,13 +65,18 @@ def generate_q32_attributes(onnx_path, output_path):
                 subgraph_compute_types[current_subgraph] = set()
             subgraph_compute_types[current_subgraph].add(compute_type)
 
-    # Build subgraph_map:  GEMM (compute_type > 0) -> core 0,  vector only -> core 1
+    # Build subgraph_map:  GEMM round-robin across Q32 cores, vector -> DSP
     num_subgraphs = max(subgraph_compute_types.keys(), default=0) + 1
     subgraph_map = {}
+    gemm_counter = 0
     for sg_id in range(num_subgraphs):
         types = subgraph_compute_types.get(sg_id, set())
         has_gemm = any(t > 0 for t in types)
-        subgraph_map[str(sg_id)] = 0 if has_gemm else 1
+        if has_gemm:
+            subgraph_map[str(sg_id)] = gemm_counter % num_q32_cores
+            gemm_counter += 1
+        else:
+            subgraph_map[str(sg_id)] = dsp_core_id
 
     attribute = {"subgraph_map": subgraph_map}
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
@@ -78,9 +84,9 @@ def generate_q32_attributes(onnx_path, output_path):
         json.dump(attribute, f, indent=2)
 
 
-def _write_default_attribute(output_path, num_subgraphs=1):
-    """Fallback: assign all subgraphs to core 0."""
-    subgraph_map = {str(i): 0 for i in range(num_subgraphs)}
+def _write_default_attribute(output_path, num_subgraphs=1, num_q32_cores=1, dsp_core_id=1):
+    """Fallback: assign subgraphs round-robin across Q32 cores."""
+    subgraph_map = {str(i): i % num_q32_cores for i in range(num_subgraphs)}
     attribute = {"subgraph_map": subgraph_map}
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
     with open(output_path, "w") as f:
@@ -89,6 +95,9 @@ def _write_default_attribute(output_path, num_subgraphs=1):
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:
-        print(f"Usage: {sys.argv[0]} <onnx_path> <output_path>")
+        print(f"Usage: {sys.argv[0]} <onnx_path> <output_path> [num_q32_cores] [dsp_core_id]")
         sys.exit(1)
-    generate_q32_attributes(sys.argv[1], sys.argv[2])
+    num_q32 = int(sys.argv[3]) if len(sys.argv) > 3 else 1
+    dsp_id = int(sys.argv[4]) if len(sys.argv) > 4 else num_q32
+    generate_q32_attributes(sys.argv[1], sys.argv[2],
+                            num_q32_cores=num_q32, dsp_core_id=dsp_id)

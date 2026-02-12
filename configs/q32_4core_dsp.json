@@ -1,0 +1,49 @@
+{
+  "num_cores": 5,
+  "core_freq_mhz": 940,
+  "core_stats_print_period_cycles": 10000,
+  "num_systolic_array_per_core": 1,
+
+  "vpu_num_lanes": 512,
+  "vpu_spad_size_kb_per_lane": 240,
+  "vpu_vector_length_bits": 1024,
+
+  "dram_type": "simple",
+  "dram_freq_mhz": 940,
+  "dram_channels": 20,
+  "dram_req_size_byte": 64,
+  "dram_latency": 83,
+  "dram_latency_per_partition": [83, 83, 83, 83, 10],
+  "dram_num_partitions": 5,
+  "dram_num_burst_length": 1,
+  "dram_stats_print_period_cycles": 10000,
+
+  "icnt_type": "booksim2",
+  "icnt_freq_mhz": 940,
+  "icnt_injection_ports_per_core": 4,
+  "booksim_config_path": "booksim2_configs/fly_c20_m20.icnt",
+  "icnt_stats_print_period_cycles": 10000,
+
+  "num_partition": 5,
+  "partition": {
+    "core_0": 0,
+    "core_1": 1,
+    "core_2": 2,
+    "core_3": 3,
+    "core_4": 4
+  },
+
+  "pytorchsim_functional_mode": 0,
+  "pytorchsim_timing_mode": 1,
+
+  "q32_cim_mode": 1,
+  "q32_mac_ns": 40,
+  "q32_cim_tile_dim": 512,
+  "q32_num_cores": 4,
+
+  "codegen_mapping_strategy": "heuristic",
+  "codegen_external_mapping_file": "",
+  "codegen_autotune_max_retry": 10,
+  "codegen_autotune_template_topk": 4,
+  "codegen_compiler_optimization": "all"
+}
