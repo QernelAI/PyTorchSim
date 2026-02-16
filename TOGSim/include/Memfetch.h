@@ -72,6 +72,9 @@ class mem_fetch {
   }
   void set_custom_data(void* custom_data) { m_custom_data = custom_data; }
   void* get_custom_data() { return m_custom_data; }
+  /* Core-to-core routing */
+  void set_dest_core_id(int id) { m_dest_core_id = id; }
+  int get_dest_core_id() { return m_dest_core_id; }
   /* Stat */
   void set_start_cycle(uint64_t start_cycle) { m_start_cycle = start_cycle; }
   uint64_t get_start_cycle() { return m_start_cycle; } 
@@ -95,6 +98,7 @@ class mem_fetch {
   void* m_custom_data = NULL;
   uint64_t m_start_cycle = 0ULL;
   bool m_cacheable = true;
+  int m_dest_core_id = -1;  // Destination core for core-to-core transfers (-1 = normal DRAM path)
 };
 
 #endif

@@ -44,6 +44,7 @@ class Core {
   void compute_cycle();
   void vu_cycle();
   void sa_cycle();
+  void local_mem_cycle();
   bool can_issue_compute(std::shared_ptr<Instruction>& inst);
   void update_stats();
 
@@ -90,6 +91,10 @@ class Core {
 
   std::unordered_map<Instruction*, std::shared_ptr<Instruction>> _dma_waiting_queue;
   std::vector<std::shared_ptr<Instruction>> _dma_finished_queue;
+  /* Local memory bypass */
+  std::queue<std::pair<mem_fetch*, cycle_type>> _local_mem_queue; // (request, ready_cycle)
+  uint32_t _local_mem_latency_cycles = 0;
+
   /* Interconnect queue */
   std::queue<mem_fetch*> _request_queue;
   std::queue<mem_fetch*> _response_queue;

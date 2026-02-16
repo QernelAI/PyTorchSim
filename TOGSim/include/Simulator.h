@@ -74,6 +74,7 @@ class Simulator {
   uint64_t _nr_to_core = 0;
   uint64_t _nr_from_mem = 0;
   uint64_t _nr_to_mem = 0;
+  uint64_t _nr_core_to_core = 0;
   cycle_type _icnt_cycle = 0;
   uint64_t _icnt_interval = 0;
 };

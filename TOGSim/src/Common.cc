@@ -140,5 +140,19 @@ SimulationConfig initialize_config(json config) {
       spdlog::info("[Config/Core] CPU {}: Partition {}", i, 0);
     }
   }
+
+  /* Local DRAM / DSP config */
+  if (config.contains("local_dram_mode"))
+    parsed_config.local_dram_mode = config["local_dram_mode"];
+  if (config.contains("local_dram_latency_ns"))
+    parsed_config.local_dram_latency_ns = config["local_dram_latency_ns"];
+  if (config.contains("dsp_core_id"))
+    parsed_config.dsp_core_id = config["dsp_core_id"];
+  if (config.contains("dsp_sram_latency_ns"))
+    parsed_config.dsp_sram_latency_ns = config["dsp_sram_latency_ns"];
+  if (parsed_config.local_dram_mode)
+    spdlog::info("[Config] Local DRAM mode enabled, DRAM latency: {}ns, DSP core: {}, DSP SRAM latency: {}ns",
+                 parsed_config.local_dram_latency_ns, parsed_config.dsp_core_id, parsed_config.dsp_sram_latency_ns);
+
   return parsed_config;
 }

@@ -14,6 +14,14 @@ Core::Core(uint32_t id, SimulationConfig config)
   _stat_sa_compute_idle_cycle.resize(_num_systolic_array_per_core);
   _stat_inst_count.resize(static_cast<size_t>(Opcode::COUNT), 0);
   _stat_tot_skipped_inst.resize(static_cast<size_t>(Opcode::COUNT), 0);
+
+  if (config.local_dram_mode) {
+    if ((int)id != config.dsp_core_id)
+      _local_mem_latency_cycles = (config.local_dram_latency_ns * config.core_freq_mhz) / 1000;
+    else
+      _local_mem_latency_cycles = (config.dsp_sram_latency_ns * config.core_freq_mhz) / 1000;
+    spdlog::info("[Config/Core] Core {}: local_mem_latency_cycles = {}", id, _local_mem_latency_cycles);
+  }
 }
 
 bool Core::can_issue(const std::shared_ptr<Tile>& op) {
@@ -178,17 +186,44 @@ void Core::dma_cycle() {
   auto access_vec = _dma.get_memory_access(_core_cycle, _config.icnt_injection_ports_per_core);
   for (auto access : *access_vec) {
     access->set_start_cycle(_core_cycle);
-    _request_queue.push(access);
+    if (_config.local_dram_mode) {
+      if (access->get_type() == mf_type::READ_REQUEST) {
+        // All reads (Q32 weights or DSP SRAM) bypass NoC via local memory
+        _local_mem_queue.push({access, _core_cycle + _local_mem_latency_cycles});
+      } else {
+        // WRITE_REQUEST: core-to-core transfer via NoC
+        if ((int)_id != _config.dsp_core_id) {
+          access->set_dest_core_id(_config.dsp_core_id);  // Q32 -> DSP
+        } else {
+          access->set_dest_core_id(access->get_numa_id()); // DSP -> target Q32
+        }
+        _request_queue.push(access);
+      }
+    } else {
+      _request_queue.push(access);  // Original path
+    }
   }
 
   /* Increase dma stat cycle */
   _stat_dma_cycle++;
 }
 
+void Core::local_mem_cycle() {
+  while (!_local_mem_queue.empty() &&
+         _local_mem_queue.front().second <= _core_cycle) {
+    mem_fetch* response = _local_mem_queue.front().first;
+    _local_mem_queue.pop();
+    response->set_reply();
+    push_memory_response(response);
+  }
+}
+
 void Core::cycle() {
   /* Run compute unit and DMA unit */
   compute_cycle();
   dma_cycle();
+  if (_config.local_dram_mode)
+    local_mem_cycle();
 
   /* Increase core cycle counter */
   _core_cycle++;
@@ -373,6 +408,7 @@ bool Core::running() {
   running = running || !_dma.empty();
   running = running || !_ld_inst_queue.empty();
   running = running || !_st_inst_queue.empty();
+  running = running || !_local_mem_queue.empty();
   return running;
 }
 

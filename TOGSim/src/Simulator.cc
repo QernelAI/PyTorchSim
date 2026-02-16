@@ -101,12 +101,14 @@ void Simulator::core_cycle() {
     _cores[core_id]->cycle();
   }
   /* L2 cache */
-  _dram->cache_cycle();
+  if (!_config.local_dram_mode)
+    _dram->cache_cycle();
   _core_cycles++;
 }
 
 void Simulator::dram_cycle() {
-  _dram->cycle();
+  if (!_config.local_dram_mode)
+    _dram->cycle();
 }
 
 void Simulator::icnt_cycle() {
@@ -114,58 +116,83 @@ void Simulator::icnt_cycle() {
 
   for (int core_id = 0; core_id < _n_cores; core_id++) {
     for (int noc_id = 0; noc_id < _noc_node_per_core; noc_id++) {
-    // PUHS core to ICNT. memory request
       int port_id = core_id * _noc_node_per_core + noc_id;
+      // Push core to ICNT: memory request
       if (_cores[core_id]->has_memory_request()) {
         mem_fetch *front = _cores[core_id]->top_memory_request();
         front->set_core_id(core_id);
         if (!_icnt->is_full(port_id, front)) {
-          int node_id = _dram->get_channel_id(front) / _config.dram_channels_per_partitions;
-          if (core_id == node_id)
-            _cores[core_id]->inc_numa_local_access();
-          else
-            _cores[core_id]->inc_numa_remote_access();
-          _icnt->push(port_id , get_dest_node(front), front);
+          if (front->get_dest_core_id() >= 0) {
+            // Core-to-core: route to destination core's port
+            int dest_port = front->get_dest_core_id() * _noc_node_per_core;
+            _icnt->push(port_id, dest_port, front);
+          } else {
+            // Normal DRAM path
+            int node_id = _dram->get_channel_id(front) / _config.dram_channels_per_partitions;
+            if (get_partition_id(core_id) == node_id)
+              _cores[core_id]->inc_numa_local_access();
+            else
+              _cores[core_id]->inc_numa_remote_access();
+            _icnt->push(port_id, get_dest_node(front), front);
+          }
           _cores[core_id]->pop_memory_request();
           _nr_from_core++;
         }
       }
-      // Push response from ICNT. to Core.
+      // Push response from ICNT to Core
       if (!_icnt->is_empty(port_id)) {
-        _cores[core_id]->push_memory_response(_icnt->top(port_id));
-        _icnt->pop(port_id);
-        _nr_to_core++;
+        mem_fetch* top = _icnt->top(port_id);
+        if (top->get_dest_core_id() >= 0 && top->is_request()) {
+          // Core-to-core data arrived at destination.
+          // Complete sender's MOVOUT by pushing response to sender core.
+          _icnt->pop(port_id);
+          top->set_reply();
+          int sender_core = top->get_core_id();
+          _cores[sender_core]->push_memory_response(top);
+          _nr_core_to_core++;
+        } else {
+          // Normal DRAM response or returning ACK
+          _cores[core_id]->push_memory_response(top);
+          _icnt->pop(port_id);
+          _nr_to_core++;
+        }
       }
     }
   }
 
-  for (int mem_id = 0; mem_id < _n_memories; mem_id++) {
-    // ICNT to memory
-    int core_offset = _n_cores * _noc_node_per_core;
-    if (!_icnt->is_empty(core_offset + mem_id) &&
-        !_dram->is_full(mem_id, _icnt->top(core_offset + mem_id))) {
-      _dram->push(mem_id, _icnt->top(core_offset + mem_id));
-      _icnt->pop(core_offset + mem_id);
-      _nr_to_mem++;
-    }
-    // Pop response to ICNT from dram
-    if (!_dram->is_empty(mem_id) &&
-        !_icnt->is_full(core_offset + mem_id, _dram->top(mem_id))) {
-      _icnt->push(core_offset + mem_id, get_dest_node(_dram->top(mem_id)),
-                  _dram->top(mem_id));
-      _dram->pop(mem_id);
-      _nr_from_mem++;
+  if (!_config.local_dram_mode) {
+    for (int mem_id = 0; mem_id < _n_memories; mem_id++) {
+      // ICNT to memory
+      int core_offset = _n_cores * _noc_node_per_core;
+      if (!_icnt->is_empty(core_offset + mem_id) &&
+          !_dram->is_full(mem_id, _icnt->top(core_offset + mem_id))) {
+        _dram->push(mem_id, _icnt->top(core_offset + mem_id));
+        _icnt->pop(core_offset + mem_id);
+        _nr_to_mem++;
+      }
+      // Pop response to ICNT from dram
+      if (!_dram->is_empty(mem_id) &&
+          !_icnt->is_full(core_offset + mem_id, _dram->top(mem_id))) {
+        _icnt->push(core_offset + mem_id, get_dest_node(_dram->top(mem_id)),
+                    _dram->top(mem_id));
+        _dram->pop(mem_id);
+        _nr_from_mem++;
+      }
     }
   }
+
   if (_icnt_interval!=0 && _icnt_cycle % _icnt_interval == 0) {
     spdlog::info("[ICNT] Core->ICNT request {}GB/Sec", ((_memory_req_size*_nr_from_core*(1000/_icnt_period)/_icnt_interval)));
     spdlog::info("[ICNT] Core<-ICNT request {}GB/Sec", ((_memory_req_size*_nr_to_core*(1000/_icnt_period)/_icnt_interval)));
     spdlog::info("[ICNT] ICNT->MEM request {}GB/Sec", ((_memory_req_size*_nr_to_mem*(1000/_icnt_period)/_icnt_interval)));
     spdlog::info("[ICNT] ICNT<-MEM request {}GB/Sec", ((_memory_req_size*_nr_from_mem*(1000/_icnt_period)/_icnt_interval)));
+    if (_config.local_dram_mode)
+      spdlog::info("[ICNT] Core<->Core transfers {}", _nr_core_to_core);
     _nr_from_core=0;
     _nr_to_core=0;
     _nr_to_mem=0;
     _nr_from_mem=0;
+    _nr_core_to_core=0;
   }
   _icnt->cycle();
 }
