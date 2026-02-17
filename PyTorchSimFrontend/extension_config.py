@@ -29,7 +29,9 @@ def __getattr__(name):
         }
 
     if name == "CONFIG_PRECISION":
-        return 4 # 32bit
+        return config_json.get("data_precision_bytes", 4)
+    if name == "CONFIG_ACC_PRECISION":
+        return config_json.get("acc_precision_bytes", config_json.get("data_precision_bytes", 4))
     if name == "CONFIG_NUM_CORES":
         return config_json["num_cores"]
     if name == "vpu_vector_length_bits":

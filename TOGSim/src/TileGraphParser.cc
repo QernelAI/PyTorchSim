@@ -944,6 +944,12 @@ int TileGraphParser::getCoreIdFromJson(const json& attribute_json, int subgraph_
     if (subgraph_map.contains(std::to_string(subgraph_id)) && subgraph_map[std::to_string(subgraph_id)].is_number_integer()) {
         return subgraph_map[std::to_string(subgraph_id)];
     }
+    if (subgraph_map.contains("round_robin") && subgraph_map["round_robin"].is_array()) {
+        const auto& cores = subgraph_map["round_robin"];
+        if (!cores.empty()) {
+            return cores[subgraph_id % cores.size()];
+        }
+    }
     if (subgraph_map.contains("default") && subgraph_map["default"].is_number_integer()) {
         return subgraph_map["default"];
     }

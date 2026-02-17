@@ -287,8 +287,13 @@ class CustomAsyncCompile(AsyncCompile):
                 TOGSim.vectorlane_size = vectorlane_size
                 extra_kwargs = {}
                 dsp_core_id = TOGSim.config_json.get("dsp_core_id", -1)
-                if dsp_core_id >= 0 and not TOGSimulator.has_gemm_ops(onnx_path):
-                    extra_kwargs["subgraph_map"] = {"default": dsp_core_id}
+                if dsp_core_id >= 0:
+                    if not TOGSimulator.has_gemm_ops(onnx_path):
+                        extra_kwargs["subgraph_map"] = {"default": dsp_core_id}
+                    elif dsp_core_id > 1:
+                        # Distribute GEMM subgraphs round-robin across Q32 cores
+                        q32_core_ids = list(range(dsp_core_id))
+                        extra_kwargs["subgraph_map"] = {"round_robin": q32_core_ids}
                 attribute_path = TOGSim.create_attribute_file(attribute_path, args, loop_size=loop_size, **extra_kwargs)
                 result_path = TOGSim.simulation(onnx_path, attribute_path, silent_mode=silent_mode)
                 result = TOGSimulator.get_result_from_file(result_path)

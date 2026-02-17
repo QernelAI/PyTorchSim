@@ -570,6 +570,7 @@ class BaseMLIRHardwareInfo():
         self.vector_lane = extension_config.vpu_num_lanes
         self.spad_info = extension_config.CONFIG_SPAD_INFO
         self.precision = extension_config.CONFIG_PRECISION
+        self.acc_precision = extension_config.CONFIG_ACC_PRECISION
         self.num_cores = extension_config.CONFIG_NUM_CORES
         self.vlen = extension_config.vpu_vector_length_bits
 

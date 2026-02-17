@@ -144,61 +144,6 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
         for idx, (loop_size, stride) in enumerate(zip(mat_size, tile_size)):
             self.loop_info[f"index{idx}"] = [0, loop_size, stride]
 
-    def gemmini_gemm_mapping(self, M, N, K):
-        spad_size = self.spad_info["spad_size"] * self.vector_lane
-        num_cores = self.num_cores
-        precision = self.precision
-        dim_I, dim_J, dim_K = M, N, K
-        dim = self.vector_lane
-
-        # split spad into 3/4 for input and 1/4 for output (only for mapping)
-        # TODO: 3/4 and 1/4 are arbitrary numbers. We should find a better way to split the spad (auto-tune?)
-        max_spad_rows = (spad_size * 3 // 4) // (dim * precision * 2) # 4 bytes per element, double buffer
-        max_acc_rows = (spad_size // 4) // (dim * 4 * 2) # 4 bytes per element, double buffer
-
-        dim_I_padded = (dim_I // dim + (dim_I % dim != 0)) * dim
-        dim_J_padded = (dim_J // dim + (dim_J % dim != 0)) * dim
-        dim_K_padded = (dim_K // dim + (dim_K % dim != 0)) * dim
-
-        db_partitions_rows = max_spad_rows // 2
-        db_mats_in_partition = db_partitions_rows // dim
-        db_mats_in_acc = max_acc_rows // dim
-        db_max_tile_i_j = int(math.sqrt(db_mats_in_acc))
-        db_max_tile_k = db_mats_in_partition // db_max_tile_i_j
-
-        tile_I = min(dim_I_padded // dim, math.ceil(dim_I / (db_max_tile_i_j * dim)))
-        tile_J = min(dim_J_padded // dim, math.ceil(dim_J / (db_max_tile_i_j * dim)))
-        tile_K = min(dim_K_padded // dim, math.ceil(dim_K / (db_max_tile_k * dim)))
-
-        num_tiles = tile_I * tile_J
-        if num_tiles < num_cores:
-            increase_tile = math.ceil(num_cores / num_tiles)
-            if dim_J > dim_I and dim_J > num_cores:
-                tile_J *= increase_tile
-            elif dim_I > dim_J and dim_I > num_cores:
-                tile_I *= increase_tile
-            num_tiles = tile_I * tile_J
-        if num_tiles % num_cores != 0:
-            increase_tile = num_tiles % num_cores
-            if dim_J > dim_I and dim_J > num_cores:
-                tile_J += increase_tile
-            elif dim_I > dim_J and dim_I > num_cores:
-                tile_I += increase_tile
-
-        inner_I = math.ceil(dim_I_padded / tile_I)
-        inner_J = math.ceil(dim_J_padded / tile_J)
-        inner_K = math.ceil(dim_K_padded / tile_K)
-
-        inner_I -= inner_I & (dim) - 1
-        inner_J -= inner_J & (dim) - 1
-        inner_K -= inner_K & (dim) - 1
-
-        tile_I = math.ceil(dim_I / inner_I)
-        tile_J = math.ceil(dim_J / inner_J)
-        tile_K = math.ceil(dim_K / inner_K)
-
-        return inner_I, inner_J, inner_K
-
     def gemm_combination_mapping(self, M, N, K, n_extra_node=0, n_prologue_node=0, pad_k=True, min_tile=False, is_conv=False):
         tile_candidates = []
         spad_size_per_lane = self.spad_info["spad_size"]
@@ -227,11 +172,13 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
                 tile_M = i * self.vector_lane if M > self.vector_lane else M_padded
                 for j in tile_N_range:
                     tile_N = j * self.vector_lane if N > self.vector_lane else N_padded
-                    used_spad_size = (tile_M * tile_K * (1 + n_prologue_node) + tile_K * tile_N + tile_M * tile_N * (1 + n_extra_node)) * self.precision
+                    used_spad_size = (tile_M * tile_K * (1 + n_prologue_node) + tile_K * tile_N) * self.precision \
+                                   + tile_M * tile_N * (1 + n_extra_node) * self.acc_precision
                     weight_size_per_lane = self.get_spad_size_per_lane(tile_K, tile_N)
                     input_size_per_lane = self.get_spad_size_per_lane(tile_M * (1 + n_prologue_node), tile_K)
                     output_size_per_lane = self.get_spad_size_per_lane(tile_M * (1 + n_extra_node), tile_N)
-                    used_spad_size_per_lane = (weight_size_per_lane + input_size_per_lane + output_size_per_lane) * self.precision
+                    used_spad_size_per_lane = (weight_size_per_lane + input_size_per_lane) * self.precision \
+                                            + output_size_per_lane * self.acc_precision
                     check_spad_size = (used_spad_size < max_spad_size and used_spad_size_per_lane < max_spad_per_lane)
                     if check_spad_size:
                         dir_path = f"{extension_config.CONFIG_TORCHSIM_DIR}/validation/gemm_candidates"
@@ -253,11 +200,13 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
                 tile_M = i * self.vector_lane if M > self.vector_lane else M_padded
                 for j in tile_N_range:
                     tile_N = j * self.vector_lane if N > self.vector_lane else N_padded
-                    used_spad_size = (tile_M * tile_K * (1 + n_prologue_node) + tile_K * tile_N + tile_M * tile_N * (1 + n_extra_node)) * self.precision
+                    used_spad_size = (tile_M * tile_K * (1 + n_prologue_node) + tile_K * tile_N) * self.precision \
+                                   + tile_M * tile_N * (1 + n_extra_node) * self.acc_precision
                     weight_size_per_lane = self.get_spad_size_per_lane(tile_K, tile_N)
                     input_size_per_lane = self.get_spad_size_per_lane(tile_M * (1 + n_prologue_node), tile_K)
                     output_size_per_lane = self.get_spad_size_per_lane(tile_M * (1 + n_extra_node), tile_N)
-                    used_spad_size_per_lane = (weight_size_per_lane + input_size_per_lane + output_size_per_lane) * self.precision
+                    used_spad_size_per_lane = (weight_size_per_lane + input_size_per_lane) * self.precision \
+                                            + output_size_per_lane * self.acc_precision
                     n_tile = math.ceil(M / max(tile_M, 128)) * math.ceil(N / max(tile_N, 128))
                     check_spad_size = (used_spad_size < max_spad_size and used_spad_size_per_lane < max_spad_per_lane)
                     if check_spad_size and max_used_spad_size < used_spad_size and maximize_i_j <= tile_M * tile_N and n_tile >= minimum_n_tile and max(tile_N, 128) // max(tile_M, 128) < 10:
@@ -269,6 +218,9 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
 
         tile_candidates = sorted(tile_candidates, key=lambda x: x[0], reverse=True)
         tile_candidates = [v for _, v in tile_candidates]
+        if extension_config.CONFIG_DEBUG_MODE and tile_candidates and not is_conv:
+            best = tile_candidates[0]
+            self.print_spad_breakdown(best[0], best[1], best[2], n_prologue_node, n_extra_node)
         return tile_candidates
 
     def conv_combination_mapping(self, M, N, K, K_H, K_W, O_H, O_W, stride, dilation, n_extra_node=0):
@@ -292,11 +244,13 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
                         weight_size = k_w * k_h * K * N
                         input_size = i_w * i_h * M * K
                         output_size = o_w * o_h * M * N
-                        used_spad_size = (weight_size + input_size + output_size * (1 + n_extra_node)) * self.precision
+                        used_spad_size = (weight_size + input_size) * self.precision \
+                                       + output_size * (1 + n_extra_node) * self.acc_precision
                         weight_size_per_lane = self.get_spad_size_per_lane(k_w * k_h * K, N)
                         input_size_per_lane = self.get_spad_size_per_lane(i_w * i_h * M, K)
                         output_size_per_lane = self.get_spad_size_per_lane(o_w * o_h * M  * (1 + n_extra_node), N)
-                        used_spad_size_per_lane = (weight_size_per_lane + input_size_per_lane + output_size_per_lane) * self.precision
+                        used_spad_size_per_lane = (weight_size_per_lane + input_size_per_lane) * self.precision \
+                                                + output_size_per_lane * self.acc_precision
                         check_spad_size = (used_spad_size < max_spad_size and used_spad_size_per_lane < max_spad_per_lane)
                         if check_spad_size:
                             tile_candidates.append((used_spad_size, (k_h, k_w, o_h, o_w, M, N, K)))
@@ -330,11 +284,13 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
                     weight_size = 1 * k_h * K * N
                     input_size = i_w * i_h * M * K
                     output_size = o_w * o_h * M * N
-                    used_spad_size = (weight_size + input_size + output_size * (1 + n_extra_node)) * self.precision
+                    used_spad_size = (weight_size + input_size) * self.precision \
+                                   + output_size * (1 + n_extra_node) * self.acc_precision
                     weight_size_per_lane = self.get_spad_size_per_lane(1 * k_h * K, N)
                     input_size_per_lane = self.get_spad_size_per_lane(i_w * i_h * M, K)
                     output_size_per_lane = self.get_spad_size_per_lane(o_w * o_h * M  * (1 + n_extra_node), N)
-                    used_spad_size_per_lane = (weight_size_per_lane + input_size_per_lane + output_size_per_lane) * self.precision
+                    used_spad_size_per_lane = (weight_size_per_lane + input_size_per_lane) * self.precision \
+                                            + output_size_per_lane * self.acc_precision
                     check_spad_size = (used_spad_size < max_spad_size and used_spad_size_per_lane < max_spad_per_lane)
                     if check_spad_size:
                         tile_candidates.append((used_spad_size, (k_h, K_W, o_h, o_w, M, N, K)))
@@ -366,11 +322,13 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
                     weight_size = k_w * k_h * K * N
                     input_size = i_w * i_h * k_w * K
                     output_size = M * o_h * N
-                    used_spad_size = (weight_size + input_size + output_size * (1 + n_extra_node)) * self.precision
+                    used_spad_size = (weight_size + input_size) * self.precision \
+                                   + output_size * (1 + n_extra_node) * self.acc_precision
                     weight_size_per_lane = self.get_spad_size_per_lane(k_w * k_h * K, N)
                     input_size_per_lane = self.get_spad_size_per_lane(i_w * i_h * k_w, K)
                     output_size_per_lane = self.get_spad_size_per_lane(M * o_h  * (1 + n_extra_node), N)
-                    used_spad_size_per_lane = (weight_size_per_lane + input_size_per_lane + output_size_per_lane) * self.precision
+                    used_spad_size_per_lane = (weight_size_per_lane + input_size_per_lane) * self.precision \
+                                            + output_size_per_lane * self.acc_precision
                     check_spad_size = (used_spad_size < max_spad_size and used_spad_size_per_lane < max_spad_per_lane)
                     if check_spad_size:
                         tile_candidates.append((used_spad_size, (k_h, k_w, o_h, M, M, N, K)))
@@ -849,6 +807,19 @@ class MLIRTemplateKernel(MLIRKernel, BaseMLIRHardwareInfo):
     def get_spad_size_per_lane(self, tile_m, tile_n):
         size = tile_m * ((tile_n + self.vector_lane - 1) // self.vector_lane)
         return max(size, 2) # vector load/store
+
+    def print_spad_breakdown(self, tile_M, tile_N, tile_K, n_prologue_node=0, n_extra_node=0):
+        spad_size = self.spad_info["spad_size"] * self.vector_lane
+        max_spad = spad_size // 2
+        x_bytes = tile_M * tile_K * (1 + n_prologue_node) * self.precision
+        w_bytes = tile_K * tile_N * self.precision
+        y_bytes = tile_M * tile_N * (1 + n_extra_node) * self.acc_precision
+        total = x_bytes + w_bytes + y_bytes
+        print(f"  SRAM Breakdown: tile=({tile_M},{tile_N},{tile_K})")
+        print(f"    X (activation):  {x_bytes/1024:>7.1f} KB  ({tile_M}x{tile_K} x {self.precision}B)")
+        print(f"    W (weight):      {w_bytes/1024:>7.1f} KB  ({tile_K}x{tile_N} x {self.precision}B)")
+        print(f"    Y (accumulator): {y_bytes/1024:>7.1f} KB  ({tile_M}x{tile_N} x {self.acc_precision}B)")
+        print(f"    Total:           {total/1024:>7.1f} KB / {max_spad/1024:.0f} KB ({100*total/max_spad:.0f}%)")
 
     def load_epilogue(self, name: str, index: sympy.Expr):
         index = self.rename_indexing(index)
