@@ -1,0 +1,59 @@
+{
+    "num_cores": 10,
+    "core_type": ["ws_mesh", "ws_mesh", "ws_mesh", "ws_mesh", "ws_mesh",
+                  "ws_mesh", "ws_mesh", "ws_mesh", "ws_mesh", "ws_mesh"],
+    "core_freq_mhz": 940,
+    "core_stats_print_period_cycles": 10000,
+    "num_systolic_array_per_core": 1,
+
+    "vpu_num_lanes": 512,
+    "vpu_spad_size_kb_per_lane": 1,
+    "vpu_vector_length_bits": 256,
+    "data_precision_bytes": 0.5,
+    "acc_precision_bytes": 4,
+
+    "local_dram_mode": true,
+    "local_dram_latency_ns": 960,
+    "dsp_core_id": 4,
+    "dsp_sram_latency_ns": 10,
+    "dsp_compute_scale": 0.1,
+
+    "q32_groups": [
+        {
+            "dsp_core": 4,
+            "q32_cores": [0, 1, 2, 3]
+        },
+        {
+            "dsp_core": 9,
+            "q32_cores": [5, 6, 7, 8]
+        }
+    ],
+
+    "dram_type": "simple",
+    "dram_freq_mhz": 940,
+    "dram_channels": 1,
+    "dram_req_size_byte": 32,
+    "dram_latency": 1,
+    "dram_num_burst_length": 1,
+    "dram_stats_print_period_cycles": 10000,
+
+    "icnt_type": "simple",
+    "icnt_latency_cycles": 10,
+    "icnt_freq_mhz": 940,
+    "icnt_injection_ports_per_core": 1,
+
+    "pytorchsim_functional_mode": 1,
+    "pytorchsim_timing_mode": 1,
+
+    "codegen_mapping_strategy": "heuristic",
+    "codegen_external_mapping_file": "",
+    "codegen_autotune_max_retry": 10,
+    "codegen_autotune_template_topk": 4,
+    "codegen_compiler_optimization": "all",
+
+    "num_partition": 1,
+    "partition": {
+        "core_0": 0, "core_1": 0, "core_2": 0, "core_3": 0, "core_4": 0,
+        "core_5": 0, "core_6": 0, "core_7": 0, "core_8": 0, "core_9": 0
+    }
+}

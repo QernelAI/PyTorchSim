@@ -16,7 +16,7 @@ Core::Core(uint32_t id, SimulationConfig config)
   _stat_tot_skipped_inst.resize(static_cast<size_t>(Opcode::COUNT), 0);
 
   if (config.local_dram_mode) {
-    if ((int)id != config.dsp_core_id)
+    if (!config.is_dsp_core(id))
       _local_mem_latency_cycles = (config.local_dram_latency_ns * config.core_freq_mhz) / 1000;
     else
       _local_mem_latency_cycles = (config.dsp_sram_latency_ns * config.core_freq_mhz) / 1000;
@@ -192,10 +192,10 @@ void Core::dma_cycle() {
         _local_mem_queue.push({access, _core_cycle + _local_mem_latency_cycles});
       } else {
         // WRITE_REQUEST: core-to-core transfer via NoC
-        if ((int)_id != _config.dsp_core_id) {
-          access->set_dest_core_id(_config.dsp_core_id);  // Q32 -> DSP
+        if (!_config.is_dsp_core(_id)) {
+          access->set_dest_core_id(_config.get_dsp_for_core(_id));  // Q32 -> local DSP
         } else {
-          access->set_dest_core_id(access->get_numa_id()); // DSP -> target Q32
+          access->set_dest_core_id(access->get_numa_id()); // DSP -> target
         }
         _request_queue.push(access);
       }
@@ -293,7 +293,7 @@ void Core::cycle() {
             auto& target_pipeline = get_compute_pipeline(inst->get_compute_type());
             int compute_cycle = inst->get_compute_cycle();
             // Apply DSP compute scale for vector ops on DSP core
-            if (_config.dsp_core_id >= 0 && (int)_id == _config.dsp_core_id
+            if (!_config.q32_groups.empty() && _config.is_dsp_core(_id)
                 && inst->get_compute_type() == VECTOR_UNIT) {
               compute_cycle = std::max(1, (int)(compute_cycle * _config.dsp_compute_scale));
             }

@@ -60,6 +60,26 @@ struct SimulationConfig {
   uint32_t dsp_sram_latency_ns = 10;    // DSP local SRAM read latency
   float dsp_compute_scale = 1.0f;       // Multiplier for VECTOR_UNIT compute cycles on DSP
 
+  /* Multi-group Q32:DSP config */
+  struct Q32Group {
+      std::vector<int> q32_cores;
+      int dsp_core;
+  };
+
+  std::vector<Q32Group> q32_groups;         // Group definitions
+  std::map<uint32_t, int> core_to_dsp;      // core_id -> local DSP core_id
+
+  int get_dsp_for_core(uint32_t core_id) const {
+      auto it = core_to_dsp.find(core_id);
+      return (it != core_to_dsp.end()) ? it->second : -1;
+  }
+
+  bool is_dsp_core(uint32_t core_id) const {
+      for (const auto& g : q32_groups)
+          if (g.dsp_core == (int)core_id) return true;
+      return false;
+  }
+
   /* Core id, Partiton id mapping */
   std::map<uint32_t, uint32_t> partiton_map;
 

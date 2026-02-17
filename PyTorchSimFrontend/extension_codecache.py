@@ -293,8 +293,22 @@ class CustomAsyncCompile(AsyncCompile):
                 TOGSim = TOGSimulator(togsim_path, extension_config.CONFIG_TOGSIM_CONFIG)
                 TOGSim.vectorlane_size = vectorlane_size
                 extra_kwargs = {}
+                # Multi-group DSP support
+                q32_groups = TOGSim.config_json.get("q32_groups", [])
                 dsp_core_id = TOGSim.config_json.get("dsp_core_id", -1)
-                if dsp_core_id >= 0:
+
+                if q32_groups:
+                    dsp_set = set(g["dsp_core"] for g in q32_groups)
+                    num_cores = TOGSim.config_json["num_cores"]
+                    q32_core_ids = [c for c in range(num_cores) if c not in dsp_set]
+                    primary_dsp = q32_groups[0]["dsp_core"]
+
+                    if not TOGSimulator.has_gemm_ops(onnx_path):
+                        extra_kwargs["subgraph_map"] = {"default": primary_dsp}
+                    elif len(q32_core_ids) > 1:
+                        extra_kwargs["subgraph_map"] = {"round_robin": q32_core_ids}
+                elif dsp_core_id >= 0:
+                    # Backward compat: single-group path
                     if not TOGSimulator.has_gemm_ops(onnx_path):
                         extra_kwargs["subgraph_map"] = {"default": dsp_core_id}
                     elif dsp_core_id > 1:

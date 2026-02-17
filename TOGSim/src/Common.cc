@@ -156,5 +156,32 @@ SimulationConfig initialize_config(json config) {
     spdlog::info("[Config] Local DRAM mode enabled, DRAM latency: {}ns, DSP core: {}, DSP SRAM latency: {}ns, DSP compute scale: {}",
                  parsed_config.local_dram_latency_ns, parsed_config.dsp_core_id, parsed_config.dsp_sram_latency_ns, parsed_config.dsp_compute_scale);
 
+  /* Multi-group Q32:DSP config */
+  if (config.contains("q32_groups")) {
+    for (auto& group_json : config["q32_groups"]) {
+      SimulationConfig::Q32Group group;
+      group.dsp_core = group_json["dsp_core"];
+      group.q32_cores = group_json["q32_cores"].get<std::vector<int>>();
+      parsed_config.q32_groups.push_back(group);
+      for (int qid : group.q32_cores)
+        parsed_config.core_to_dsp[qid] = group.dsp_core;
+      parsed_config.core_to_dsp[group.dsp_core] = group.dsp_core;
+      spdlog::info("[Config] Q32 group: DSP core {}, Q32 cores [{}]",
+                   group.dsp_core, fmt::join(group.q32_cores, ", "));
+    }
+    if (!parsed_config.q32_groups.empty())
+      parsed_config.dsp_core_id = parsed_config.q32_groups[0].dsp_core;
+  } else if (parsed_config.dsp_core_id >= 0) {
+    // Backward compat: single group from scalar dsp_core_id
+    SimulationConfig::Q32Group group;
+    group.dsp_core = parsed_config.dsp_core_id;
+    for (int i = 0; i < (int)parsed_config.num_cores; i++)
+      if (i != parsed_config.dsp_core_id)
+        group.q32_cores.push_back(i);
+    parsed_config.q32_groups.push_back(group);
+    for (int i = 0; i < (int)parsed_config.num_cores; i++)
+      parsed_config.core_to_dsp[i] = parsed_config.dsp_core_id;
+  }
+
   return parsed_config;
 }
