@@ -177,9 +177,16 @@ class MLIRCodeCache:
                 stack_size = val_llvm_caller.parse_stack_sizes(f"{write_path}/{key}.s", vlenb=vlenb)
                 spad_size =  val_llvm_caller.get_spad_size(target)
                 spad_usage = stack_size + spad_size # Spad usage per lane
-                if extension_config.CONFIG_SPAD_INFO["spad_size"] < spad_usage:
+                # MLIR simulation always uses f32 (4B) buffers, but tile sizing may
+                # model smaller hardware precision (e.g. int4 = 0.5B). Scale the
+                # per-lane budget to account for f32 simulation inflation.
+                sim_precision = 4  # f32, always used in MLIR codegen
+                hw_min_precision = min(extension_config.CONFIG_PRECISION, extension_config.CONFIG_ACC_PRECISION)
+                spad_scale = sim_precision / hw_min_precision
+                effective_spad_per_lane = int(extension_config.CONFIG_SPAD_INFO["spad_size"] * spad_scale)
+                if effective_spad_per_lane < spad_usage:
                     print(f"[Warning] Scratchpad size exceeded: required {spad_usage} bytes, "
-                        f"but only {extension_config.CONFIG_SPAD_INFO['spad_size']} bytes available.")
+                        f"but only {effective_spad_per_lane} bytes available (hw={extension_config.CONFIG_SPAD_INFO['spad_size']}B x {spad_scale:.0f}x sim scale).")
                     raise SpadOverflowError()
 
         # Launch tile graph generator
