@@ -92,10 +92,16 @@ class FunctionalSimulator():
         file_path_str = ' '.join(file_path)
 
         # Set hardware information
-        spad_option = f"-m0x{0x80000000:x}:0x{100<<30:x},0x{spad_info['spad_paddr']:x}:0x{spad_info['spad_size']*vectorlane_size:x} " + \
+        # MLIR simulation uses f32 (4B) for all buffers, but tile sizing may model
+        # smaller precision (e.g. int4=0.5B). Scale spike's scratchpad to fit f32.
+        sim_precision = 4  # f32, always used in MLIR codegen
+        hw_min_precision = min(extension_config.CONFIG_PRECISION, extension_config.CONFIG_ACC_PRECISION)
+        spad_scale = sim_precision / hw_min_precision
+        sim_spad_size = int(spad_info['spad_size'] * spad_scale)
+        spad_option = f"-m0x{0x80000000:x}:0x{100<<30:x},0x{spad_info['spad_paddr']:x}:0x{sim_spad_size*vectorlane_size:x} " + \
             f"--scratchpad-base-paddr={spad_info['spad_paddr']} " + \
             f"--scratchpad-base-vaddr={spad_info['spad_vaddr']} " + \
-            f"--scratchpad-size={spad_info['spad_size']} "
+            f"--scratchpad-size={sim_spad_size} "
         vectorlane_option = f"--vectorlane-size={vectorlane_size}"
         kernel_address = f"--kernel-addr={kernel_start_addr}:{kernel_end_addr}"
         base_path= f"--base-path={runtime_path}"
