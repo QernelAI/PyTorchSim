@@ -61,19 +61,26 @@ def parse_log_stats(log_path):
 
 
 # ── Test: Large GEMM (1x4096 @ 4096x4096) across 4 Q32 cores ──
+import json
+_cfg = json.load(open(os.environ.get('TOGSIM_CONFIG', '')))
+_vlanes = _cfg['vpu_num_lanes']
+_spad_kb = _cfg['vpu_spad_size_kb_per_lane']
+_data_prec = _cfg.get('data_precision_bytes', 4)
+_acc_prec = _cfg.get('acc_precision_bytes', _data_prec)
+_dsp_core = _cfg.get('dsp_core_id', -1)
+_num_q32 = _dsp_core if _dsp_core > 0 else _cfg['num_cores']
+_M, _N, _K = 1, 4096, 4096
+_n_subgraphs = _N // _vlanes
+_k_iters = _K // _vlanes
+
 print("\n" + "=" * 70)
-print("Test: Large GEMM (1x4096 @ 4096x4096) — 4-core round-robin")
+print(f"Test: Large GEMM ({_M}x{_K} @ {_K}x{_N}) — {_num_q32}-core round-robin")
 print("=" * 70)
-print("  Tensor core:  512 x 512 int4")
-print("  vectorlane:   512")
-print("  Output tiles:  4096 / 512 = 8 subgraphs")
-print("  K tiles:       4096 / 512 = 8 iterations per subgraph")
-print("  Distribution:  round-robin across 4 Q32 cores (2 subgraphs each)")
-print()
-print("  SRAM per lane: 1 KB")
-print("  Total SRAM:    512 KB (512 lanes x 1 KB)")
-print("  Weight tile:   512x512 int4 = 128 KB")
-print("  Double buffer: 256 KB for 2 weight tiles — fits in 512 KB SRAM")
+print(f"  Tensor core:   {_vlanes} x {_vlanes}, {_data_prec}B data / {_acc_prec}B accumulator")
+print(f"  vectorlane:    {_vlanes}")
+print(f"  Output tiles:  {_N} / {_vlanes} = {_n_subgraphs} subgraphs")
+print(f"  K tiles:       {_K} / {_vlanes} = {_k_iters} iterations per subgraph")
+print(f"  Distribution:  round-robin across {_num_q32} Q32 cores ({_n_subgraphs // _num_q32} subgraphs each)")
 print()
 
 torch._dynamo.reset()
@@ -105,35 +112,40 @@ if log_path and log_path != before_log:
 else:
     print("  WARNING: No new log file generated")
 
+_tile_M, _tile_N, _tile_K = 8, _vlanes, _vlanes  # padded M=8, tiles = vector_lane
+_total_spad_kb = _spad_kb * _vlanes
+_double_buf_kb = _total_spad_kb / 2
+_x_kb = _tile_M * _tile_K * _data_prec / 1024
+_w_kb = _tile_K * _tile_N * _data_prec / 1024
+_y_kb = _tile_M * _tile_N * _acc_prec / 1024
+_total_kb = _x_kb + _w_kb + _y_kb
+
 print("\n" + "=" * 70)
 print("Breakdown")
 print("=" * 70)
-print("""
-Tensor core: 512 x 512, int4 (0.5 bytes per element)
-Precision: data_precision_bytes = 0.5
+print(f"""
+Tensor core: {_vlanes} x {_vlanes}, {_data_prec}B data / {_acc_prec}B accumulator
 
 SRAM (scratchpad) sizing:
-  - vpu_spad_size_kb_per_lane = 1 KB per lane
-  - vpu_num_lanes = 512
-  - Total SPAD per core: 1 KB x 512 lanes = 512 KB
-  - Double buffer half: 256 KB
+  - vpu_spad_size_kb_per_lane = {_spad_kb} KB per lane
+  - vpu_num_lanes = {_vlanes}
+  - Total SPAD per core: {_spad_kb} KB x {_vlanes} lanes = {_total_spad_kb:.0f} KB
+  - Double buffer half: {_double_buf_kb:.0f} KB
 
-  Per K-iteration, the SRAM holds:
-    Weight tile (W_buffer): 512 x 512 x 0.5B = 128 KB
-    Input tile  (X_buffer): 1 x 512 x 0.5B   = 256 B
-    Output acc  (Y_buffer): 1 x 512 x 0.5B   = 256 B  (accum may be wider)
-    ─────────────────────────────────────────────────
-    Total one set:                            ~128.5 KB
-    Fits in 256 KB half → other 256 KB prefetches next weight tile
+  Per K-iteration, the SRAM holds (tile {_tile_M}x{_tile_N}x{_tile_K}):
+    Weight tile (W_buffer): {_tile_K} x {_tile_N} x {_data_prec}B = {_w_kb:.1f} KB
+    Input tile  (X_buffer): {_tile_M} x {_tile_K} x {_data_prec}B = {_x_kb:.1f} KB
+    Output acc  (Y_buffer): {_tile_M} x {_tile_N} x {_acc_prec}B  = {_y_kb:.1f} KB
+    Total one set:          {_total_kb:.1f} KB / {_double_buf_kb:.0f} KB ({100*_total_kb/_double_buf_kb:.0f}%)
 
 Memory access:
   - Reads bypass NoC (local DRAM, 902 cycles per read)
   - Only writes (output tiles) go over NoC as core-to-core transfers
 
 K-reduction loop (inner):
-  for k in 0..4096 step 512:
-    DMA weight B[k:k+512, n:n+512] -> W_buffer  (from local DRAM, 902 cyc)
-    DMA input  A[0, k:k+512]       -> X_buffer  (from local DRAM, 902 cyc)
-    matmul X_buffer @ W_buffer      -> Y_buffer  (accumulate in SRAM)
-  DMA Y_buffer -> output via NoC to DSP core 4
+  for k in 0..{_K} step {_tile_K}:
+    DMA weight B[k:k+{_tile_K}, n:n+{_tile_N}] -> W_buffer  (from local DRAM, 902 cyc)
+    DMA input  A[0, k:k+{_tile_K}]             -> X_buffer  (from local DRAM, 902 cyc)
+    matmul X_buffer @ W_buffer                  -> Y_buffer  (accumulate in SRAM)
+  DMA Y_buffer -> output via NoC to DSP core
 """)
