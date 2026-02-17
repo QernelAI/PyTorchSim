@@ -291,13 +291,19 @@ void Core::cycle() {
         case Opcode::COMP:
           {
             auto& target_pipeline = get_compute_pipeline(inst->get_compute_type());
+            int compute_cycle = inst->get_compute_cycle();
+            // Apply DSP compute scale for vector ops on DSP core
+            if (_config.dsp_core_id >= 0 && (int)_id == _config.dsp_core_id
+                && inst->get_compute_type() == VECTOR_UNIT) {
+              compute_cycle = std::max(1, (int)(compute_cycle * _config.dsp_compute_scale));
+            }
             if (target_pipeline.empty()) {
-              inst->finish_cycle = _core_cycle + inst->get_compute_cycle();
+              inst->finish_cycle = _core_cycle + compute_cycle;
               inst->bubble_cycle = inst->get_overlapping_cycle();
             } else {
               int overlapped_cycle = std::min(target_pipeline.back()->finish_cycle - _core_cycle, inst->get_overlapping_cycle());
               int bubble_cycle = inst->get_overlapping_cycle() - overlapped_cycle;
-              inst->finish_cycle = target_pipeline.back()->finish_cycle + inst->get_compute_cycle() - overlapped_cycle;
+              inst->finish_cycle = target_pipeline.back()->finish_cycle + compute_cycle - overlapped_cycle;
               inst->bubble_cycle = bubble_cycle;
             }
 

@@ -355,6 +355,9 @@ class TOGSimulator():
             sram_buffer[buf_name] = range
         json_content["sram_alloc"] = sram_buffer
 
+        if 'subgraph_map' in kwargs:
+            json_content["subgraph_map"] = kwargs['subgraph_map']
+
         with open(attribute_path, "w") as f:
             json.dump(json_content, f, indent=4)
             f.flush()
@@ -395,6 +398,17 @@ class TOGSimulator():
                         zero_positions[i] = {}
                     zero_positions[i][j] = 0 # i pos : j pos : 0
         return zero_positions
+
+    @staticmethod
+    def has_gemm_ops(onnx_path):
+        import onnx
+        model = onnx.load(onnx_path)
+        MATMUL_TYPE = 1
+        for node in model.graph.node:
+            for attr in node.attribute:
+                if attr.name == "torchsim_compute_type" and attr.i == MATMUL_TYPE:
+                    return True
+        return False
 
     @staticmethod
     def get_result_from_file(result_path):

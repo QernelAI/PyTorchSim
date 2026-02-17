@@ -13,6 +13,7 @@
     "local_dram_latency_ns": 960,
     "dsp_core_id": 4,
     "dsp_sram_latency_ns": 10,
+    "dsp_compute_scale": 0.1,
 
     "dram_type": "simple",
     "dram_freq_mhz": 940,

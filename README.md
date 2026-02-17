@@ -417,6 +417,63 @@ You can set TOGSim config path as below.
 ```bash
 export TORCHSIM_CONFIG=/workspace/PyTorchSim/configs/systolic_ws_128x128_c1_simple_noc_tpuv3.json
 ```
+
+### Building TOGSim
+After modifying C++ source files under `TOGSim/`, rebuild the simulator inside the Docker container:
+```bash
+cd /workspace/PyTorchSim/TOGSim/build
+cmake .. && make -j$(nproc)
+```
+For a clean build (first time or after dependency changes):
+```bash
+cd /workspace/PyTorchSim/TOGSim
+mkdir -p build && cd build
+conan install .. --build=missing
+cmake .. && make -j$(nproc)
+```
+
+## Q32 CIM Multi-Core
+PyTorchSim supports Q32 CIM (Compute-In-Memory) multi-core configurations with an optional DSP core for non-GEMM operations.
+
+### Architecture
+- **Q32 cores**: Handle GEMM (matrix multiply) workloads with local DRAM
+- **DSP core**: Handles non-GEMM kernels (e.g., exp, activation) with fast SRAM and hardware-accelerated compute
+
+### DSP Routing
+Non-GEMM kernels are automatically routed to the DSP core when `dsp_core_id` is set in the config. The compiler inspects each kernel's ONNX graph: if no MATMUL operations are found, all subgraphs are routed to the DSP via a `"default"` subgraph map entry.
+
+### DSP Compute Scaling
+The `dsp_compute_scale` config parameter scales VECTOR_UNIT compute cycles on the DSP core. For example, `0.1` models a DSP that is 10x faster than the generic RISC-V compute model for vector operations.
+
+### Configuration
+Use `configs/q32_local_dram_dsp.json` as a reference:
+```json
+{
+    "num_cores": 5,
+    "local_dram_mode": true,
+    "local_dram_latency_ns": 960,
+    "dsp_core_id": 4,
+    "dsp_sram_latency_ns": 10,
+    "dsp_compute_scale": 0.1
+}
+```
+
+| Parameter | Description |
+|-----------|-------------|
+| `local_dram_mode` | Enable per-core local DRAM (no shared DRAM via NoC) |
+| `local_dram_latency_ns` | Local DRAM fill latency for Q32 cores (nanoseconds) |
+| `dsp_core_id` | Core ID of the DSP (-1 to disable) |
+| `dsp_sram_latency_ns` | DSP SRAM read latency (nanoseconds) |
+| `dsp_compute_scale` | Multiplier for VECTOR_UNIT cycles on DSP (e.g., 0.1 = 10x faster) |
+
+### Running Q32 Tests
+```bash
+# Inside Docker container
+TOGSIM_CONFIG=configs/q32_local_dram_dsp.json python tests/test_local_dram_gemm_exp.py
+```
+Expected behavior:
+- **GEMM kernels** run on Q32 cores (0-3) with local DRAM latency
+- **Non-GEMM kernels** (e.g., exp) run on DSP (core 4) with fast SRAM and scaled compute
 ## Tutorial
 Check out our [KSC 2025 tutorial](https://www.youtube.com/watch?v=6vcwKCPdoTw&list=PLYIb5dkr4isISXGhVf6gdePqBVb42j-mb&pp=gAQB) to learn:
 - PyTorchSim architecture, motivation, and design goals

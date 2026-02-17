@@ -58,6 +58,7 @@ struct SimulationConfig {
   uint32_t local_dram_latency_ns = 960; // Fixed local DRAM fill latency in nanoseconds
   int dsp_core_id = -1;                 // Core ID of shared DSP (-1 = disabled)
   uint32_t dsp_sram_latency_ns = 10;    // DSP local SRAM read latency
+  float dsp_compute_scale = 1.0f;       // Multiplier for VECTOR_UNIT compute cycles on DSP
 
   /* Core id, Partiton id mapping */
   std::map<uint32_t, uint32_t> partiton_map;

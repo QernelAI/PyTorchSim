@@ -285,7 +285,11 @@ class CustomAsyncCompile(AsyncCompile):
                 togsim_path = os.path.join(extension_config.CONFIG_TORCHSIM_DIR, "TOGSim")
                 TOGSim = TOGSimulator(togsim_path, extension_config.CONFIG_TOGSIM_CONFIG)
                 TOGSim.vectorlane_size = vectorlane_size
-                attribute_path = TOGSim.create_attribute_file(attribute_path, args, loop_size=loop_size)
+                extra_kwargs = {}
+                dsp_core_id = TOGSim.config_json.get("dsp_core_id", -1)
+                if dsp_core_id >= 0 and not TOGSimulator.has_gemm_ops(onnx_path):
+                    extra_kwargs["subgraph_map"] = {"default": dsp_core_id}
+                attribute_path = TOGSim.create_attribute_file(attribute_path, args, loop_size=loop_size, **extra_kwargs)
                 result_path = TOGSim.simulation(onnx_path, attribute_path, silent_mode=silent_mode)
                 result = TOGSimulator.get_result_from_file(result_path)
                 return result

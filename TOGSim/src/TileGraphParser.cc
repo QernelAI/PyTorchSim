@@ -944,6 +944,9 @@ int TileGraphParser::getCoreIdFromJson(const json& attribute_json, int subgraph_
     if (subgraph_map.contains(std::to_string(subgraph_id)) && subgraph_map[std::to_string(subgraph_id)].is_number_integer()) {
         return subgraph_map[std::to_string(subgraph_id)];
     }
+    if (subgraph_map.contains("default") && subgraph_map["default"].is_number_integer()) {
+        return subgraph_map["default"];
+    }
   }
   return -1;
 }
