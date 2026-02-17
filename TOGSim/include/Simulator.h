@@ -69,7 +69,7 @@ class Simulator {
   uint64_t _core_cycles;
   uint32_t _cycle_mask;
 
-  // Icnt stat
+  // Icnt stat (periodic, reset each interval)
   uint64_t _nr_from_core = 0;
   uint64_t _nr_to_core = 0;
   uint64_t _nr_from_mem = 0;
@@ -77,4 +77,11 @@ class Simulator {
   uint64_t _nr_core_to_core = 0;
   cycle_type _icnt_cycle = 0;
   uint64_t _icnt_interval = 0;
+
+  // Icnt stat (cumulative, never reset)
+  uint64_t _total_from_core = 0;
+  uint64_t _total_to_core = 0;
+  uint64_t _total_to_mem = 0;
+  uint64_t _total_from_mem = 0;
+  uint64_t _total_core_to_core = 0;
 };

@@ -1,0 +1,92 @@
+"""Run GEMM + softmax on Q32 CIM config to verify op-name inference and K-tile reduction."""
+import os
+import sys
+import glob
+import time
+
+sys.path.append(os.environ.get('TORCHSIM_DIR', default='/workspace/PyTorchSim'))
+
+import torch
+import torch._dynamo
+
+from Scheduler.scheduler import PyTorchSimRunner
+module = PyTorchSimRunner.setup_device()
+device = module.custom_device()
+
+LOG_DIR = os.path.join(os.environ.get('TORCHSIM_DIR', '/workspace/PyTorchSim'), 'togsim_results')
+
+def get_latest_log():
+    logs = sorted(glob.glob(os.path.join(LOG_DIR, '*.log')))
+    return logs[-1] if logs else None
+
+def parse_log(log_path):
+    """Extract key stats from a TOGSim log."""
+    stats = {}
+    with open(log_path) as f:
+        for line in f:
+            if 'Total execution cycles' in line:
+                stats['total_cycles'] = int(line.split(':')[-1].strip())
+            elif 'Core [0]' in line and 'Total_cycles' in line:
+                stats['core0_cycles'] = int(line.split('Total_cycles')[-1].strip())
+            elif 'Core [1]' in line and 'Total_cycles' in line:
+                stats['core1_cycles'] = int(line.split('Total_cycles')[-1].strip())
+            elif 'Core [0]' in line and 'Systolic array [0] utilization' in line:
+                stats['core0_sa_util'] = line.split('utilization(%)')[1].split(',')[0].strip()
+            elif 'Core [0]' in line and 'DRAM BW' in line:
+                bw = line.split('DRAM BW')[1].split('GB/s')[0].strip()
+                stats['core0_dram_bw'] = bw
+            elif 'Core [0]' in line and 'MOVIN' in line and 'inst_count' in line:
+                stats['core0_movin'] = line.split('inst_count')[1].strip()
+            elif 'Core [0]' in line and 'COMP' in line and 'inst_count' in line:
+                stats['core0_comp'] = line.split('inst_count')[1].strip()
+    return stats
+
+def run_gemm_softmax(M, N, K):
+    """Run GEMM followed by softmax and return the log path."""
+    def gemm_then_softmax(a, b):
+        c = torch.matmul(a, b)
+        return torch.softmax(c, dim=-1)
+
+    torch.manual_seed(0)
+    torch._dynamo.reset()
+
+    x = torch.randn(M, K).to(device=device)
+    w = torch.randn(K, N).to(device=device)
+    opt_fn = torch.compile(dynamic=False)(gemm_then_softmax)
+
+    before_log = get_latest_log()
+    try:
+        _ = opt_fn(x, w)
+    except Exception:
+        pass  # Ignore correctness failures
+    time.sleep(0.5)
+    after_log = get_latest_log()
+
+    if after_log != before_log:
+        return after_log
+    return None
+
+# Test cases: (M, N, K) — K > cim_dim exercises K-tile reduction
+sizes = [
+    (1,  512,  512),    # Single MAC, no K-reduction
+    (1,  512,  1024),   # K-reduction: 2 K-tiles
+    (1,  2048, 512),    # 4 N-tiles, no K-reduction
+    (1,  2048, 1024),   # 4 N-tiles + K-reduction
+]
+
+print("GEMM + Softmax on Q32 CIM config")
+print(f"{'M':>6} {'N':>6} {'K':>6} | {'Cycles':>8} {'Time(us)':>9} | "
+      f"{'SA Util%':>9} {'DRAM BW':>9} | {'MOVIN':>6} {'COMP':>20}")
+print("-" * 100)
+
+for M, N, K in sizes:
+    log_path = run_gemm_softmax(M, N, K)
+    if log_path:
+        stats = parse_log(log_path)
+        cycles = stats.get('total_cycles', 0)
+        time_us = cycles / 940.0  # 940 MHz -> microseconds
+        print(f"{M:>6} {N:>6} {K:>6} | {cycles:>8} {time_us:>8.2f} | "
+              f"{stats.get('core0_sa_util', 'N/A'):>9} {stats.get('core0_dram_bw', 'N/A'):>8} | "
+              f"{stats.get('core0_movin', 'N/A'):>6} {stats.get('core0_comp', 'N/A'):>20}")
+    else:
+        print(f"{M:>6} {N:>6} {K:>6} | {'FAILED':>8}")

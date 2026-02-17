@@ -137,6 +137,7 @@ void Simulator::icnt_cycle() {
           }
           _cores[core_id]->pop_memory_request();
           _nr_from_core++;
+          _total_from_core++;
         }
       }
       // Push response from ICNT to Core
@@ -150,11 +151,13 @@ void Simulator::icnt_cycle() {
           int sender_core = top->get_core_id();
           _cores[sender_core]->push_memory_response(top);
           _nr_core_to_core++;
+          _total_core_to_core++;
         } else {
           // Normal DRAM response or returning ACK
           _cores[core_id]->push_memory_response(top);
           _icnt->pop(port_id);
           _nr_to_core++;
+          _total_to_core++;
         }
       }
     }
@@ -169,6 +172,7 @@ void Simulator::icnt_cycle() {
         _dram->push(mem_id, _icnt->top(core_offset + mem_id));
         _icnt->pop(core_offset + mem_id);
         _nr_to_mem++;
+        _total_to_mem++;
       }
       // Pop response to ICNT from dram
       if (!_dram->is_empty(mem_id) &&
@@ -177,6 +181,7 @@ void Simulator::icnt_cycle() {
                     _dram->top(mem_id));
         _dram->pop(mem_id);
         _nr_from_mem++;
+        _total_from_mem++;
       }
     }
   }
@@ -322,4 +327,7 @@ void Simulator::print_core_stat()
     _cores[core_id]->print_stats();
   }
   spdlog::info("Total execution cycles: {}", _core_cycles);
+  spdlog::info("[ICNT Summary] Core->ICNT: {} packets, ICNT->Core: {} packets", _total_from_core, _total_to_core);
+  spdlog::info("[ICNT Summary] ICNT->MEM: {} packets, MEM->ICNT: {} packets", _total_to_mem, _total_from_mem);
+  spdlog::info("[ICNT Summary] Core<->Core transfers: {}", _total_core_to_core);
 }
