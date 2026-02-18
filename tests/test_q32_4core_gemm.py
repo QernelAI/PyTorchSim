@@ -36,6 +36,13 @@ def get_latest_log():
     logs = sorted(glob.glob(os.path.join(LOG_DIR, '*.log')))
     return logs[-1] if logs else None
 
+def get_all_logs():
+    return set(glob.glob(os.path.join(LOG_DIR, '*.log')))
+
+def get_new_logs(before_set):
+    """Return new log files sorted by name (chronological)."""
+    return sorted(set(glob.glob(os.path.join(LOG_DIR, '*.log'))) - before_set)
+
 def parse_log_stats(log_path):
     """Extract key stats from a TOGSim log."""
     stats = {
@@ -111,6 +118,53 @@ if log_path and log_path != before_log:
         print(f"  FAIL: No core-to-core transfers detected")
 else:
     print("  WARNING: No new log file generated")
+
+gemm_only_cycles = stats['total_cycles'] if (log_path and log_path != before_log) else None
+
+# ── Test 2: Same GEMM + exp (1x4096 @ 4096x4096 -> exp) ──
+print("\n" + "=" * 70)
+print(f"Test 2: GEMM + exp ({_M}x{_K} @ {_K}x{_N} -> exp) — {_num_q32}-core round-robin")
+print("=" * 70)
+
+torch._dynamo.reset()
+a2 = torch.randn(1, 4096).to(device=device)
+b2 = torch.randn(4096, 4096).to(device=device)
+
+before_logs2 = get_all_logs()
+fn2 = torch.compile(dynamic=False)(lambda a, b: torch.exp(torch.matmul(a, b)))
+result2 = fn2(a2, b2)
+print(f"Result shape: {result2.shape}")
+time.sleep(0.5)
+new_logs2 = get_new_logs(before_logs2)
+
+gemm_exp_cycles = None
+if new_logs2:
+    total_cycles = 0
+    total_core_to_core = 0
+    for i, lp in enumerate(new_logs2):
+        s = parse_log_stats(lp)
+        label = os.path.basename(lp)
+        print(f"\n  Log {i+1} ({label}):")
+        print(f"    Total cycles:         {s['total_cycles']}")
+        print(f"    Core-to-core packets: {s['core_to_core']}")
+        if s['total_cycles']:
+            total_cycles += s['total_cycles']
+        total_core_to_core += s['core_to_core']
+    gemm_exp_cycles = total_cycles
+    print(f"\n  Combined ({len(new_logs2)} kernels):")
+    print(f"    Total cycles:         {total_cycles}")
+    print(f"    Core-to-core packets: {total_core_to_core}")
+else:
+    print("  WARNING: No new log files generated")
+
+# ── Comparison ──
+if gemm_only_cycles and gemm_exp_cycles:
+    overhead = gemm_exp_cycles - gemm_only_cycles
+    pct = 100 * overhead / gemm_only_cycles
+    print(f"\n  --- GEMM vs GEMM+exp ---")
+    print(f"  GEMM only:    {gemm_only_cycles} cycles")
+    print(f"  GEMM + exp:   {gemm_exp_cycles} cycles")
+    print(f"  exp overhead:  {overhead} cycles ({pct:.1f}%)")
 
 _tile_M, _tile_N, _tile_K = 8, _vlanes, _vlanes  # padded M=8, tiles = vector_lane
 _total_spad_kb = _spad_kb * _vlanes

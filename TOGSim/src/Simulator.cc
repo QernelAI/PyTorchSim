@@ -152,6 +152,19 @@ void Simulator::icnt_cycle() {
           _cores[sender_core]->push_memory_response(top);
           _nr_core_to_core++;
           _total_core_to_core++;
+          // Classify as intra-row vs inter-row
+          if (_config.groups_per_row > 0) {
+              int sender = top->get_core_id();
+              if (_config.is_same_row(sender, core_id)) {
+                  _nr_intra_row++;
+                  _total_intra_row++;
+                  _total_intra_row_bytes += top->get_data_size();
+              } else {
+                  _nr_inter_row++;
+                  _total_inter_row++;
+                  _total_inter_row_bytes += top->get_data_size();
+              }
+          }
         } else {
           // Normal DRAM response or returning ACK
           _cores[core_id]->push_memory_response(top);
@@ -193,11 +206,15 @@ void Simulator::icnt_cycle() {
     spdlog::info("[ICNT] ICNT<-MEM request {}GB/Sec", ((_memory_req_size*_nr_from_mem*(1000/_icnt_period)/_icnt_interval)));
     if (_config.local_dram_mode)
       spdlog::info("[ICNT] Core<->Core transfers {}", _nr_core_to_core);
+    if (_config.groups_per_row > 0)
+      spdlog::info("[ICNT] Intra-row transfers: {}, Inter-row transfers: {}", _nr_intra_row, _nr_inter_row);
     _nr_from_core=0;
     _nr_to_core=0;
     _nr_to_mem=0;
     _nr_from_mem=0;
     _nr_core_to_core=0;
+    _nr_intra_row=0;
+    _nr_inter_row=0;
   }
   _icnt->cycle();
 }
@@ -330,4 +347,8 @@ void Simulator::print_core_stat()
   spdlog::info("[ICNT Summary] Core->ICNT: {} packets, ICNT->Core: {} packets", _total_from_core, _total_to_core);
   spdlog::info("[ICNT Summary] ICNT->MEM: {} packets, MEM->ICNT: {} packets", _total_to_mem, _total_from_mem);
   spdlog::info("[ICNT Summary] Core<->Core transfers: {}", _total_core_to_core);
+  if (_config.groups_per_row > 0) {
+    spdlog::info("[ICNT Summary] Intra-row transfers: {} ({} bytes)", _total_intra_row, _total_intra_row_bytes);
+    spdlog::info("[ICNT Summary] Inter-row transfers: {} ({} bytes)", _total_inter_row, _total_inter_row_bytes);
+  }
 }

@@ -84,4 +84,12 @@ class Simulator {
   uint64_t _total_to_mem = 0;
   uint64_t _total_from_mem = 0;
   uint64_t _total_core_to_core = 0;
+
+  // Hierarchical NoC stats
+  uint64_t _nr_intra_row = 0;
+  uint64_t _nr_inter_row = 0;
+  uint64_t _total_intra_row = 0;
+  uint64_t _total_inter_row = 0;
+  uint64_t _total_intra_row_bytes = 0;
+  uint64_t _total_inter_row_bytes = 0;
 };

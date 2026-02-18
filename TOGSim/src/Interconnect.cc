@@ -45,10 +45,25 @@ void SimpleInterconnect::cycle() {
 
 void SimpleInterconnect::push(uint32_t src, uint32_t dest, mem_fetch* request) {
   SimpleInterconnect::Entity entity;
+  uint32_t latency = _latency;
+
+  // Add extra latency for inter-row transfers
+  if (_config.groups_per_row > 0 && _config.icnt_inter_row_extra_latency > 0) {
+      uint32_t ppc = _config.icnt_injection_ports_per_core;
+      uint32_t core_count = _config.num_cores;
+      // Only apply to core-to-core (not DRAM port) transfers
+      if (src < core_count * ppc && dest < core_count * ppc) {
+          uint32_t src_core = src / ppc;
+          uint32_t dest_core = dest / ppc;
+          if (!_config.is_same_row(src_core, dest_core))
+              latency += _config.icnt_inter_row_extra_latency;
+      }
+  }
+
   if(_in_buffers[src][dest].empty())
-    entity.finish_cycle =  _cycles + _latency;
+    entity.finish_cycle = _cycles + latency;
   else
-    entity.finish_cycle =  _in_buffers[src][dest].back().finish_cycle + 1;
+    entity.finish_cycle = _in_buffers[src][dest].back().finish_cycle + 1;
   entity.dest = dest;
   entity.access = request;
   _in_buffers[src][dest].push(entity);

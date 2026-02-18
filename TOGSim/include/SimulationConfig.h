@@ -80,6 +80,27 @@ struct SimulationConfig {
       return false;
   }
 
+  /* Hierarchical NoC: row topology */
+  uint32_t groups_per_row = 0;                  // 0 = flat (no hierarchy)
+  uint32_t icnt_inter_row_extra_latency = 0;    // Additional cycles for cross-row transfers
+  std::map<uint32_t, int> core_to_group_idx;    // core_id -> group index in q32_groups
+
+  int get_group_idx(uint32_t core_id) const {
+      auto it = core_to_group_idx.find(core_id);
+      return (it != core_to_group_idx.end()) ? it->second : -1;
+  }
+
+  int get_row(uint32_t core_id) const {
+      if (groups_per_row == 0) return 0;
+      int gidx = get_group_idx(core_id);
+      return (gidx >= 0) ? gidx / groups_per_row : -1;
+  }
+
+  bool is_same_row(uint32_t core_a, uint32_t core_b) const {
+      if (groups_per_row == 0) return true;  // flat = always same row
+      return get_row(core_a) == get_row(core_b);
+  }
+
   /* Core id, Partiton id mapping */
   std::map<uint32_t, uint32_t> partiton_map;
 

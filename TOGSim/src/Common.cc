@@ -169,6 +169,13 @@ SimulationConfig initialize_config(json config) {
       spdlog::info("[Config] Q32 group: DSP core {}, Q32 cores [{}]",
                    group.dsp_core, fmt::join(group.q32_cores, ", "));
     }
+    // Build core_to_group_idx map
+    for (int gi = 0; gi < (int)parsed_config.q32_groups.size(); gi++) {
+        const auto& g = parsed_config.q32_groups[gi];
+        for (int qid : g.q32_cores)
+            parsed_config.core_to_group_idx[qid] = gi;
+        parsed_config.core_to_group_idx[g.dsp_core] = gi;
+    }
     if (!parsed_config.q32_groups.empty())
       parsed_config.dsp_core_id = parsed_config.q32_groups[0].dsp_core;
   } else if (parsed_config.dsp_core_id >= 0) {
@@ -182,6 +189,15 @@ SimulationConfig initialize_config(json config) {
     for (int i = 0; i < (int)parsed_config.num_cores; i++)
       parsed_config.core_to_dsp[i] = parsed_config.dsp_core_id;
   }
+
+  /* Hierarchical NoC config */
+  if (config.contains("groups_per_row"))
+    parsed_config.groups_per_row = config["groups_per_row"];
+  if (config.contains("icnt_inter_row_extra_latency_cycles"))
+    parsed_config.icnt_inter_row_extra_latency = config["icnt_inter_row_extra_latency_cycles"];
+  if (parsed_config.groups_per_row > 0)
+    spdlog::info("[Config] Hierarchical NoC: {} groups/row, inter-row extra latency: {} cycles",
+                 parsed_config.groups_per_row, parsed_config.icnt_inter_row_extra_latency);
 
   return parsed_config;
 }
